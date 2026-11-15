@@ -1,0 +1,43 @@
+{
+    "name": "@markstanden/opencode-test-container",
+    "version": "0.1.0",
+    "type": "module",
+    "description": "An isolated test sandbox for OpenCode plugins, skills and agent instructions.",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/markstanden/opencode-test-container.git"
+    },
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "default": "./dist/index.js"
+        }
+    },
+    "bin": {
+        "otc": "./dist/cli/otc.js"
+    },
+    "files": [
+        "dist",
+        "container",
+        "examples",
+        "docs",
+        "README.md",
+        "LICENSE"
+    ],
+    "engines": {
+        "node": ">=26"
+    },
+    "scripts": {
+        "build": "rm -rf dist && tsc -p tsconfig.build.json",
+        "test": "npm run build && node --test 'tests/**/*.test.ts'",
+        "test:unit": "node --test 'tests/unit/**/*.test.ts'",
+        "test:coverage": "npm run build && mkdir -p coverage && node --test --experimental-test-coverage --test-coverage-include='src/**/*.ts' --test-coverage-exclude='**/*.test.ts' --test-reporter=lcov --test-reporter-destination=coverage/lcov.info 'tests/**/*.test.ts'",
+        "typecheck": "tsc --noEmit",
+        "rehearse:offline": "npm run build && node rehearsals/offline.mts"
+    },
+    "devDependencies": {
+        "@types/node": "^26.6.4",
+        "typescript": "^6.0.3"
+    },
+    "license": "MIT"
+}
