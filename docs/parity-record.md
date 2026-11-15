@@ -37,11 +37,19 @@ Result: all three artefacts byte-identical; receipt differs only in
 `renderedAt`. Decision `inconclusive`; totals 40 planned/completed; utility
 20; bounds delta -13..7.
 
+Rerun 2026-11-15 at OTC head `4de97a0` against the original analyser at docs
+`76ed331`: `analysis.json`, `REPORT.md`, `SCREENING.json` and the receipt
+(apart from `renderedAt`) were byte-identical.
+
 ## Recorded screening corpus
 
 Evidence: `/home/mark/tmp/docs-desc-fresh-20261110` (48 trials, six arms).
 Result: all three artefacts byte-identical; decision `not-defined`; utility
 24; 6 screening findings.
+
+Rerun 2026-11-15 at OTC head `4de97a0` against the original analyser at docs
+`76ed331`: all three artefacts and the receipt (apart from `renderedAt`) were
+byte-identical.
 
 ## Fresh lifecycle rehearsal
 
