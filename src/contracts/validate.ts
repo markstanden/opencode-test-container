@@ -61,15 +61,15 @@ export function isSafeRelativePath(value: unknown): value is string {
 }
 
 /**
- * Whether a subject source path is acceptable: an absolute path, or a safe
- * relative path. Subject payloads are staged before dispatch, so a source
- * outside the campaign document is allowed; containment is enforced on the
- * staged tree, not on the developer's layout.
+ * Whether a subject source path is acceptable. Subject payloads are staged
+ * and hashed before dispatch, so a source outside the campaign document is
+ * allowed; containment and symlink escapes are enforced on the staged tree,
+ * not on the developer's layout.
  * @param value The candidate source path.
- * @returns True for an absolute path or a safe relative path.
+ * @returns True for a non-blank, NUL-free path.
  */
 export function isSourcePath(value: unknown): value is string {
-    return isText(value) && (isAbsolute(value) || isSafeRelativePath(value));
+    return isText(value) && !value.includes("\0");
 }
 
 /** Read JSON from a path, preserving parse failure as a problem. */

@@ -10,15 +10,15 @@ Recorded 2026-11-15 from `npm run rehearse:offline` on the dev box.
 - Scripted chat requests: **22**
 - Readiness/model-list probes: **0**
 
-| Suite   | Slot            | Validity | Observed           | Outcome | Chat requests |
-| ------- | --------------- | -------- | ------------------ | ------- | ------------- |
-| skills  | positive        | valid    | target-activation  | pass    | 2             |
-| skills  | negative        | valid    | no-invocation      | pass    | 1             |
-| skills  | wrong-skill     | valid    | other-skill-only   | pass    | 2             |
-| skills  | failed-load     | unknown  | failed-target-load | unknown | 2             |
-| skills  | invalid-capture | invalid  | unrun              | unknown | 11            |
-| docs    | useful-write    | valid    | —                  | pass    | 2             |
-| docs    | gate-blocked    | valid    | —                  | pass    | 2             |
+| Suite  | Slot            | Validity | Observed           | Outcome | Chat requests |
+| ------ | --------------- | -------- | ------------------ | ------- | ------------- |
+| skills | positive        | valid    | target-activation  | pass    | 2             |
+| skills | negative        | valid    | no-invocation      | pass    | 1             |
+| skills | wrong-skill     | valid    | other-skill-only   | pass    | 2             |
+| skills | failed-load     | unknown  | failed-target-load | unknown | 2             |
+| skills | invalid-capture | invalid  | unrun              | unknown | 11            |
+| docs   | useful-write    | valid    | —                  | pass    | 2             |
+| docs   | gate-blocked    | valid    | —                  | pass    | 2             |
 
 Docs counts: useful write credited 1 call / 1 write; gate-blocked credited 1
 call / **0 writes**, attempted 1. Both journals verified with the per-run key.

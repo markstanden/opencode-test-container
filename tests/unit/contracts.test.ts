@@ -126,13 +126,13 @@ describe("campaign validation", () => {
         assert.equal(validateCampaign(campaign()).ok, true);
     });
 
-    it("refuses path traversal in a subject path", () => {
+    it("refuses a NUL in a subject source path", () => {
         const parsed = validateCampaign(
             campaign({
                 subjects: [
                     {
                         armId: "baseline",
-                        skills: [{ id: "otel", path: "../../etc" }],
+                        skills: [{ id: "otel", path: "skills\u0000otel" }],
                     },
                 ],
             }),
