@@ -49,14 +49,16 @@ harness:
 Evidence guarantees added at the repair head:
 
 - one checked-selection reader is used by judge, status, closure and reporting;
-  a readable object is not a judgement;
+  a readable object is not a judgement, and slot/attempt packet bytes are
+  re-hashed and reconstructed from current evidence;
 - judge and recovery claims share `<root>/evidence` as their only location and
   both are settled by the dispatch outcome;
 - the judge's standing permission comes from the pristine prepared workspace,
   never the trial's live `AGENTS.md`, so A/B instruction overlays stay out of
   the packet;
 - the executing tool's artifact hash is compared with the freeze before
-  dispatch, detecting changed code under the same package version.
+  dispatch, derived from the executing module's `src`/`dist` location so
+  changed code is detected under the same package version.
 
 ## Semantic parity runs
 

@@ -5,7 +5,13 @@ import { loadPreparedManifest } from "./prepare.ts";
 import { loadFrozen } from "./freeze.ts";
 import { readLedger, trialStarts } from "./ledger.ts";
 import { readAssessments, assessmentPath } from "./assess.ts";
-import { checkedSelection, policyOf, readJudgeAttempts } from "./judge.ts";
+import {
+    checkedSelection,
+    packetIntegrityProblems,
+    policyOf,
+    readJudgeAttempts,
+    selectionPath as selectionPathOf,
+} from "./judge.ts";
 import {
     toolIdentity,
     toolIdentityProblems,
@@ -72,6 +78,8 @@ export interface StatusReport {
         invalid: number;
         /** Durable judge and recovery claims not yet closed. */
         unsettled: number;
+        /** Packet and selection integrity diagnostics. */
+        problems: string[];
     } | null;
     /** The next actions value. */
     nextActions: NextAction[];
@@ -111,6 +119,7 @@ function judgementOf(
     let failed = 0;
     let attempts = 0;
     let invalid = 0;
+    const problems: string[] = [];
     for (const slot of slots) {
         const recorded = readJudgeAttempts(root, slot.slotId);
         attempts += recorded.length;
@@ -129,6 +138,12 @@ function judgementOf(
             : { ok: false as const, problems: policy.problems };
         if (checked.ok) {
             judged += 1;
+        } else if (existsSync(selectionPathOf(root, slot.slotId))) {
+            problems.push(
+                ...checked.problems.map(
+                    (problem) => `${slot.slotId}: ${problem}`,
+                ),
+            );
         } else if (
             existsSync(join(trialDirectory(root, slot.slotId), "meta.json"))
         ) {
@@ -150,7 +165,22 @@ function judgementOf(
             ).filter((claim) => claim.state !== "closed").length,
         0,
     );
-    return { judged, pending, failed, attempts, invalid, unsettled };
+    problems.push(
+        ...slots.flatMap((slot) =>
+            packetIntegrityProblems(root, manifest, slot).map(
+                (problem) => `${slot.slotId}: ${problem}`,
+            ),
+        ),
+    );
+    return {
+        judged,
+        pending,
+        failed,
+        attempts,
+        invalid,
+        unsettled,
+        problems,
+    };
 }
 
 /** The judge action when completed slots are awaiting a checked judgement. */
@@ -275,6 +305,8 @@ export function statusOf(root: string): StatusReport {
     }
     const policy = policyOf(manifest);
     if (!policy.ok) problems.push(...policy.problems);
+    const judgement = judgementOf(root, manifest);
+    problems.push(...(judgement?.problems ?? []));
     const state = lifecycleStateOf({
         root,
         manifest,
@@ -319,7 +351,7 @@ export function statusOf(root: string): StatusReport {
             used: starts.length,
             remaining: manifest.campaign.budgets.trials - starts.length,
         },
-        judgement: judgementOf(root, manifest),
+        judgement,
         nextActions,
         problems,
     };

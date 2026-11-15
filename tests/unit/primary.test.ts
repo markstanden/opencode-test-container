@@ -311,6 +311,45 @@ describe("product primary check", () => {
         rmSync(fixture.dir, { recursive: true, force: true });
     });
 
+    it("refuses dispatch when the executing artifact differs under one version", async () => {
+        // Arrange
+        const fixture = fixtureCampaign();
+        const localRoot = join(fixture.dir, "root");
+        const prepared = prepareCampaign(fixture.campaignPath, localRoot);
+        assert.equal(prepared.ok, true);
+        const frozen = await freezeCampaign(
+            localRoot,
+            fakeImage as typeof runCommand,
+        );
+        assert.equal(frozen.ok, true);
+        const current = toolIdentity();
+
+        // Act
+        const summary = await runCampaign(
+            localRoot,
+            { slotIds: ["primary-failure"] },
+            {
+                runContainer: fakeContainer(),
+                tool: { ...current, artifactSha256: "0".repeat(64) },
+            },
+        );
+
+        // Assert
+        assert.equal(summary.ok, false);
+        assert.equal(
+            summary.problems.some((problem) => /artifact/.test(problem)),
+            true,
+            summary.problems.join("; "),
+        );
+        assert.equal(
+            existsSync(
+                join(localRoot, "evidence", "trials", "primary-failure"),
+            ),
+            false,
+        );
+        rmSync(fixture.dir, { recursive: true, force: true });
+    });
+
     it("runs the checker in a separate no-network container with read-only evidence", async () => {
         // Arrange
         const plans: ContainerPlan[] = [];

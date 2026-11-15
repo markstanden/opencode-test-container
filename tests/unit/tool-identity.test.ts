@@ -45,6 +45,63 @@ describe("executing tool identity", () => {
         }
     });
 
+    it("uses the source tree when the executing module is under src", () => {
+        // Arrange
+        const copy = mkdtempSync(join(tmpdir(), "otc-tool-source-"));
+        try {
+            cpSync(join(REPO, "package.json"), join(copy, "package.json"));
+            cpSync(join(REPO, "src"), join(copy, "src"), { recursive: true });
+            cpSync(join(REPO, "dist"), join(copy, "dist"), { recursive: true });
+            const moduleFile = join(copy, "src", "contracts", "version.ts");
+            const before = artifactSha256(copy, moduleFile);
+            writeFileSync(
+                join(copy, "src", "campaign", "judge.ts"),
+                `${readFileSync(join(copy, "src", "campaign", "judge.ts"), "utf8")}\n// changed\n`,
+                "utf8",
+            );
+
+            // Act
+            const after = artifactSha256(copy, moduleFile);
+
+            // Assert
+            assert.notEqual(before, after);
+        } finally {
+            rmSync(copy, { recursive: true, force: true });
+        }
+    });
+
+    it("uses the built tree when the executing module is under dist", () => {
+        // Arrange
+        const copy = mkdtempSync(join(tmpdir(), "otc-tool-built-"));
+        try {
+            cpSync(join(REPO, "package.json"), join(copy, "package.json"));
+            cpSync(join(REPO, "src"), join(copy, "src"), { recursive: true });
+            cpSync(join(REPO, "dist"), join(copy, "dist"), { recursive: true });
+            const moduleFile = join(copy, "dist", "contracts", "version.js");
+            const before = artifactSha256(copy, moduleFile);
+            writeFileSync(
+                join(copy, "src", "campaign", "judge.ts"),
+                `${readFileSync(join(copy, "src", "campaign", "judge.ts"), "utf8")}\n// source only\n`,
+                "utf8",
+            );
+            const afterSource = artifactSha256(copy, moduleFile);
+            writeFileSync(
+                join(copy, "dist", "campaign", "judge.js"),
+                `${readFileSync(join(copy, "dist", "campaign", "judge.js"), "utf8")}\n// built change\n`,
+                "utf8",
+            );
+
+            // Act
+            const afterBuilt = artifactSha256(copy, moduleFile);
+
+            // Assert
+            assert.equal(afterSource, before);
+            assert.notEqual(afterBuilt, afterSource);
+        } finally {
+            rmSync(copy, { recursive: true, force: true });
+        }
+    });
+
     it("refuses a different version even when the content hash matches", () => {
         // Arrange
         const current = toolIdentity();

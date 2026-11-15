@@ -1044,7 +1044,13 @@ describe("judge evidence guarantees", () => {
         // Assert
         assert.equal(checked.ok, false);
         assert.equal(status.judgement?.judged, 0);
-        assert.equal(status.judgement?.pending, 3);
+        assert.equal(status.judgement?.pending, 2);
+        assert.equal(
+            status.judgement?.problems.some((problem) =>
+                /selection/.test(problem),
+            ),
+            true,
+        );
         assert.equal(closed.ok, false);
     });
 
@@ -1372,5 +1378,215 @@ describe("judge evidence guarantees", () => {
         assert.equal(packetB.packet.includes("CANARY_ARM_A"), false);
         assert.equal(packetB.packet.includes("CANARY_ARM_B"), false);
         assert.equal(packetA.packet, packetB.packet);
+    });
+});
+
+describe("judge packet binding", () => {
+    const dirs: string[] = [];
+
+    after(() => {
+        for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
+    });
+
+    /** A root with every slot judged validly. */
+    async function judgedRoot(): Promise<{ dir: string; root: string }> {
+        const fixture = await campaignRoot();
+        dirs.push(fixture.dir);
+        await judgeCampaign(
+            fixture.root,
+            {},
+            {
+                runContainer: container({}),
+                now: () => "2026-11-15T00:10:00.000Z",
+            },
+        );
+        return fixture;
+    }
+
+    /** The slot and selected attempt packet paths. */
+    function packets(root: string, slotId: string, attemptId: string) {
+        return {
+            slot: join(root, "evidence", "judgements", slotId, "packet.md"),
+            attempt: join(
+                root,
+                "evidence",
+                "judgements",
+                slotId,
+                attemptId,
+                "packet.md",
+            ),
+        };
+    }
+
+    it("rejects a changed slot packet", async () => {
+        // Arrange
+        const { root } = await judgedRoot();
+        const path = packets(root, "useful-write", "attempt-001");
+        writeFileSync(path.slot, "changed slot packet\n", "utf8");
+
+        // Act
+        const checked = checkedSelectionForSlot(root, "useful-write");
+        const status = statusOf(root);
+        const closed = closeCampaign(root, () => "2026-11-15T00:30:00.000Z");
+
+        // Assert
+        assert.equal(checked.ok, false);
+        assert.equal(status.judgement?.judged, 2);
+        assert.equal(
+            status.judgement?.problems.some((problem) =>
+                /packet/.test(problem),
+            ),
+            true,
+        );
+        assert.equal(closed.ok, false);
+    });
+
+    it("rejects a changed attempt packet", async () => {
+        // Arrange
+        const { root } = await judgedRoot();
+        const path = packets(root, "useful-write", "attempt-001");
+        writeFileSync(path.attempt, "changed attempt packet\n", "utf8");
+
+        // Act
+        const checked = checkedSelectionForSlot(root, "useful-write");
+
+        // Assert
+        assert.equal(checked.ok, false);
+        assert.equal(
+            checked.ok
+                ? false
+                : checked.problems.some((problem) => /packet/.test(problem)),
+            true,
+        );
+    });
+
+    it("rejects changed packets in both locations", async () => {
+        // Arrange
+        const { root } = await judgedRoot();
+        const path = packets(root, "useful-write", "attempt-001");
+        writeFileSync(path.slot, "changed together\n", "utf8");
+        writeFileSync(path.attempt, "changed together\n", "utf8");
+
+        // Act
+        const checked = checkedSelectionForSlot(root, "useful-write");
+
+        // Assert
+        assert.equal(checked.ok, false);
+    });
+
+    it("rejects missing packets", async () => {
+        // Arrange
+        const { root } = await judgedRoot();
+        const path = packets(root, "useful-write", "attempt-001");
+        rmSync(path.slot, { force: true });
+        rmSync(path.attempt, { force: true });
+
+        // Act
+        const checked = checkedSelectionForSlot(root, "useful-write");
+
+        // Assert
+        assert.equal(checked.ok, false);
+        assert.equal(
+            checked.ok
+                ? false
+                : checked.problems.some((problem) => /missing/.test(problem)),
+            true,
+        );
+    });
+
+    it("rejects changed underlying answer evidence", async () => {
+        // Arrange
+        const { dir, root } = await judgedRoot();
+        const answer = join(
+            root,
+            "evidence",
+            "trials",
+            "useful-write",
+            "answer.md",
+        );
+        writeFileSync(answer, "A different answer.\n", "utf8");
+
+        // Act
+        const checked = checkedSelectionForSlot(root, "useful-write");
+        const closed = closeCampaign(root, () => "2026-11-15T00:30:00.000Z");
+
+        // Assert
+        assert.equal(checked.ok, false);
+        assert.equal(
+            checked.ok
+                ? false
+                : checked.problems.some((problem) => /evidence/.test(problem)),
+            true,
+        );
+        assert.equal(closed.ok, false);
+        void dir;
+    });
+
+    it("does not hide corruption of a selected recovery behind the failed first attempt", async () => {
+        // Arrange
+        const { dir, root } = await campaignRoot();
+        dirs.push(dir);
+        await judgeCampaign(
+            root,
+            { slotIds: ["restraint", "primary-failure"] },
+            {
+                runContainer: container({}),
+                now: () => "2026-11-15T00:09:00.000Z",
+            },
+        );
+        await judgeCampaign(
+            root,
+            { slotIds: ["useful-write"] },
+            {
+                runContainer: container({
+                    judgeResponses: (slotId, attemptId) =>
+                        attemptId === "attempt-001"
+                            ? "not json"
+                            : judgement("useful-create"),
+                }),
+                now: () => "2026-11-15T00:10:00.000Z",
+            },
+        );
+        const closed = closeCampaign(root, () => "2026-11-15T00:20:00.000Z");
+        assert.equal(
+            closed.ok,
+            true,
+            closed.ok ? "" : closed.problems.join("; "),
+        );
+        const path = packets(root, "useful-write", "attempt-002");
+        writeFileSync(path.attempt, "corrupted recovery packet\n", "utf8");
+
+        // Act
+        const checked = checkedSelectionForSlot(root, "useful-write");
+        const status = statusOf(root);
+        const report = analyseCampaign(
+            root,
+            join(dir, "recovery-corrupt-report"),
+            () => "2026-11-15T00:40:00.000Z",
+        );
+
+        // Assert
+        assert.equal(checked.ok, false);
+        assert.equal(status.judgement?.judged, 2);
+        assert.equal(status.judgement?.failed, 0);
+        assert.equal(
+            status.judgement?.problems.some((problem) =>
+                /packet/.test(problem),
+            ),
+            true,
+        );
+        assert.equal(
+            report.ok,
+            true,
+            report.ok ? "" : report.problems.join("; "),
+        );
+        if (!report.ok) return;
+        assert.equal(report.report.denominators.judged, 2);
+        assert.equal(
+            report.report.slots
+                .find((slot) => slot.slotId === "useful-write")
+                ?.judgeProblems.some((problem) => /packet/.test(problem)),
+            true,
+        );
     });
 });

@@ -2,7 +2,12 @@ import { appendLedgerEvent, readLedger, trialStarts } from "./ledger.ts";
 import { loadPreparedManifest, type PreparedManifest } from "./prepare.ts";
 import { loadFrozen } from "./freeze.ts";
 import { readAssessments } from "./assess.ts";
-import { checkedSelection, policyOf, readJudgeAttempts } from "./judge.ts";
+import {
+    checkedSelection,
+    packetIntegrityProblems,
+    policyOf,
+    readJudgeAttempts,
+} from "./judge.ts";
 import { readClaims } from "../evaluators/docs/analysis/budget.ts";
 import { join } from "node:path";
 
@@ -66,18 +71,26 @@ function closureRefusals(
             `unresolved trial launch(es): ${unresolved.join(", ")}; closure would hide unknown spend`,
         ];
     }
+    const packetProblems = manifest.campaign.schedule.slots.flatMap((slot) =>
+        packetIntegrityProblems(root, manifest, slot).map(
+            (problem) => `${slot.slotId}: ${problem}`,
+        ),
+    );
+    if (packetProblems.length > 0) {
+        return ["judge packet integrity failed", ...packetProblems];
+    }
+    const claims = unsettledClaims(root);
+    if (claims.length > 0) {
+        return [
+            `unsettled judge spend: ${claims.join("; ")}; closure would hide an unknown outcome`,
+        ];
+    }
     const policy = policyOf(manifest);
     if (!policy.ok) return policy.problems;
     const pending = unjudgedCompleted(root, manifest, ended);
-    if (pending.length > 0) {
-        return [
-            `unjudged completed slot(s): ${pending.join(", ")}; run otc judge before closure`,
-        ];
-    }
-    const claims = unsettledClaims(root);
-    return claims.length > 0
+    return pending.length > 0
         ? [
-              `unsettled judge spend: ${claims.join("; ")}; closure would hide an unknown outcome`,
+              `unjudged completed slot(s): ${pending.join(", ")}; run otc judge before closure`,
           ]
         : [];
 }

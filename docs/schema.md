@@ -42,8 +42,9 @@ stays `null` unless an adapter exposes a real request count.
 
 The prepared manifest and freeze receipt also carry
 `tool: { name, version, evaluatorVersion, artifactSha256 }`. The artifact hash
-covers the executing runtime tree and package manifest, so a changed build
-under the same version is detectable. `run`, `judge`, `delivery-check` and
+covers the executing runtime tree and package manifest, derived from the
+executing module's own `src`/`dist` location, so source execution beside a
+build and installed JavaScript execution each fingerprint the right tree. `run`, `judge`, `delivery-check` and
 `status` compare the executing identity with the frozen identity before
 dispatch; read-only historical replay does not require it.
 
@@ -54,9 +55,13 @@ according to the dispatch outcome; an interrupted dispatch keeps the claim
 `invalid` and `unsettled` from the same checked state.
 
 A selection is trusted only through the shared checked reader: attempt set,
-packet identity, policy hash, selected judgement SHA-256, outcome/utility and
-the judged documentation state are re-derived. A readable object alone is never
-a judgement and never permits closure.
+packet bytes, policy hash, selected judgement SHA-256, outcome/utility and the
+judged documentation state are re-derived. The slot and attempt `packet.md`
+bytes are hashed and compared with the registered identity, with each other,
+and with the packet reconstructed from current evidence. A readable object
+alone is never a judgement and never permits closure; missing, changed or
+mismatched packets are explicit integrity diagnostics in judge, status,
+closure and report.
 
 ## New/legacy names
 

@@ -2,11 +2,17 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { sha256Of } from "../contracts/canonical.ts";
 import { isRecord } from "../contracts/validate.ts";
-import { loadPreparedManifest } from "../campaign/prepare.ts";
+import {
+    loadPreparedManifest,
+    type PreparedManifest,
+} from "../campaign/prepare.ts";
 import { loadFrozen } from "../campaign/freeze.ts";
 import { readLedger } from "../campaign/ledger.ts";
 import { readAssessments, type StoredAssessment } from "../campaign/assess.ts";
-import { readSelectedJudgement } from "../campaign/judge.ts";
+import {
+    checkedSelectionForSlot,
+    readSelectedJudgement,
+} from "../campaign/judge.ts";
 import { trialDirectory } from "../campaign/run.ts";
 
 /** The derived report document. */
@@ -58,6 +64,7 @@ export interface Report {
             utility: number | null;
             status: string;
         } | null;
+        judgeProblems: string[];
     }>;
 }
 
@@ -117,6 +124,17 @@ function judgementOf(
     };
 }
 
+/** The packet and selection integrity diagnostics for one judged slot. */
+function judgeProblemsOf(
+    root: string,
+    manifest: PreparedManifest,
+    slotId: string,
+): string[] {
+    if (manifest.campaign.assessment.judge === undefined) return [];
+    const checked = checkedSelectionForSlot(root, slotId);
+    return checked.ok ? [] : checked.problems;
+}
+
 /** The slot table rows. */
 function slotRows(report: Report): string[] {
     return report.slots.map((slot) => {
@@ -137,6 +155,24 @@ function reasonSection(report: Report): string[] {
         "",
         ...reasons.map(
             (slot) => `- **${slot.slotId}**: ${slot.reasons.join("; ")}`,
+        ),
+    ];
+}
+
+/** The judge integrity section, when any slot has a diagnostic. */
+function judgeIntegritySection(report: Report): string[] {
+    const problems = report.slots.filter(
+        (slot) => slot.judgeProblems.length > 0,
+    );
+    if (problems.length === 0) return [];
+    return [
+        "",
+        "## Judge integrity",
+        "",
+        ...problems.flatMap((slot) =>
+            slot.judgeProblems.map(
+                (problem) => `- **${slot.slotId}**: ${problem}`,
+            ),
         ),
     ];
 }
@@ -176,6 +212,7 @@ function markdownOf(report: Report): string {
         "| ---- | ---- | --- | --- | -------- | -------- | -------- | ------- | ------ | --------- |",
         ...slotRows(report),
         ...reasonSection(report),
+        ...judgeIntegritySection(report),
         "",
         "## Per-run usage",
         "",
@@ -239,6 +276,11 @@ export function analyseCampaign(
                 counts: {},
                 usage: readUsage(root, slot.slotId),
                 judgement: judgementOf(root, slot.slotId),
+                judgeProblems: judgeProblemsOf(
+                    root,
+                    prepared.manifest,
+                    slot.slotId,
+                ),
             };
         }
         const observed = observedOf(assessment);
@@ -253,6 +295,11 @@ export function analyseCampaign(
             reasons: assessment.reasons,
             usage: readUsage(root, slot.slotId),
             judgement: judgementOf(root, slot.slotId),
+            judgeProblems: judgeProblemsOf(
+                root,
+                prepared.manifest,
+                slot.slotId,
+            ),
         };
     });
     const body = {

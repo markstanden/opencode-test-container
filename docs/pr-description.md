@@ -53,10 +53,16 @@ Four independently reproduced blockers are closed:
 - the judge's standing permission is read from the pristine prepared workspace,
   never the trial's live `AGENTS.md`; A/B instruction canaries are absent from
   both packets;
-- the executing tool identity includes an artifact hash and is compared with
-  the freeze before `run`, `judge`, `delivery-check` or `status` trusts it;
-  changed code under the same version is refused. Read-only historical replay
-  remains independent of the freeze.
+- the checked reader hashes the actual slot and attempt packet bytes, compares
+  them with registered identities and with the packet reconstructed from
+  current evidence, and reports missing/changed packets across judge, status,
+  closure and report;
+- the executing tool identity includes an artifact hash derived from the
+  executing module's own `src`/`dist` location and is compared with the freeze
+  before `run`, `judge`, `delivery-check` or `status` trusts it; source
+  execution beside a build and installed JavaScript execution each fingerprint
+  the right tree. Read-only historical replay remains independent of the
+  freeze.
 
 ## Proof
 
@@ -65,9 +71,9 @@ typecheck`, `defined comply` all pass.
 - Coverage populations, all measured on this head:
     - migrated docs analysis keeps the inherited 95/90/95 floors
       (95.6/90.1/95.9);
-    - all OTC runtime has the explicit 75/55/80 ratchet (91.6/79.9/92.9);
+    - all OTC runtime has the explicit 75/55/80 ratchet (91.6/80.2/93.0);
     - the genuinely new lifecycle/adapters/evaluators population has an explicit
-      82/66/84 ratchet (87.6/70.5/89.7).
+      82/66/84 ratchet (87.8/71.2/90.0).
 - Recorded-evidence parity: committed mini corpus deep-equal; recorded 40-trial
   confirmation and 48-trial screening corpora byte-identical apart from the
   receipt's `renderedAt`.

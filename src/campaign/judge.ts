@@ -368,7 +368,6 @@ function docStateFor(
 /** The packet and mutation state for one slot. */
 function buildPacket(options: {
     root: string;
-    manifest: PreparedManifest;
     slot: Slot;
     testCase: DocsTaskCase;
 }): { packet: string; state: DocState } {
@@ -1121,6 +1120,105 @@ export interface CheckedSelection {
     judgement: StoredJudgement;
 }
 
+/** Read a file's bytes, or null when it is absent or unreadable. */
+function packetBytes(path: string): Buffer | null {
+    if (!existsSync(path)) return null;
+    try {
+        return readFileSync(path);
+    } catch {
+        return null;
+    }
+}
+
+/** The registered packet identity against the actual slot and attempt bytes. */
+function packetBindingProblems(
+    root: string,
+    slotId: string,
+    attempt: RecordedAttempt,
+): string[] {
+    const problems: string[] = [];
+    const slotPath = packetPath(root, slotId);
+    const attemptPath = join(
+        attemptDirectory(root, slotId, attempt.attemptId),
+        "packet.md",
+    );
+    const slot = packetBytes(slotPath);
+    const attemptBytes = packetBytes(attemptPath);
+    if (slot === null)
+        problems.push(`slot packet ${slotPath} is missing or unreadable`);
+    if (attemptBytes === null) {
+        problems.push(
+            `attempt ${attempt.attemptId} packet ${attemptPath} is missing or unreadable`,
+        );
+    }
+    if (slot !== null && sha256Bytes(slot) !== attempt.meta.packetSha256) {
+        problems.push(
+            `slot packet for ${slotId} does not match its registered identity`,
+        );
+    }
+    if (
+        attemptBytes !== null &&
+        sha256Bytes(attemptBytes) !== attempt.meta.packetSha256
+    ) {
+        problems.push(
+            `attempt ${attempt.attemptId} packet does not match its registered identity`,
+        );
+    }
+    if (
+        slot !== null &&
+        attemptBytes !== null &&
+        sha256Bytes(slot) !== sha256Bytes(attemptBytes)
+    ) {
+        problems.push(`slot and attempt packets for ${slotId} differ`);
+    }
+    return problems;
+}
+
+/**
+ * Re-derive the packet evidence for one slot: every recorded attempt's packet
+ * must hash to its registered identity, the slot and attempt copies must agree,
+ * and every copy must equal the packet reconstructed from current evidence.
+ * @param root The campaign root.
+ * @param manifest The prepared manifest.
+ * @param slot The scheduled slot.
+ * @returns Packet integrity problems; empty means the packet is bound.
+ */
+export function packetIntegrityProblems(
+    root: string,
+    manifest: PreparedManifest,
+    slot: Slot,
+): string[] {
+    const recorded = recordedAttempts(root, slot.slotId);
+    if (recorded.attempts.length === 0) return [];
+    const testCase = manifest.suite.cases.find(
+        (entry) => entry.caseId === slot.caseId,
+    );
+    const expected =
+        testCase?.kind === "docs-task"
+            ? buildPacket({ root, slot, testCase }).packet
+            : null;
+    const problems: string[] = [];
+    for (const attempt of recorded.attempts) {
+        problems.push(...packetBindingProblems(root, slot.slotId, attempt));
+        const attemptBytes = packetBytes(
+            join(
+                attemptDirectory(root, slot.slotId, attempt.attemptId),
+                "packet.md",
+            ),
+        );
+        if (
+            expected !== null &&
+            attemptBytes !== null &&
+            attemptBytes.toString("utf8") !== expected
+        ) {
+            problems.push(
+                `attempt ${attempt.attemptId} packet does not match current evidence`,
+            );
+        }
+    }
+    return problems;
+}
+
 /** The identity and attempt-set checks for one raw selection. */
 function selectionRecordProblems(
     root: string,
@@ -1319,7 +1417,9 @@ export function checkedSelection(options: {
             problems: [`slot ${slot.slotId} has no docs case`],
         };
     }
+    const packetProblems = packetIntegrityProblems(root, manifest, slot);
     const base = selectionRecordProblems(root, manifest, slot, policy);
+    base.problems.unshift(...packetProblems);
     if (base.selection === null) {
         return { ok: false, problems: base.problems };
     }
@@ -1403,12 +1503,7 @@ export function buildJudgePacketForSlot(
     ) {
         return { ok: false, problems: [`slot ${slotId} has no docs case`] };
     }
-    const built = buildPacket({
-        root,
-        manifest: prepared.manifest,
-        slot,
-        testCase,
-    });
+    const built = buildPacket({ root, slot, testCase });
     return { ok: true, ...built };
 }
 

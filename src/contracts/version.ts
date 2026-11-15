@@ -9,7 +9,7 @@
  */
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { dirname, join, relative, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /** The frozen evaluator-semantics version. */
@@ -51,11 +51,22 @@ export function packageVersion(): string {
     return "unknown";
 }
 
-/** The runtime tree that is actually executing: `dist` when built, else `src`. */
-function runtimeRoot(root: string): string {
-    return existsSync(join(root, "dist", "contracts", "version.js"))
-        ? join(root, "dist")
-        : join(root, "src");
+/**
+ * The runtime tree that is actually executing, derived from the module's own
+ * location rather than the mere presence of a build.
+ * @param root The package root.
+ * @param moduleFile The executing module file.
+ * @returns The `src` or `dist` tree under `root`.
+ */
+function runtimeRoot(root: string, moduleFile: string): string {
+    const rel = relative(root, moduleFile);
+    if (!rel.startsWith("..") && !isAbsolute(rel)) {
+        const top = rel.split(sep)[0];
+        if (top === "dist" || top === "src") return join(root, top);
+    }
+    return existsSync(join(root, "src"))
+        ? join(root, "src")
+        : join(root, "dist");
 }
 
 /** Every file under a root, sorted by relative path. */
@@ -79,11 +90,15 @@ function filesUnder(root: string): string[] {
 /**
  * The content identity of the executing runtime tree.
  * @param root The package root; defaults to the running installation.
+ * @param moduleFile The executing module file; defaults to this module.
  * @returns A stable SHA-256 over sorted paths and file bytes.
  */
-export function artifactSha256(root: string = packageRoot()): string {
+export function artifactSha256(
+    root: string = packageRoot(),
+    moduleFile: string = fileURLToPath(import.meta.url),
+): string {
     const hash = createHash("sha256");
-    for (const path of filesUnder(runtimeRoot(root))) {
+    for (const path of filesUnder(runtimeRoot(root, moduleFile))) {
         hash.update(relative(root, path).split(sep).join("/"));
         hash.update("\0");
         hash.update(readFileSync(path));
