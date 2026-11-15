@@ -70,10 +70,10 @@ Four independently reproduced blockers are closed:
 typecheck`, `defined comply` all pass.
 - Coverage populations, all measured on this head:
     - migrated docs analysis keeps the inherited 95/90/95 floors
-      (95.6/90.1/95.9);
+      (95.6/90.2/95.9);
     - all OTC runtime has the explicit 75/55/80 ratchet (91.6/80.2/93.0);
     - the genuinely new lifecycle/adapters/evaluators population has an explicit
-      82/66/84 ratchet (87.8/71.2/90.0).
+      82/66/84 ratchet (87.8/71.3/90.0).
 - Recorded-evidence parity: committed mini corpus deep-equal; recorded 40-trial
   confirmation and 48-trial screening corpora byte-identical apart from the
   receipt's `renderedAt`.

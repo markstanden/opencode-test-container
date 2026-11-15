@@ -1590,3 +1590,141 @@ describe("judge packet binding", () => {
         );
     });
 });
+
+describe("mixed attempt integrity", () => {
+    const dirs: string[] = [];
+
+    after(() => {
+        for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
+    });
+
+    /** One failed first attempt followed by a selected, valid recovery. */
+    async function recoveryRoot(): Promise<{ dir: string; root: string }> {
+        const { dir, root } = await campaignRoot();
+        dirs.push(dir);
+        await judgeCampaign(
+            root,
+            { slotIds: ["restraint", "primary-failure"] },
+            {
+                runContainer: container({}),
+                now: () => "2026-11-15T00:09:00.000Z",
+            },
+        );
+        await judgeCampaign(
+            root,
+            { slotIds: ["useful-write"] },
+            {
+                runContainer: container({
+                    judgeResponses: (slotId, attemptId) =>
+                        attemptId === "attempt-001"
+                            ? "not json"
+                            : judgement("useful-create"),
+                }),
+                now: () => "2026-11-15T00:10:00.000Z",
+            },
+        );
+        return { dir, root };
+    }
+
+    /** Corrupt the selected recovery's metadata. */
+    function corruptMeta(root: string, mode: "malformed" | "missing"): void {
+        const path = join(
+            root,
+            "evidence",
+            "judgements",
+            "useful-write",
+            "attempt-002",
+            "meta.json",
+        );
+        if (mode === "missing") {
+            rmSync(path, { force: true });
+            return;
+        }
+        writeFileSync(path, "not json\n", "utf8");
+    }
+
+    it("rejects malformed selected-recovery metadata before closure", async () => {
+        // Arrange
+        const { root } = await recoveryRoot();
+        corruptMeta(root, "malformed");
+        const ledger = join(root, "evidence", "ATTEMPTS.jsonl");
+        const before = readFileSync(ledger, "utf8");
+
+        // Act
+        const checked = checkedSelectionForSlot(root, "useful-write");
+        const status = statusOf(root);
+        const closed = closeCampaign(root, () => "2026-11-15T00:30:00.000Z");
+
+        // Assert
+        assert.equal(checked.ok, false);
+        assert.equal(
+            status.judgement?.problems.some((problem) =>
+                /attempt-002|readable meta/.test(problem),
+            ),
+            true,
+        );
+        assert.equal(closed.ok, false);
+        assert.equal(
+            closed.ok
+                ? false
+                : closed.problems.some((problem) =>
+                      /integrity|readable meta/.test(problem),
+                  ),
+            true,
+        );
+        assert.equal(readFileSync(ledger, "utf8"), before);
+    });
+
+    it("rejects missing selected-recovery metadata before closure", async () => {
+        // Arrange
+        const { root } = await recoveryRoot();
+        corruptMeta(root, "missing");
+        const ledger = join(root, "evidence", "ATTEMPTS.jsonl");
+        const before = readFileSync(ledger, "utf8");
+
+        // Act
+        const checked = checkedSelectionForSlot(root, "useful-write");
+        const closed = closeCampaign(root, () => "2026-11-15T00:30:00.000Z");
+
+        // Assert
+        assert.equal(checked.ok, false);
+        assert.equal(closed.ok, false);
+        assert.equal(readFileSync(ledger, "utf8"), before);
+    });
+
+    it("reports selected-recovery metadata corruption after closure", async () => {
+        // Arrange
+        const { dir, root } = await recoveryRoot();
+        const closed = closeCampaign(root, () => "2026-11-15T00:20:00.000Z");
+        assert.equal(
+            closed.ok,
+            true,
+            closed.ok ? "" : closed.problems.join("; "),
+        );
+        corruptMeta(root, "malformed");
+
+        // Act
+        const report = analyseCampaign(
+            root,
+            join(dir, "mixed-integrity-report"),
+            () => "2026-11-15T00:40:00.000Z",
+        );
+
+        // Assert
+        assert.equal(
+            report.ok,
+            true,
+            report.ok ? "" : report.problems.join("; "),
+        );
+        if (!report.ok) return;
+        assert.equal(report.report.denominators.judged, 2);
+        assert.equal(
+            report.report.slots
+                .find((slot) => slot.slotId === "useful-write")
+                ?.judgeProblems.some((problem) =>
+                    /attempt-002|readable meta/.test(problem),
+                ),
+            true,
+        );
+    });
+});

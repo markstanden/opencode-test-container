@@ -47,8 +47,8 @@ declared populations:
   work; the all-runtime aggregate includes migrated code and is not a
   standalone measurement of it.
 
-Measured at the reconciliation head: migrated analysis 95.6/90.1/95.9; all
-OTC runtime 91.6/80.2/93.0; new OTC lifecycle/adapters/evaluators 87.8/71.2/90.0.
+Measured at the reconciliation head: migrated analysis 95.6/90.2/95.9; all
+OTC runtime 91.6/80.2/93.0; new OTC lifecycle/adapters/evaluators 87.8/71.3/90.0.
 The script fails loudly if any population drops below its floor, and writes the
 `coverage/lcov.info` Sonar consumes.
 

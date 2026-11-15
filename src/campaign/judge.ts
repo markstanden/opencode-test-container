@@ -1197,7 +1197,7 @@ export function packetIntegrityProblems(
         testCase?.kind === "docs-task"
             ? buildPacket({ root, slot, testCase }).packet
             : null;
-    const problems: string[] = [];
+    const problems = [...recorded.problems];
     for (const attempt of recorded.attempts) {
         problems.push(...packetBindingProblems(root, slot.slotId, attempt));
         const attemptBytes = packetBytes(

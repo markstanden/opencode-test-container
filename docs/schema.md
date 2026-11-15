@@ -60,8 +60,10 @@ judged documentation state are re-derived. The slot and attempt `packet.md`
 bytes are hashed and compared with the registered identity, with each other,
 and with the packet reconstructed from current evidence. A readable object
 alone is never a judgement and never permits closure; missing, changed or
-mismatched packets are explicit integrity diagnostics in judge, status,
-closure and report.
+mismatched packets and metadata are explicit integrity diagnostics in judge,
+status, closure and report. Metadata-reading problems from every attempt are
+retained even when other attempts remain readable, so an earlier terminal
+failure never masks an inconsistent later recovery.
 
 ## New/legacy names
 
