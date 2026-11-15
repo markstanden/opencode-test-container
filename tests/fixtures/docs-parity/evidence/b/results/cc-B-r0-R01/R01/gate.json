@@ -1,0 +1,10 @@
+{
+  "caseId": "R01",
+  "status": "pass",
+  "reason": null,
+  "artifacts": [
+    "lakes/docs/ops/csv-bom.md"
+  ],
+  "answerHash": "5eb3e6a1691bf36d2517850788b964803ec8783154c0d12d2f29f183f8eacdac",
+  "checkedAt": "2026-11-10T18:22:10.675Z"
+}

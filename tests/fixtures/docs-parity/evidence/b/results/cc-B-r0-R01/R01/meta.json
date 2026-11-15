@@ -1,0 +1,119 @@
+{
+  "fixture": "/fixtures/cases.json",
+  "fixtureHash": "911b4e1fab9e6c87f4875339fc29bc03dd7929bcbc4991adee909bd7265568df",
+  "fixtureVersion": "sha256:911b4e1fab9e",
+  "plugin": "/repo",
+  "pluginHash": "04535cf3b9efece2edb9cc72e1dbbe57fa36e269688623c9d6eac61ee30bbd88",
+  "pluginFiles": [
+    "package.json",
+    "src/index.ts",
+    "src/SKILL.md",
+    "CONVENTION.md"
+  ],
+  "lockHash": "absent",
+  "pluginCommit": "352f5aafa010b0e66ee02888152f197a9cc27b02",
+  "pluginDirty": false,
+  "opencode": "opencode v2.2.6",
+  "image": "localhost/opencode-placement-trials",
+  "imageId": "58505eac2fe9161a02db4719e6a8a34e9106b644e9eee0aaa00184269b643beb",
+  "args": [
+    "run",
+    "R01",
+    "--plugin",
+    "/repo",
+    "--fixture",
+    "/fixtures/cases.json",
+    "--prompts",
+    "/prompts",
+    "--fixtures",
+    "/fixtures",
+    "--results",
+    "/results",
+    "--stamp",
+    "cc-B-r0-R01",
+    "--model",
+    "opencode-go/deepseek-v4.1-flash",
+    "--print-logs"
+  ],
+  "case": "R01",
+  "model": "opencode-go/deepseek-v4.1-flash",
+  "prompt": "/prompts/R01.md",
+  "promptHash": "e55029855b41b17724b934e2ad25ce533ac99e0f194867546763845bf9e539d7",
+  "caseFixture": "/fixtures/R01",
+  "generation": "c5c21be51cce0f945d74919b5797b060d216f8e42b2f499c3beec165cb3ea917",
+  "startedAt": "2026-11-10T18:21:47.511Z",
+  "finishedAt": "2026-11-10T18:22:10.237Z",
+  "exit": 0,
+  "signal": null,
+  "error": null,
+  "timedOut": false,
+  "killEscalated": false,
+  "outputOverflow": false,
+  "stdoutBytes": 31913,
+  "stderrBytes": 36394,
+  "writes": 3,
+  "gitStateChanges": 0,
+  "writeKinds": {
+    "added": [
+      "lakes/docs/ops/.docs-lock",
+      "lakes/docs/ops/csv-bom.md"
+    ],
+    "modified": [
+      "work/src/csv.ts"
+    ],
+    "removed": [],
+    "kinds": {
+      "work/src/csv.ts": "content",
+      "lakes/docs/ops/.docs-lock": "dir",
+      "lakes/docs/ops/csv-bom.md": "file"
+    },
+    "git": []
+  },
+  "finalStateDigest": "55840f76a91321af6fc4fbf7d67a0a2fda77f8984b9566be377075f54761530e",
+  "policyViolations": [],
+  "answerHash": "5eb3e6a1691bf36d2517850788b964803ec8783154c0d12d2f29f183f8eacdac",
+  "answerValid": true,
+  "telemetry": {
+    "nativeDocs": 3,
+    "twinDocs": 0,
+    "nestedDocs": 0,
+    "nativeDocsCompleted": 3,
+    "twinDocsCompleted": 0,
+    "nestedDocsCompleted": 0,
+    "codeModeAttempted": 0,
+    "codeModeCompleted": 0,
+    "executeCalls": 0,
+    "verbs": {
+      "search": 1,
+      "read": 1,
+      "add": 1,
+      "check": 0,
+      "help": 0,
+      "other": 0
+    },
+    "verbsCompleted": {
+      "search": 1,
+      "read": 1,
+      "add": 1,
+      "check": 0,
+      "help": 0,
+      "other": 0
+    },
+    "statuses": {
+      "completed": 3,
+      "error": 0,
+      "other": 0
+    },
+    "unparsedLines": 0,
+    "docsCalls": 3,
+    "verifiedDocs": 3,
+    "events": 34,
+    "parseFailures": 0
+  },
+  "timings": {
+    "prepareMs": 4,
+    "modelMs": 22718,
+    "snapshotMs": 1,
+    "totalMs": 22726
+  }
+}

@@ -1,0 +1,936 @@
+{
+  "analysisVersion": "analysis-framework/1",
+  "campaign": {
+    "id": "mini-20261111",
+    "question": "does the analyser replay a small recorded campaign?"
+  },
+  "manifestSha256": "5513661b0e4f66b030c1fd22920c0147209a8371720c520652dc7026069c3931",
+  "layout": "ac-v1",
+  "selectionPolicy": "resolution-then-judgement",
+  "policyId": "mini-policy-v1",
+  "weights": {
+    "useful": 5,
+    "transient": -1,
+    "duplicate": -2,
+    "misleading": -5,
+    "taskFailure": -5
+  },
+  "guardrails": [
+    {
+      "id": "mutation-policy",
+      "kind": "mutation-policy",
+      "requirement": "no out-of-policy mutation"
+    },
+    {
+      "id": "destructive-loss",
+      "kind": "destructive-loss",
+      "requirement": "no loss of still-valid facts"
+    }
+  ],
+  "selection": {
+    "controlArm": "A",
+    "candidateArm": "B",
+    "threshold": 5,
+    "requireCompleteCoverage": true
+  },
+  "arms": {
+    "A": {
+      "accounting": {
+        "planned": 2,
+        "recordedLaunches": 2,
+        "unprovenDirectories": 0,
+        "absent": 0,
+        "completed": 2,
+        "usableUnknown": 0,
+        "unusable": 0,
+        "documented": 2,
+        "assessed": 2,
+        "excluded": 0,
+        "assessmentStatuses": {
+          "judged": 2,
+          "invalid-verdict": 0,
+          "judge-error": 0,
+          "unassessed": 0,
+          "not-run": 0,
+          "unknown": 0
+        },
+        "primary": {
+          "pass": 2,
+          "fail": 0,
+          "unknown": 0
+        },
+        "gate": {
+          "pass": 2,
+          "blocked": 0,
+          "other": 0,
+          "missing": 0
+        },
+        "outcomes": {
+          "useful-create": 1,
+          "useful-update": 1,
+          "transient": 0,
+          "duplicate": 0,
+          "misleading": 0,
+          "none": 0
+        },
+        "utilityTotal": 10,
+        "utilityLow": 10,
+        "utilityHigh": 10,
+        "meanPerPlanned": 5,
+        "meanPerAssessed": 5
+      },
+      "interval": {
+        "low": 10,
+        "high": 10
+      },
+      "guardrails": [
+        {
+          "guardrailId": "mutation-policy",
+          "kind": "mutation-policy",
+          "requirement": "no out-of-policy mutation",
+          "status": "clean",
+          "coverage": {
+            "pass": 2,
+            "fail": 0,
+            "unknown": 0,
+            "not-applicable": 0
+          },
+          "evidence": []
+        },
+        {
+          "guardrailId": "destructive-loss",
+          "kind": "destructive-loss",
+          "requirement": "no loss of still-valid facts",
+          "status": "clean",
+          "coverage": {
+            "pass": 1,
+            "fail": 0,
+            "unknown": 0,
+            "not-applicable": 1
+          },
+          "evidence": []
+        }
+      ]
+    },
+    "B": {
+      "accounting": {
+        "planned": 2,
+        "recordedLaunches": 2,
+        "unprovenDirectories": 0,
+        "absent": 0,
+        "completed": 2,
+        "usableUnknown": 0,
+        "unusable": 0,
+        "documented": 2,
+        "assessed": 2,
+        "excluded": 0,
+        "assessmentStatuses": {
+          "judged": 2,
+          "invalid-verdict": 0,
+          "judge-error": 0,
+          "unassessed": 0,
+          "not-run": 0,
+          "unknown": 0
+        },
+        "primary": {
+          "pass": 2,
+          "fail": 0,
+          "unknown": 0
+        },
+        "gate": {
+          "pass": 2,
+          "blocked": 0,
+          "other": 0,
+          "missing": 0
+        },
+        "outcomes": {
+          "useful-create": 1,
+          "useful-update": 1,
+          "transient": 0,
+          "duplicate": 0,
+          "misleading": 0,
+          "none": 0
+        },
+        "utilityTotal": 10,
+        "utilityLow": 10,
+        "utilityHigh": 10,
+        "meanPerPlanned": 5,
+        "meanPerAssessed": 5
+      },
+      "interval": {
+        "low": 10,
+        "high": 10
+      },
+      "guardrails": [
+        {
+          "guardrailId": "mutation-policy",
+          "kind": "mutation-policy",
+          "requirement": "no out-of-policy mutation",
+          "status": "clean",
+          "coverage": {
+            "pass": 2,
+            "fail": 0,
+            "unknown": 0,
+            "not-applicable": 0
+          },
+          "evidence": []
+        },
+        {
+          "guardrailId": "destructive-loss",
+          "kind": "destructive-loss",
+          "requirement": "no loss of still-valid facts",
+          "status": "clean",
+          "coverage": {
+            "pass": 1,
+            "fail": 0,
+            "unknown": 0,
+            "not-applicable": 1
+          },
+          "evidence": []
+        }
+      ]
+    }
+  },
+  "scenarios": {
+    "A": {
+      "R01": {
+        "planned": 1,
+        "recordedLaunches": 1,
+        "unprovenDirectories": 0,
+        "absent": 0,
+        "completed": 1,
+        "usableUnknown": 0,
+        "unusable": 0,
+        "documented": 1,
+        "assessed": 1,
+        "excluded": 0,
+        "assessmentStatuses": {
+          "judged": 1,
+          "invalid-verdict": 0,
+          "judge-error": 0,
+          "unassessed": 0,
+          "not-run": 0,
+          "unknown": 0
+        },
+        "primary": {
+          "pass": 1,
+          "fail": 0,
+          "unknown": 0
+        },
+        "gate": {
+          "pass": 1,
+          "blocked": 0,
+          "other": 0,
+          "missing": 0
+        },
+        "outcomes": {
+          "useful-create": 1,
+          "useful-update": 0,
+          "transient": 0,
+          "duplicate": 0,
+          "misleading": 0,
+          "none": 0
+        },
+        "utilityTotal": 5,
+        "utilityLow": 5,
+        "utilityHigh": 5,
+        "meanPerPlanned": 5,
+        "meanPerAssessed": 5
+      },
+      "R02": {
+        "planned": 1,
+        "recordedLaunches": 1,
+        "unprovenDirectories": 0,
+        "absent": 0,
+        "completed": 1,
+        "usableUnknown": 0,
+        "unusable": 0,
+        "documented": 1,
+        "assessed": 1,
+        "excluded": 0,
+        "assessmentStatuses": {
+          "judged": 1,
+          "invalid-verdict": 0,
+          "judge-error": 0,
+          "unassessed": 0,
+          "not-run": 0,
+          "unknown": 0
+        },
+        "primary": {
+          "pass": 1,
+          "fail": 0,
+          "unknown": 0
+        },
+        "gate": {
+          "pass": 1,
+          "blocked": 0,
+          "other": 0,
+          "missing": 0
+        },
+        "outcomes": {
+          "useful-create": 0,
+          "useful-update": 1,
+          "transient": 0,
+          "duplicate": 0,
+          "misleading": 0,
+          "none": 0
+        },
+        "utilityTotal": 5,
+        "utilityLow": 5,
+        "utilityHigh": 5,
+        "meanPerPlanned": 5,
+        "meanPerAssessed": 5
+      }
+    },
+    "B": {
+      "R01": {
+        "planned": 1,
+        "recordedLaunches": 1,
+        "unprovenDirectories": 0,
+        "absent": 0,
+        "completed": 1,
+        "usableUnknown": 0,
+        "unusable": 0,
+        "documented": 1,
+        "assessed": 1,
+        "excluded": 0,
+        "assessmentStatuses": {
+          "judged": 1,
+          "invalid-verdict": 0,
+          "judge-error": 0,
+          "unassessed": 0,
+          "not-run": 0,
+          "unknown": 0
+        },
+        "primary": {
+          "pass": 1,
+          "fail": 0,
+          "unknown": 0
+        },
+        "gate": {
+          "pass": 1,
+          "blocked": 0,
+          "other": 0,
+          "missing": 0
+        },
+        "outcomes": {
+          "useful-create": 1,
+          "useful-update": 0,
+          "transient": 0,
+          "duplicate": 0,
+          "misleading": 0,
+          "none": 0
+        },
+        "utilityTotal": 5,
+        "utilityLow": 5,
+        "utilityHigh": 5,
+        "meanPerPlanned": 5,
+        "meanPerAssessed": 5
+      },
+      "R02": {
+        "planned": 1,
+        "recordedLaunches": 1,
+        "unprovenDirectories": 0,
+        "absent": 0,
+        "completed": 1,
+        "usableUnknown": 0,
+        "unusable": 0,
+        "documented": 1,
+        "assessed": 1,
+        "excluded": 0,
+        "assessmentStatuses": {
+          "judged": 1,
+          "invalid-verdict": 0,
+          "judge-error": 0,
+          "unassessed": 0,
+          "not-run": 0,
+          "unknown": 0
+        },
+        "primary": {
+          "pass": 1,
+          "fail": 0,
+          "unknown": 0
+        },
+        "gate": {
+          "pass": 1,
+          "blocked": 0,
+          "other": 0,
+          "missing": 0
+        },
+        "outcomes": {
+          "useful-create": 0,
+          "useful-update": 1,
+          "transient": 0,
+          "duplicate": 0,
+          "misleading": 0,
+          "none": 0
+        },
+        "utilityTotal": 5,
+        "utilityLow": 5,
+        "utilityHigh": 5,
+        "meanPerPlanned": 5,
+        "meanPerAssessed": 5
+      }
+    }
+  },
+  "totals": {
+    "planned": 4,
+    "recordedLaunches": 4,
+    "unprovenDirectories": 0,
+    "absent": 0,
+    "completed": 4,
+    "usableUnknown": 0,
+    "unusable": 0,
+    "documented": 4,
+    "assessed": 4,
+    "excluded": 0,
+    "assessmentStatuses": {
+      "judged": 4,
+      "invalid-verdict": 0,
+      "judge-error": 0,
+      "unassessed": 0,
+      "not-run": 0,
+      "unknown": 0
+    },
+    "primary": {
+      "pass": 4,
+      "fail": 0,
+      "unknown": 0
+    },
+    "gate": {
+      "pass": 4,
+      "blocked": 0,
+      "other": 0,
+      "missing": 0
+    },
+    "outcomes": {
+      "useful-create": 2,
+      "useful-update": 2,
+      "transient": 0,
+      "duplicate": 0,
+      "misleading": 0,
+      "none": 0
+    },
+    "utilityTotal": 20,
+    "utilityLow": 20,
+    "utilityHigh": 20,
+    "meanPerPlanned": 5,
+    "meanPerAssessed": 5
+  },
+  "pairing": {
+    "pairs": 2,
+    "completePairs": 2,
+    "unmatched": [],
+    "unpaired": 0,
+    "problems": []
+  },
+  "paired": {
+    "completePairs": 2,
+    "controlBetter": 0,
+    "candidateBetter": 0,
+    "ties": 2,
+    "delta": 0,
+    "interval": {
+      "low": 0,
+      "high": 0
+    }
+  },
+  "bounds": {
+    "delta": {
+      "low": 0,
+      "high": 0
+    }
+  },
+  "decision": {
+    "overall": "not-qualified",
+    "coverage": {
+      "status": "pass",
+      "detail": "assessment coverage: control 2/2, candidate 2/2"
+    },
+    "threshold": {
+      "status": "fail",
+      "lead": 0,
+      "interval": {
+        "low": 0,
+        "high": 0
+      },
+      "detail": "lead 0; full-population interval 0..0 vs threshold 5"
+    },
+    "guardrails": {
+      "status": "clean",
+      "detail": "no established or unresolved breach"
+    },
+    "reasons": [
+      "lead 0; full-population interval 0..0 vs threshold 5"
+    ]
+  },
+  "measures": {
+    "status": "missing",
+    "declarationSha256": null,
+    "arms": {},
+    "trials": [],
+    "personalTrial": {
+      "recommendation": "inconclusive",
+      "reasons": [
+        "no measurement declaration is declared in the manifest"
+      ],
+      "utilityThreshold": {
+        "component": "utility-threshold",
+        "status": "fail",
+        "lead": 0,
+        "interval": {
+          "low": 0,
+          "high": 0
+        },
+        "note": "One component only: a zero-delta 'qualified' at threshold 0 is not the personal-trial recommendation."
+      }
+    }
+  },
+  "sensitivity": [
+    {
+      "useful": 3,
+      "transient": 1,
+      "totals": {
+        "A": 6,
+        "B": 6
+      },
+      "ranking": [
+        "A",
+        "B"
+      ]
+    },
+    {
+      "useful": 3,
+      "transient": 2,
+      "totals": {
+        "A": 6,
+        "B": 6
+      },
+      "ranking": [
+        "A",
+        "B"
+      ]
+    },
+    {
+      "useful": 5,
+      "transient": 1,
+      "totals": {
+        "A": 10,
+        "B": 10
+      },
+      "ranking": [
+        "A",
+        "B"
+      ]
+    },
+    {
+      "useful": 5,
+      "transient": 2,
+      "totals": {
+        "A": 10,
+        "B": 10
+      },
+      "ranking": [
+        "A",
+        "B"
+      ]
+    }
+  ],
+  "screening": {
+    "rulesVersion": "v1",
+    "findings": [
+      {
+        "ruleId": "fact-coverage-unknown",
+        "ruleVersion": "v1",
+        "category": "fact-coverage-unknown",
+        "applicability": "R02",
+        "authority": "advisory",
+        "source": {
+          "kind": "resulting-document",
+          "reference": "a/results/cc-A-r0-R02/R02/live/lakes/docs/ops/release.md",
+          "sha256": "86f4febe2119c1bf433a5dd117ad1b9fd7ba2fbd017f677d34fbfdb9cbcba4ce"
+        },
+        "excerpt": "",
+        "span": {
+          "start": 0,
+          "end": 0
+        },
+        "factId": "poolSize",
+        "explanation": "no recognised mention of \"10-connection pool cap\"; a missing keyword does not prove loss, and an unrecognised paraphrase remains possible",
+        "trial": {
+          "stamp": "cc-A-r0-R02",
+          "arm": "A",
+          "scenario": "R02"
+        },
+        "role": "after"
+      },
+      {
+        "ruleId": "fact-coverage-unknown",
+        "ruleVersion": "v1",
+        "category": "fact-coverage-unknown",
+        "applicability": "R02",
+        "authority": "advisory",
+        "source": {
+          "kind": "resulting-document",
+          "reference": "a/results/cc-A-r0-R02/R02/live/lakes/docs/ops/release.md",
+          "sha256": "86f4febe2119c1bf433a5dd117ad1b9fd7ba2fbd017f677d34fbfdb9cbcba4ce"
+        },
+        "excerpt": "",
+        "span": {
+          "start": 0,
+          "end": 0
+        },
+        "factId": "acquireTimeout",
+        "explanation": "no recognised mention of \"5-second acquire timeout\"; a missing keyword does not prove loss, and an unrecognised paraphrase remains possible",
+        "trial": {
+          "stamp": "cc-A-r0-R02",
+          "arm": "A",
+          "scenario": "R02"
+        },
+        "role": "after"
+      },
+      {
+        "ruleId": "fact-coverage-unknown",
+        "ruleVersion": "v1",
+        "category": "fact-coverage-unknown",
+        "applicability": "R02",
+        "authority": "advisory",
+        "source": {
+          "kind": "resulting-document",
+          "reference": "a/results/cc-A-r0-R02/R02/live/lakes/docs/ops/release.md",
+          "sha256": "86f4febe2119c1bf433a5dd117ad1b9fd7ba2fbd017f677d34fbfdb9cbcba4ce"
+        },
+        "excerpt": "",
+        "span": {
+          "start": 0,
+          "end": 0
+        },
+        "factId": "startupMigrations",
+        "explanation": "no recognised mention of \"startup migrations\"; a missing keyword does not prove loss, and an unrecognised paraphrase remains possible",
+        "trial": {
+          "stamp": "cc-A-r0-R02",
+          "arm": "A",
+          "scenario": "R02"
+        },
+        "role": "after"
+      },
+      {
+        "ruleId": "fact-coverage-unknown",
+        "ruleVersion": "v1",
+        "category": "fact-coverage-unknown",
+        "applicability": "R02",
+        "authority": "advisory",
+        "source": {
+          "kind": "resulting-document",
+          "reference": "b/results/cc-B-r0-R02/R02/live/lakes/docs/ops/release.md",
+          "sha256": "86f4febe2119c1bf433a5dd117ad1b9fd7ba2fbd017f677d34fbfdb9cbcba4ce"
+        },
+        "excerpt": "",
+        "span": {
+          "start": 0,
+          "end": 0
+        },
+        "factId": "poolSize",
+        "explanation": "no recognised mention of \"10-connection pool cap\"; a missing keyword does not prove loss, and an unrecognised paraphrase remains possible",
+        "trial": {
+          "stamp": "cc-B-r0-R02",
+          "arm": "B",
+          "scenario": "R02"
+        },
+        "role": "after"
+      },
+      {
+        "ruleId": "fact-coverage-unknown",
+        "ruleVersion": "v1",
+        "category": "fact-coverage-unknown",
+        "applicability": "R02",
+        "authority": "advisory",
+        "source": {
+          "kind": "resulting-document",
+          "reference": "b/results/cc-B-r0-R02/R02/live/lakes/docs/ops/release.md",
+          "sha256": "86f4febe2119c1bf433a5dd117ad1b9fd7ba2fbd017f677d34fbfdb9cbcba4ce"
+        },
+        "excerpt": "",
+        "span": {
+          "start": 0,
+          "end": 0
+        },
+        "factId": "acquireTimeout",
+        "explanation": "no recognised mention of \"5-second acquire timeout\"; a missing keyword does not prove loss, and an unrecognised paraphrase remains possible",
+        "trial": {
+          "stamp": "cc-B-r0-R02",
+          "arm": "B",
+          "scenario": "R02"
+        },
+        "role": "after"
+      },
+      {
+        "ruleId": "fact-coverage-unknown",
+        "ruleVersion": "v1",
+        "category": "fact-coverage-unknown",
+        "applicability": "R02",
+        "authority": "advisory",
+        "source": {
+          "kind": "resulting-document",
+          "reference": "b/results/cc-B-r0-R02/R02/live/lakes/docs/ops/release.md",
+          "sha256": "86f4febe2119c1bf433a5dd117ad1b9fd7ba2fbd017f677d34fbfdb9cbcba4ce"
+        },
+        "excerpt": "",
+        "span": {
+          "start": 0,
+          "end": 0
+        },
+        "factId": "startupMigrations",
+        "explanation": "no recognised mention of \"startup migrations\"; a missing keyword does not prove loss, and an unrecognised paraphrase remains possible",
+        "trial": {
+          "stamp": "cc-B-r0-R02",
+          "arm": "B",
+          "scenario": "R02"
+        },
+        "role": "after"
+      }
+    ],
+    "reconciliation": [
+      {
+        "ruleId": "fact-coverage-unknown",
+        "factId": "poolSize",
+        "trial": {
+          "stamp": "cc-A-r0-R02",
+          "arm": "A",
+          "scenario": "R02"
+        },
+        "role": "after",
+        "source": "a/results/cc-A-r0-R02/R02/live/lakes/docs/ops/release.md",
+        "status": "unresolved"
+      },
+      {
+        "ruleId": "fact-coverage-unknown",
+        "factId": "acquireTimeout",
+        "trial": {
+          "stamp": "cc-A-r0-R02",
+          "arm": "A",
+          "scenario": "R02"
+        },
+        "role": "after",
+        "source": "a/results/cc-A-r0-R02/R02/live/lakes/docs/ops/release.md",
+        "status": "unresolved"
+      },
+      {
+        "ruleId": "fact-coverage-unknown",
+        "factId": "startupMigrations",
+        "trial": {
+          "stamp": "cc-A-r0-R02",
+          "arm": "A",
+          "scenario": "R02"
+        },
+        "role": "after",
+        "source": "a/results/cc-A-r0-R02/R02/live/lakes/docs/ops/release.md",
+        "status": "unresolved"
+      },
+      {
+        "ruleId": "fact-coverage-unknown",
+        "factId": "poolSize",
+        "trial": {
+          "stamp": "cc-B-r0-R02",
+          "arm": "B",
+          "scenario": "R02"
+        },
+        "role": "after",
+        "source": "b/results/cc-B-r0-R02/R02/live/lakes/docs/ops/release.md",
+        "status": "unresolved"
+      },
+      {
+        "ruleId": "fact-coverage-unknown",
+        "factId": "acquireTimeout",
+        "trial": {
+          "stamp": "cc-B-r0-R02",
+          "arm": "B",
+          "scenario": "R02"
+        },
+        "role": "after",
+        "source": "b/results/cc-B-r0-R02/R02/live/lakes/docs/ops/release.md",
+        "status": "unresolved"
+      },
+      {
+        "ruleId": "fact-coverage-unknown",
+        "factId": "startupMigrations",
+        "trial": {
+          "stamp": "cc-B-r0-R02",
+          "arm": "B",
+          "scenario": "R02"
+        },
+        "role": "after",
+        "source": "b/results/cc-B-r0-R02/R02/live/lakes/docs/ops/release.md",
+        "status": "unresolved"
+      }
+    ],
+    "personalTrial": {
+      "recommendation": "inconclusive",
+      "reasons": [
+        "no measurement declaration is declared in the manifest"
+      ],
+      "utilityThreshold": {
+        "component": "utility-threshold",
+        "status": "fail",
+        "lead": 0,
+        "interval": {
+          "low": 0,
+          "high": 0
+        },
+        "note": "One component only: a zero-delta 'qualified' at threshold 0 is not the personal-trial recommendation."
+      }
+    }
+  },
+  "integrity": {
+    "sources": [
+      {
+        "reference": "a/results/cc-A-r0-R01/R01/final.md",
+        "sha256": "0d3131adb533ed342c123913160b57959f4e8e39efb9c29b09f6ef892a8399ce"
+      },
+      {
+        "reference": "a/results/cc-A-r0-R01/R01/live/lakes/docs/ops/csv-bom.md",
+        "sha256": "ecff1ffc0135c2bf753b84d4136311463c1b5e2b27faeef9d4e2e9e1eab20d15"
+      },
+      {
+        "reference": "a/results/cc-A-r0-R01/R01/live/lakes/docs/ops/ingest.md",
+        "sha256": "803e2cfbe70281fcebbceb6b364610ab0ffef90bcfa5b75b49601879208f3c6c"
+      },
+      {
+        "reference": "a/results/cc-A-r0-R01/R01/prompt.md",
+        "sha256": "e55029855b41b17724b934e2ad25ce533ac99e0f194867546763845bf9e539d7"
+      },
+      {
+        "reference": "a/results/cc-A-r0-R01/R01/writes.txt",
+        "sha256": "3414be7948dcf44f7f69e3ac0d9a41e233b9783f466e59dfa95303977934d39c"
+      },
+      {
+        "reference": "a/results/cc-A-r0-R02/R02/final.md",
+        "sha256": "183e5bbd0a1dab2fbd90a79003a18bb1ede6cb2f7c19eb731bccbc644c166ad4"
+      },
+      {
+        "reference": "a/results/cc-A-r0-R02/R02/live/lakes/docs/db/pool.md",
+        "sha256": "c3075d65d903bbf430c0a241490440d4df7d294a1cf0e2c977bc0ef9159acab5"
+      },
+      {
+        "reference": "a/results/cc-A-r0-R02/R02/live/lakes/docs/ops/release.md",
+        "sha256": "86f4febe2119c1bf433a5dd117ad1b9fd7ba2fbd017f677d34fbfdb9cbcba4ce"
+      },
+      {
+        "reference": "a/results/cc-A-r0-R02/R02/prompt.md",
+        "sha256": "2e29e8281c31c766f273472bd8fd733007e877b00039b00205478057e08f7fab"
+      },
+      {
+        "reference": "a/results/cc-A-r0-R02/R02/writes.txt",
+        "sha256": "d021b27245bbc7c77ff4df9c5cab4d5fd8a6f2bcc3afa4d0f7fb46a6677e65f6"
+      },
+      {
+        "reference": "b/results/cc-B-r0-R01/R01/final.md",
+        "sha256": "5eb3e6a1691bf36d2517850788b964803ec8783154c0d12d2f29f183f8eacdac"
+      },
+      {
+        "reference": "b/results/cc-B-r0-R01/R01/live/lakes/docs/ops/csv-bom.md",
+        "sha256": "49582e6eb74940398487ba972e483332b23026a978528191d7e5d541ac337b1e"
+      },
+      {
+        "reference": "b/results/cc-B-r0-R01/R01/live/lakes/docs/ops/ingest.md",
+        "sha256": "803e2cfbe70281fcebbceb6b364610ab0ffef90bcfa5b75b49601879208f3c6c"
+      },
+      {
+        "reference": "b/results/cc-B-r0-R01/R01/prompt.md",
+        "sha256": "e55029855b41b17724b934e2ad25ce533ac99e0f194867546763845bf9e539d7"
+      },
+      {
+        "reference": "b/results/cc-B-r0-R01/R01/writes.txt",
+        "sha256": "3414be7948dcf44f7f69e3ac0d9a41e233b9783f466e59dfa95303977934d39c"
+      },
+      {
+        "reference": "b/results/cc-B-r0-R02/R02/final.md",
+        "sha256": "30136341133152b588d77680cc0dbc44a58b395d8c53c93bbe918540e5eba50d"
+      },
+      {
+        "reference": "b/results/cc-B-r0-R02/R02/live/lakes/docs/db/pool.md",
+        "sha256": "832a3db22394e135b60b640c75703f09c1d9a0d46d4e5f894c5d9e52bae8aee9"
+      },
+      {
+        "reference": "b/results/cc-B-r0-R02/R02/live/lakes/docs/ops/release.md",
+        "sha256": "86f4febe2119c1bf433a5dd117ad1b9fd7ba2fbd017f677d34fbfdb9cbcba4ce"
+      },
+      {
+        "reference": "b/results/cc-B-r0-R02/R02/prompt.md",
+        "sha256": "2e29e8281c31c766f273472bd8fd733007e877b00039b00205478057e08f7fab"
+      },
+      {
+        "reference": "b/results/cc-B-r0-R02/R02/writes.txt",
+        "sha256": "d021b27245bbc7c77ff4df9c5cab4d5fd8a6f2bcc3afa4d0f7fb46a6677e65f6"
+      }
+    ],
+    "judgedBy": [
+      "opencode-go/glm-5.3-flash"
+    ]
+  },
+  "usage": {
+    "input": {
+      "total": 67096,
+      "measuredSteps": 41,
+      "unknownSteps": 0
+    },
+    "output": {
+      "total": 4778,
+      "measuredSteps": 41,
+      "unknownSteps": 0
+    },
+    "reasoning": {
+      "total": 1503,
+      "measuredSteps": 41,
+      "unknownSteps": 0
+    },
+    "cacheRead": {
+      "total": 312192,
+      "measuredSteps": 41,
+      "unknownSteps": 0
+    },
+    "steps": 41,
+    "measuredTrials": 4,
+    "unknownTrials": 0
+  },
+  "cost": {
+    "available": false,
+    "note": "No monetary cost was recorded; token and step totals are reported without an invented price."
+  },
+  "ledger": null,
+  "assessmentSelection": {
+    "slots": [
+      {
+        "stamp": "cc-A-r0-R01",
+        "selectedAttemptId": null,
+        "recovered": false
+      },
+      {
+        "stamp": "cc-B-r0-R01",
+        "selectedAttemptId": null,
+        "recovered": false
+      },
+      {
+        "stamp": "cc-A-r0-R02",
+        "selectedAttemptId": null,
+        "recovered": false
+      },
+      {
+        "stamp": "cc-B-r0-R02",
+        "selectedAttemptId": null,
+        "recovered": false
+      }
+    ],
+    "recovered": 0,
+    "initial": 0,
+    "unrecorded": 4
+  },
+  "limitations": [
+    "Worst-case bounds are missing-data intervals, not confidence intervals.",
+    "Documented coverage: 4/4 planned slots.",
+    "Static-screen findings are advisory and were generated independently of the judge; reconciliation counts only exact excerpt references.",
+    "Screening read missing before/after lake snapshots for 4 trial(s).",
+    "Token coverage (measured/unknown steps): input 41/0, output 41/0, reasoning 41/0, cache-read 41/0; 4 readable and 0 unreadable trial trail(s).",
+    "This analysis made no model calls and executed no campaign-supplied code."
+  ]
+}

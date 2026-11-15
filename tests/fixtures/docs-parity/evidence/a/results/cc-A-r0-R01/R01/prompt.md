@@ -1,0 +1,1 @@
+`npm run import:fixture` fails with `unexpected header: ﻿id` for the vendor's `fixtures/orders.csv`. Fix the importer so the BOM is ignored without breaking plain UTF-8 files. Run `npm test` when done. Keep code changes to `src/` and documentation to the knowledge lake; do not modify the tests, fixture files or any other tracked file.

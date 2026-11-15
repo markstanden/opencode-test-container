@@ -162,6 +162,53 @@ describe("packaged consumer", () => {
             );
             assert.equal(validate.status, 0, validate.stderr);
             assert.match(validate.stdout, /skill-basic/);
+            const root = join(consumer, "installed-root");
+            const prepared = spawnSync(
+                binary,
+                [
+                    "prepare",
+                    "--campaign",
+                    join(fixture, "campaign.json"),
+                    "--root",
+                    root,
+                ],
+                { cwd: consumer, encoding: "utf8" },
+            );
+            assert.equal(prepared.status, 0, prepared.stderr);
+            const status = spawnSync(
+                binary,
+                ["status", "--root", root, "--json"],
+                { cwd: consumer, encoding: "utf8" },
+            );
+            assert.equal(status.status, 0, status.stderr);
+            const statusJson = JSON.parse(status.stdout) as { state: string };
+            assert.equal(statusJson.state, "prepared");
+            const report = join(consumer, "installed-report");
+            const replay = spawnSync(
+                binary,
+                [
+                    "replay",
+                    "--manifest",
+                    join(
+                        REPO,
+                        "tests",
+                        "fixtures",
+                        "docs-parity",
+                        "manifest.json",
+                    ),
+                    "--evidence-root",
+                    join(REPO, "tests", "fixtures", "docs-parity", "evidence"),
+                    "--out",
+                    report,
+                ],
+                { cwd: consumer, encoding: "utf8" },
+            );
+            assert.equal(replay.status, 0, replay.stderr);
+            assert.equal(
+                existsSync(join(report, "analysis.json")),
+                true,
+                "installed CLI wrote the analysis",
+            );
         } finally {
             rmSync(consumer, { recursive: true, force: true });
         }

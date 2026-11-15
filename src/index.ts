@@ -102,6 +102,7 @@ export {
 } from "./adapters/podman/image.ts";
 export { assessDocsTrial, docsVerbOf } from "./evaluators/docs/assess.ts";
 export type { DocsAssessment } from "./evaluators/docs/assess.ts";
+export * from "./evaluators/docs/index.ts";
 export {
     hostDispatchesFromTrail,
     isServedRecord,

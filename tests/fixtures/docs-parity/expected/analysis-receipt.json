@@ -1,0 +1,531 @@
+{
+  "analyserVersion": "analysis-framework/1",
+  "templateVersion": "trial-feedback-report/2026-11-10",
+  "manifestSha256": "5513661b0e4f66b030c1fd22920c0147209a8371720c520652dc7026069c3931",
+  "policyId": "mini-policy-v1",
+  "renderedAt": "2026-11-15T09:17:55.122Z",
+  "inputs": [
+    {
+      "reference": "campaign-manifest",
+      "kind": "file",
+      "sha256": "5513661b0e4f66b030c1fd22920c0147209a8371720c520652dc7026069c3931",
+      "state": "available"
+    },
+    {
+      "reference": "a/fixtures/R01/lakes/docs",
+      "kind": "directory",
+      "sha256": null,
+      "state": "missing"
+    },
+    {
+      "reference": "a/fixtures/R02/lakes/docs",
+      "kind": "directory",
+      "sha256": null,
+      "state": "missing"
+    },
+    {
+      "reference": "a/results/cc-A-r0-R01/R01",
+      "kind": "directory",
+      "sha256": "8812494c71bb0d6ee8af908bcff61d3754b3d3ec04c4efa4baae75fe06925bd6",
+      "state": "available"
+    },
+    {
+      "reference": "a/results/cc-A-r0-R01/R01/ac",
+      "kind": "directory",
+      "sha256": "1bbe47982721cb0a10c0deaea3b1514b088d8179dd7d16879f54e560f42923f5",
+      "state": "available"
+    },
+    {
+      "reference": "a/results/cc-A-r0-R01/R01/ac/attempt-001/judgement.json",
+      "kind": "file",
+      "sha256": "1975154f47ecd3943c4d7d095dcf7922c3cba3dd43ea831ac4a2f797252e7c68",
+      "state": "available"
+    },
+    {
+      "reference": "a/results/cc-A-r0-R01/R01/ac/attempt-001/meta.json",
+      "kind": "file",
+      "sha256": "6bc14263c8dfd005b867676f0c10c54936517088af22b7f2179173b14558c1c6",
+      "state": "available"
+    },
+    {
+      "reference": "a/results/cc-A-r0-R01/R01/ac/attempt-001/resolution.json",
+      "kind": "file",
+      "sha256": null,
+      "state": "missing"
+    },
+    {
+      "reference": "a/results/cc-A-r0-R01/R01/ac/selection.json",
+      "kind": "file",
+      "sha256": null,
+      "state": "missing"
+    },
+    {
+      "reference": "a/results/cc-A-r0-R01/R01/docs-operations.jsonl",
+      "kind": "file",
+      "sha256": "59a79c459c11308d2a55132a0e73efe71a0534c61fe6f2d406d7e0fcf488b612",
+      "state": "available"
+    },
+    {
+      "reference": "a/results/cc-A-r0-R01/R01/docs-operations.key",
+      "kind": "file",
+      "sha256": "1f972dd22c32e61c123af80464324a444e363bca3ee4eba08fbf19f74849e6b7",
+      "state": "available"
+    },
+    {
+      "reference": "a/results/cc-A-r0-R01/R01/final.md",
+      "kind": "file",
+      "sha256": "0d3131adb533ed342c123913160b57959f4e8e39efb9c29b09f6ef892a8399ce",
+      "state": "available"
+    },
+    {
+      "reference": "a/results/cc-A-r0-R01/R01/gate.json",
+      "kind": "file",
+      "sha256": "e397bfef9a7a54eeb0ac00313c2d2d68ab11549dc35cb924a5cc7e03bea977d6",
+      "state": "available"
+    },
+    {
+      "reference": "a/results/cc-A-r0-R01/R01/live/lakes/docs",
+      "kind": "directory",
+      "sha256": "5b381c451dff55610d528b0f9de9f07466a20d0a35da39f1fda286a89882619a",
+      "state": "available"
+    },
+    {
+      "reference": "a/results/cc-A-r0-R01/R01/live/lakes/docs/ops",
+      "kind": "directory",
+      "sha256": "c7b9c0caa3dc7768af7fb202b819aa3a8eef7ac961bd02460af8084523f48546",
+      "state": "available"
+    },
+    {
+      "reference": "a/results/cc-A-r0-R01/R01/live/lakes/docs/ops/csv-bom.md",
+      "kind": "file",
+      "sha256": "ecff1ffc0135c2bf753b84d4136311463c1b5e2b27faeef9d4e2e9e1eab20d15",
+      "state": "available"
+    },
+    {
+      "reference": "a/results/cc-A-r0-R01/R01/live/lakes/docs/ops/ingest.md",
+      "kind": "file",
+      "sha256": "803e2cfbe70281fcebbceb6b364610ab0ffef90bcfa5b75b49601879208f3c6c",
+      "state": "available"
+    },
+    {
+      "reference": "a/results/cc-A-r0-R01/R01/meta.json",
+      "kind": "file",
+      "sha256": "a882c35947c9f6d098c3a2d77d8cb497a90ad781d24a3572bd0d6cff3fec8c51",
+      "state": "available"
+    },
+    {
+      "reference": "a/results/cc-A-r0-R01/R01/primary-check.json",
+      "kind": "file",
+      "sha256": "9e2c8ae2b9d2400e9131053c2dd62d53c4c37c52d4fc9457332e1caabfd77433",
+      "state": "available"
+    },
+    {
+      "reference": "a/results/cc-A-r0-R01/R01/prompt.md",
+      "kind": "file",
+      "sha256": "e55029855b41b17724b934e2ad25ce533ac99e0f194867546763845bf9e539d7",
+      "state": "available"
+    },
+    {
+      "reference": "a/results/cc-A-r0-R01/R01/stdout.jsonl",
+      "kind": "file",
+      "sha256": "90d7cf6046d3059865875a001d51bccd6a264d74d9fb679ad17287f5963da24b",
+      "state": "available"
+    },
+    {
+      "reference": "a/results/cc-A-r0-R01/R01/tools.jsonl",
+      "kind": "file",
+      "sha256": "ce23ff950386e84b954f9c19b06ad8a681a86a537318a4397512dc5f6605a902",
+      "state": "available"
+    },
+    {
+      "reference": "a/results/cc-A-r0-R01/R01/writes.txt",
+      "kind": "file",
+      "sha256": "3414be7948dcf44f7f69e3ac0d9a41e233b9783f466e59dfa95303977934d39c",
+      "state": "available"
+    },
+    {
+      "reference": "a/results/cc-A-r0-R02/R02",
+      "kind": "directory",
+      "sha256": "8812494c71bb0d6ee8af908bcff61d3754b3d3ec04c4efa4baae75fe06925bd6",
+      "state": "available"
+    },
+    {
+      "reference": "a/results/cc-A-r0-R02/R02/ac",
+      "kind": "directory",
+      "sha256": "1bbe47982721cb0a10c0deaea3b1514b088d8179dd7d16879f54e560f42923f5",
+      "state": "available"
+    },
+    {
+      "reference": "a/results/cc-A-r0-R02/R02/ac/attempt-001/judgement.json",
+      "kind": "file",
+      "sha256": "6406e1aabba2207f8d9f07fcbbbf0b31887e1da979529b51359d1c826b85380d",
+      "state": "available"
+    },
+    {
+      "reference": "a/results/cc-A-r0-R02/R02/ac/attempt-001/meta.json",
+      "kind": "file",
+      "sha256": "29af94ce79871770958fbae114e6772ec3a6641f82936ff9a95e2a4569feee06",
+      "state": "available"
+    },
+    {
+      "reference": "a/results/cc-A-r0-R02/R02/ac/attempt-001/resolution.json",
+      "kind": "file",
+      "sha256": null,
+      "state": "missing"
+    },
+    {
+      "reference": "a/results/cc-A-r0-R02/R02/ac/selection.json",
+      "kind": "file",
+      "sha256": null,
+      "state": "missing"
+    },
+    {
+      "reference": "a/results/cc-A-r0-R02/R02/docs-operations.jsonl",
+      "kind": "file",
+      "sha256": "f99287b32462b5cae2bfc955dd910446b17cfa82179b3316d2032b144dcfaab7",
+      "state": "available"
+    },
+    {
+      "reference": "a/results/cc-A-r0-R02/R02/docs-operations.key",
+      "kind": "file",
+      "sha256": "a7a4a01daacead845891c0f2461f6b14f500711d7473d4610946b684057036b1",
+      "state": "available"
+    },
+    {
+      "reference": "a/results/cc-A-r0-R02/R02/final.md",
+      "kind": "file",
+      "sha256": "183e5bbd0a1dab2fbd90a79003a18bb1ede6cb2f7c19eb731bccbc644c166ad4",
+      "state": "available"
+    },
+    {
+      "reference": "a/results/cc-A-r0-R02/R02/gate.json",
+      "kind": "file",
+      "sha256": "841727cac1da647357a0b58ad4f01bcdbf7f5c9172908cf609cabd5bcd773b89",
+      "state": "available"
+    },
+    {
+      "reference": "a/results/cc-A-r0-R02/R02/live/lakes/docs",
+      "kind": "directory",
+      "sha256": "01aa520c704583efe2ba6c53c7078bf582c8c6352d4d44e9ac2a12c6f4ce5894",
+      "state": "available"
+    },
+    {
+      "reference": "a/results/cc-A-r0-R02/R02/live/lakes/docs/db",
+      "kind": "directory",
+      "sha256": "bff714b34b08617b32bb287ffe773b261ff827db38a7596efeeab77a3bc57165",
+      "state": "available"
+    },
+    {
+      "reference": "a/results/cc-A-r0-R02/R02/live/lakes/docs/db/pool.md",
+      "kind": "file",
+      "sha256": "c3075d65d903bbf430c0a241490440d4df7d294a1cf0e2c977bc0ef9159acab5",
+      "state": "available"
+    },
+    {
+      "reference": "a/results/cc-A-r0-R02/R02/live/lakes/docs/ops",
+      "kind": "directory",
+      "sha256": "c5eb9c11dddcae94a92f56651ab368aee1f2619f4609e3b4038d2762c54cd26c",
+      "state": "available"
+    },
+    {
+      "reference": "a/results/cc-A-r0-R02/R02/live/lakes/docs/ops/release.md",
+      "kind": "file",
+      "sha256": "86f4febe2119c1bf433a5dd117ad1b9fd7ba2fbd017f677d34fbfdb9cbcba4ce",
+      "state": "available"
+    },
+    {
+      "reference": "a/results/cc-A-r0-R02/R02/meta.json",
+      "kind": "file",
+      "sha256": "3ef8c6f67492f28006c1b5911e88ff517253de827383f8b9d2f4130433ac76cb",
+      "state": "available"
+    },
+    {
+      "reference": "a/results/cc-A-r0-R02/R02/primary-check.json",
+      "kind": "file",
+      "sha256": "e1278f9f548ade238cbb43f2465c557e7592ee6c4bca6738fc50d9903f4d9a38",
+      "state": "available"
+    },
+    {
+      "reference": "a/results/cc-A-r0-R02/R02/prompt.md",
+      "kind": "file",
+      "sha256": "2e29e8281c31c766f273472bd8fd733007e877b00039b00205478057e08f7fab",
+      "state": "available"
+    },
+    {
+      "reference": "a/results/cc-A-r0-R02/R02/stdout.jsonl",
+      "kind": "file",
+      "sha256": "f702af9bb5dba7b7c8898b319816ea1ec2a3fefd6ed6c98be474699e9bd4c4d1",
+      "state": "available"
+    },
+    {
+      "reference": "a/results/cc-A-r0-R02/R02/tools.jsonl",
+      "kind": "file",
+      "sha256": "2e1278eef4b98dbfed5577d7321460657ac3ba95c8c680e6b1325eb986aae7af",
+      "state": "available"
+    },
+    {
+      "reference": "a/results/cc-A-r0-R02/R02/writes.txt",
+      "kind": "file",
+      "sha256": "d021b27245bbc7c77ff4df9c5cab4d5fd8a6f2bcc3afa4d0f7fb46a6677e65f6",
+      "state": "available"
+    },
+    {
+      "reference": "b/fixtures/R01/lakes/docs",
+      "kind": "directory",
+      "sha256": null,
+      "state": "missing"
+    },
+    {
+      "reference": "b/fixtures/R02/lakes/docs",
+      "kind": "directory",
+      "sha256": null,
+      "state": "missing"
+    },
+    {
+      "reference": "b/results/cc-B-r0-R01/R01",
+      "kind": "directory",
+      "sha256": "8812494c71bb0d6ee8af908bcff61d3754b3d3ec04c4efa4baae75fe06925bd6",
+      "state": "available"
+    },
+    {
+      "reference": "b/results/cc-B-r0-R01/R01/ac",
+      "kind": "directory",
+      "sha256": "1bbe47982721cb0a10c0deaea3b1514b088d8179dd7d16879f54e560f42923f5",
+      "state": "available"
+    },
+    {
+      "reference": "b/results/cc-B-r0-R01/R01/ac/attempt-001/judgement.json",
+      "kind": "file",
+      "sha256": "602af3a30c84a28ba335845712f03eeda780df0a052cae218110ef32147084e5",
+      "state": "available"
+    },
+    {
+      "reference": "b/results/cc-B-r0-R01/R01/ac/attempt-001/meta.json",
+      "kind": "file",
+      "sha256": "223ae17ed22cf9a951ee6ed061f2828fd7b691a3d0ed9453653c07c483695d1e",
+      "state": "available"
+    },
+    {
+      "reference": "b/results/cc-B-r0-R01/R01/ac/attempt-001/resolution.json",
+      "kind": "file",
+      "sha256": null,
+      "state": "missing"
+    },
+    {
+      "reference": "b/results/cc-B-r0-R01/R01/ac/selection.json",
+      "kind": "file",
+      "sha256": null,
+      "state": "missing"
+    },
+    {
+      "reference": "b/results/cc-B-r0-R01/R01/docs-operations.jsonl",
+      "kind": "file",
+      "sha256": "3a4632dd0e198752d45dd3ccf3bb2a44f1b6fd57276c5f3fa39d7e933c8e8637",
+      "state": "available"
+    },
+    {
+      "reference": "b/results/cc-B-r0-R01/R01/docs-operations.key",
+      "kind": "file",
+      "sha256": "f5f95106ddfa9bc5afd7592fabc3d0e0ac258f7a2243a14bc7dec8b14a496203",
+      "state": "available"
+    },
+    {
+      "reference": "b/results/cc-B-r0-R01/R01/final.md",
+      "kind": "file",
+      "sha256": "5eb3e6a1691bf36d2517850788b964803ec8783154c0d12d2f29f183f8eacdac",
+      "state": "available"
+    },
+    {
+      "reference": "b/results/cc-B-r0-R01/R01/gate.json",
+      "kind": "file",
+      "sha256": "6f53e91894a4d6e5007a0669fad9a055a7a1bc01bb425502ec720c21d7835271",
+      "state": "available"
+    },
+    {
+      "reference": "b/results/cc-B-r0-R01/R01/live/lakes/docs",
+      "kind": "directory",
+      "sha256": "5b381c451dff55610d528b0f9de9f07466a20d0a35da39f1fda286a89882619a",
+      "state": "available"
+    },
+    {
+      "reference": "b/results/cc-B-r0-R01/R01/live/lakes/docs/ops",
+      "kind": "directory",
+      "sha256": "c7b9c0caa3dc7768af7fb202b819aa3a8eef7ac961bd02460af8084523f48546",
+      "state": "available"
+    },
+    {
+      "reference": "b/results/cc-B-r0-R01/R01/live/lakes/docs/ops/csv-bom.md",
+      "kind": "file",
+      "sha256": "49582e6eb74940398487ba972e483332b23026a978528191d7e5d541ac337b1e",
+      "state": "available"
+    },
+    {
+      "reference": "b/results/cc-B-r0-R01/R01/live/lakes/docs/ops/ingest.md",
+      "kind": "file",
+      "sha256": "803e2cfbe70281fcebbceb6b364610ab0ffef90bcfa5b75b49601879208f3c6c",
+      "state": "available"
+    },
+    {
+      "reference": "b/results/cc-B-r0-R01/R01/meta.json",
+      "kind": "file",
+      "sha256": "de86797845a41891c15e7596f4d4851479327bee2d93d4444ef1dcf58582adf4",
+      "state": "available"
+    },
+    {
+      "reference": "b/results/cc-B-r0-R01/R01/primary-check.json",
+      "kind": "file",
+      "sha256": "c395f631d0db2b284c42046f11efd8bcbe2a5c487e384ffcdb937854a67d101d",
+      "state": "available"
+    },
+    {
+      "reference": "b/results/cc-B-r0-R01/R01/prompt.md",
+      "kind": "file",
+      "sha256": "e55029855b41b17724b934e2ad25ce533ac99e0f194867546763845bf9e539d7",
+      "state": "available"
+    },
+    {
+      "reference": "b/results/cc-B-r0-R01/R01/stdout.jsonl",
+      "kind": "file",
+      "sha256": "a9984a05e6681cd3d254777d7b3bf43b6643760ef63915b0dc5f282de8c36c2f",
+      "state": "available"
+    },
+    {
+      "reference": "b/results/cc-B-r0-R01/R01/tools.jsonl",
+      "kind": "file",
+      "sha256": "697598f1c0d4610d710533e45c482e29a2f03c6e4270be618ec280a04aca4f93",
+      "state": "available"
+    },
+    {
+      "reference": "b/results/cc-B-r0-R01/R01/writes.txt",
+      "kind": "file",
+      "sha256": "3414be7948dcf44f7f69e3ac0d9a41e233b9783f466e59dfa95303977934d39c",
+      "state": "available"
+    },
+    {
+      "reference": "b/results/cc-B-r0-R02/R02",
+      "kind": "directory",
+      "sha256": "8812494c71bb0d6ee8af908bcff61d3754b3d3ec04c4efa4baae75fe06925bd6",
+      "state": "available"
+    },
+    {
+      "reference": "b/results/cc-B-r0-R02/R02/ac",
+      "kind": "directory",
+      "sha256": "1bbe47982721cb0a10c0deaea3b1514b088d8179dd7d16879f54e560f42923f5",
+      "state": "available"
+    },
+    {
+      "reference": "b/results/cc-B-r0-R02/R02/ac/attempt-001/judgement.json",
+      "kind": "file",
+      "sha256": "95f380a5328621fe4f4e08f850bd36e45abae80e282433728871f1a1562dcad6",
+      "state": "available"
+    },
+    {
+      "reference": "b/results/cc-B-r0-R02/R02/ac/attempt-001/meta.json",
+      "kind": "file",
+      "sha256": "9e26f9cacbb67f0a3b570e5a909cf27d47c6de6c57ac7d7dfb2f3261d00d9b1b",
+      "state": "available"
+    },
+    {
+      "reference": "b/results/cc-B-r0-R02/R02/ac/attempt-001/resolution.json",
+      "kind": "file",
+      "sha256": null,
+      "state": "missing"
+    },
+    {
+      "reference": "b/results/cc-B-r0-R02/R02/ac/selection.json",
+      "kind": "file",
+      "sha256": null,
+      "state": "missing"
+    },
+    {
+      "reference": "b/results/cc-B-r0-R02/R02/docs-operations.jsonl",
+      "kind": "file",
+      "sha256": "d8a84fd19ebc2d3beff98924877a5a15906459838579172fcfd857911c2a1ee8",
+      "state": "available"
+    },
+    {
+      "reference": "b/results/cc-B-r0-R02/R02/docs-operations.key",
+      "kind": "file",
+      "sha256": "c9de8a762b98aba9957e422ee91eaac132d4b4cddbe432f371718db1c849d6ce",
+      "state": "available"
+    },
+    {
+      "reference": "b/results/cc-B-r0-R02/R02/final.md",
+      "kind": "file",
+      "sha256": "30136341133152b588d77680cc0dbc44a58b395d8c53c93bbe918540e5eba50d",
+      "state": "available"
+    },
+    {
+      "reference": "b/results/cc-B-r0-R02/R02/gate.json",
+      "kind": "file",
+      "sha256": "46b0651c98bb85d2097c6b2f8047ef9614f5461d7977eb0c9f503576cdbe1a70",
+      "state": "available"
+    },
+    {
+      "reference": "b/results/cc-B-r0-R02/R02/live/lakes/docs",
+      "kind": "directory",
+      "sha256": "01aa520c704583efe2ba6c53c7078bf582c8c6352d4d44e9ac2a12c6f4ce5894",
+      "state": "available"
+    },
+    {
+      "reference": "b/results/cc-B-r0-R02/R02/live/lakes/docs/db",
+      "kind": "directory",
+      "sha256": "bff714b34b08617b32bb287ffe773b261ff827db38a7596efeeab77a3bc57165",
+      "state": "available"
+    },
+    {
+      "reference": "b/results/cc-B-r0-R02/R02/live/lakes/docs/db/pool.md",
+      "kind": "file",
+      "sha256": "832a3db22394e135b60b640c75703f09c1d9a0d46d4e5f894c5d9e52bae8aee9",
+      "state": "available"
+    },
+    {
+      "reference": "b/results/cc-B-r0-R02/R02/live/lakes/docs/ops",
+      "kind": "directory",
+      "sha256": "c5eb9c11dddcae94a92f56651ab368aee1f2619f4609e3b4038d2762c54cd26c",
+      "state": "available"
+    },
+    {
+      "reference": "b/results/cc-B-r0-R02/R02/live/lakes/docs/ops/release.md",
+      "kind": "file",
+      "sha256": "86f4febe2119c1bf433a5dd117ad1b9fd7ba2fbd017f677d34fbfdb9cbcba4ce",
+      "state": "available"
+    },
+    {
+      "reference": "b/results/cc-B-r0-R02/R02/meta.json",
+      "kind": "file",
+      "sha256": "a31bc7973ccb17d1e70190446b417b94f5e39d59b403e4b1ee91ccbb76dc877f",
+      "state": "available"
+    },
+    {
+      "reference": "b/results/cc-B-r0-R02/R02/primary-check.json",
+      "kind": "file",
+      "sha256": "c045b8fcc7532b792d9c647623b55d026671d5158483ba70a6857df0184cf096",
+      "state": "available"
+    },
+    {
+      "reference": "b/results/cc-B-r0-R02/R02/prompt.md",
+      "kind": "file",
+      "sha256": "2e29e8281c31c766f273472bd8fd733007e877b00039b00205478057e08f7fab",
+      "state": "available"
+    },
+    {
+      "reference": "b/results/cc-B-r0-R02/R02/stdout.jsonl",
+      "kind": "file",
+      "sha256": "2a850a4e18a80e347848834861d5e470168b65081cadb18e5bc455299080fcd7",
+      "state": "available"
+    },
+    {
+      "reference": "b/results/cc-B-r0-R02/R02/tools.jsonl",
+      "kind": "file",
+      "sha256": "2ae1645897612822d49496326257aab37689f28e98f5872a87178d7f4be315eb",
+      "state": "available"
+    },
+    {
+      "reference": "b/results/cc-B-r0-R02/R02/writes.txt",
+      "kind": "file",
+      "sha256": "d021b27245bbc7c77ff4df9c5cab4d5fd8a6f2bcc3afa4d0f7fb46a6677e65f6",
+      "state": "available"
+    }
+  ]
+}

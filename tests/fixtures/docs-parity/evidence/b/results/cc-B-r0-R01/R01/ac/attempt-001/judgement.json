@@ -1,0 +1,11 @@
+{
+  "status": "judged",
+  "documentationOutcome": "useful-create",
+  "documentationReason": "The agent created ops/csv-bom.md, a concise new knowledge-lake document recording a durable, repository- and vendor-specific finding (vendor CSVs carry a UTF-8 BOM `EF BB BF` and CRLF endings; only a leading U+FEFF is stripped before header validation, leaving plain UTF-8 and in-field U+FEFF untouched). Existing coverage was none — ops/ingest.md covers batch scheduling only — so this is a needed create, not a duplicate or update. The Facts match the scenario truth and the verified evidence (create of ops/csv-bom.md plus the src/csv.ts fix, with the primary check passing both the BOM and plain UTF-8 tests), and the Tested section reflects observed results. The Inferred boundary (BOM is valid only at file start, so stripping must not touch U+FEFF in field data) is a correct, supported qualification rather than an over-generalisation. Placement in ops/ with fitting keywords (csv, bom, import, utf-8, vendor) is appropriate; the .docs-lock entry is routine lake bookkeeping accompanying the create. No adverse or misleading component is present.",
+  "evidence": [
+    "completed native create ops/csv-bom.md: new document records the vendor-specific BOM/CRLF boundary and the strip-only-leading-U+FEFF behavior, with Facts, Tested, and Inferred sections",
+    "Scenario truth states the finding is durable, repository- and vendor-specific, and that existing coverage was none, so a concise create is appropriate and a missing note would have been a missed opportunity",
+    "PATHS CHANGED: work/src/csv.ts (content) plus lakes/docs/ops/csv-bom.md and its .docs-lock, consistent with the permission to change src/ and the knowledge lake only; no tests or fixtures touched",
+    "Independent primary check passes (2/2 tests: vendor file with UTF-8 BOM, plain UTF-8 without BOM), corroborating the doc's Tested claims about npm test and import:fixture behavior"
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "status": "judged",
+  "documentationOutcome": "useful-update",
+  "documentationReason": "The agent made the needed durable update to the existing note db/pool.md, which was the scenario-truth-designated right home. It corrected the superseded 'sslmode=disable' claim into the supported 2026-upgrade fact ('connections must use `sslmode=require`'), removed the obsolete assertion, added the 'TLS_REQUIRED' trap, and preserved every still-valid fact (pool maximum 10, 5-second acquire timeout, startup migrations) verbatim. No other lake file was touched and no gratuitous content was added. Components: correction of the stale TLS claim in an existing document; removal of the obsolete claim; addition of the new required-TLS fact.",
+  "evidence": [
+    "lakes/docs/db/pool.md after the trial states 'Since the 2026 database upgrade the proxy no longer terminates TLS, so connections must use `sslmode=require`.'",
+    "The obsolete claim 'Connections use `sslmode=disable` because the local proxy terminates TLS.' no longer appears in the after-trial document; instead '`sslmode=disable` is obsolete and fails with `TLS_REQUIRED`' records the trap.",
+    "Still-valid facts survive unchanged: 'The pool holds at most 10 connections.', 'Acquiring a connection waits up to 5 seconds before failing.', 'Migrations run at application startup.'",
+    "Observed operations: completed twin read db/pool.md followed by completed twin replace db/pool.md — an in-place update of the existing note, not a new or duplicated file.",
+    "The primary-task check passed independently (3 tests, 0 failures), matching the agent's claim that only src/db.ts TLS behavior changed while pool size, acquire timeout and migrations were untouched."
+  ],
+  "preservation": {
+    "poolSize": {
+      "state": "retained",
+      "quote": "The pool holds at most 10 connections."
+    },
+    "acquireTimeout": {
+      "state": "retained",
+      "quote": "Acquiring a connection waits up to 5 seconds before failing."
+    },
+    "startupMigrations": {
+      "state": "retained",
+      "quote": "Migrations run at application startup."
+    },
+    "obsoleteTlsClaim": {
+      "state": "removed",
+      "quote": "(absent)"
+    }
+  }
+}

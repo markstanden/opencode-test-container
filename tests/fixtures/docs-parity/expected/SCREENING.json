@@ -1,0 +1,229 @@
+{
+  "rulesVersion": "v1",
+  "findings": [
+    {
+      "ruleId": "fact-coverage-unknown",
+      "ruleVersion": "v1",
+      "category": "fact-coverage-unknown",
+      "applicability": "R02",
+      "authority": "advisory",
+      "source": {
+        "kind": "resulting-document",
+        "reference": "a/results/cc-A-r0-R02/R02/live/lakes/docs/ops/release.md",
+        "sha256": "86f4febe2119c1bf433a5dd117ad1b9fd7ba2fbd017f677d34fbfdb9cbcba4ce"
+      },
+      "excerpt": "",
+      "span": {
+        "start": 0,
+        "end": 0
+      },
+      "factId": "poolSize",
+      "explanation": "no recognised mention of \"10-connection pool cap\"; a missing keyword does not prove loss, and an unrecognised paraphrase remains possible",
+      "trial": {
+        "stamp": "cc-A-r0-R02",
+        "arm": "A",
+        "scenario": "R02"
+      },
+      "role": "after"
+    },
+    {
+      "ruleId": "fact-coverage-unknown",
+      "ruleVersion": "v1",
+      "category": "fact-coverage-unknown",
+      "applicability": "R02",
+      "authority": "advisory",
+      "source": {
+        "kind": "resulting-document",
+        "reference": "a/results/cc-A-r0-R02/R02/live/lakes/docs/ops/release.md",
+        "sha256": "86f4febe2119c1bf433a5dd117ad1b9fd7ba2fbd017f677d34fbfdb9cbcba4ce"
+      },
+      "excerpt": "",
+      "span": {
+        "start": 0,
+        "end": 0
+      },
+      "factId": "acquireTimeout",
+      "explanation": "no recognised mention of \"5-second acquire timeout\"; a missing keyword does not prove loss, and an unrecognised paraphrase remains possible",
+      "trial": {
+        "stamp": "cc-A-r0-R02",
+        "arm": "A",
+        "scenario": "R02"
+      },
+      "role": "after"
+    },
+    {
+      "ruleId": "fact-coverage-unknown",
+      "ruleVersion": "v1",
+      "category": "fact-coverage-unknown",
+      "applicability": "R02",
+      "authority": "advisory",
+      "source": {
+        "kind": "resulting-document",
+        "reference": "a/results/cc-A-r0-R02/R02/live/lakes/docs/ops/release.md",
+        "sha256": "86f4febe2119c1bf433a5dd117ad1b9fd7ba2fbd017f677d34fbfdb9cbcba4ce"
+      },
+      "excerpt": "",
+      "span": {
+        "start": 0,
+        "end": 0
+      },
+      "factId": "startupMigrations",
+      "explanation": "no recognised mention of \"startup migrations\"; a missing keyword does not prove loss, and an unrecognised paraphrase remains possible",
+      "trial": {
+        "stamp": "cc-A-r0-R02",
+        "arm": "A",
+        "scenario": "R02"
+      },
+      "role": "after"
+    },
+    {
+      "ruleId": "fact-coverage-unknown",
+      "ruleVersion": "v1",
+      "category": "fact-coverage-unknown",
+      "applicability": "R02",
+      "authority": "advisory",
+      "source": {
+        "kind": "resulting-document",
+        "reference": "b/results/cc-B-r0-R02/R02/live/lakes/docs/ops/release.md",
+        "sha256": "86f4febe2119c1bf433a5dd117ad1b9fd7ba2fbd017f677d34fbfdb9cbcba4ce"
+      },
+      "excerpt": "",
+      "span": {
+        "start": 0,
+        "end": 0
+      },
+      "factId": "poolSize",
+      "explanation": "no recognised mention of \"10-connection pool cap\"; a missing keyword does not prove loss, and an unrecognised paraphrase remains possible",
+      "trial": {
+        "stamp": "cc-B-r0-R02",
+        "arm": "B",
+        "scenario": "R02"
+      },
+      "role": "after"
+    },
+    {
+      "ruleId": "fact-coverage-unknown",
+      "ruleVersion": "v1",
+      "category": "fact-coverage-unknown",
+      "applicability": "R02",
+      "authority": "advisory",
+      "source": {
+        "kind": "resulting-document",
+        "reference": "b/results/cc-B-r0-R02/R02/live/lakes/docs/ops/release.md",
+        "sha256": "86f4febe2119c1bf433a5dd117ad1b9fd7ba2fbd017f677d34fbfdb9cbcba4ce"
+      },
+      "excerpt": "",
+      "span": {
+        "start": 0,
+        "end": 0
+      },
+      "factId": "acquireTimeout",
+      "explanation": "no recognised mention of \"5-second acquire timeout\"; a missing keyword does not prove loss, and an unrecognised paraphrase remains possible",
+      "trial": {
+        "stamp": "cc-B-r0-R02",
+        "arm": "B",
+        "scenario": "R02"
+      },
+      "role": "after"
+    },
+    {
+      "ruleId": "fact-coverage-unknown",
+      "ruleVersion": "v1",
+      "category": "fact-coverage-unknown",
+      "applicability": "R02",
+      "authority": "advisory",
+      "source": {
+        "kind": "resulting-document",
+        "reference": "b/results/cc-B-r0-R02/R02/live/lakes/docs/ops/release.md",
+        "sha256": "86f4febe2119c1bf433a5dd117ad1b9fd7ba2fbd017f677d34fbfdb9cbcba4ce"
+      },
+      "excerpt": "",
+      "span": {
+        "start": 0,
+        "end": 0
+      },
+      "factId": "startupMigrations",
+      "explanation": "no recognised mention of \"startup migrations\"; a missing keyword does not prove loss, and an unrecognised paraphrase remains possible",
+      "trial": {
+        "stamp": "cc-B-r0-R02",
+        "arm": "B",
+        "scenario": "R02"
+      },
+      "role": "after"
+    }
+  ],
+  "reconciliation": [
+    {
+      "ruleId": "fact-coverage-unknown",
+      "factId": "poolSize",
+      "trial": {
+        "stamp": "cc-A-r0-R02",
+        "arm": "A",
+        "scenario": "R02"
+      },
+      "role": "after",
+      "source": "a/results/cc-A-r0-R02/R02/live/lakes/docs/ops/release.md",
+      "status": "unresolved"
+    },
+    {
+      "ruleId": "fact-coverage-unknown",
+      "factId": "acquireTimeout",
+      "trial": {
+        "stamp": "cc-A-r0-R02",
+        "arm": "A",
+        "scenario": "R02"
+      },
+      "role": "after",
+      "source": "a/results/cc-A-r0-R02/R02/live/lakes/docs/ops/release.md",
+      "status": "unresolved"
+    },
+    {
+      "ruleId": "fact-coverage-unknown",
+      "factId": "startupMigrations",
+      "trial": {
+        "stamp": "cc-A-r0-R02",
+        "arm": "A",
+        "scenario": "R02"
+      },
+      "role": "after",
+      "source": "a/results/cc-A-r0-R02/R02/live/lakes/docs/ops/release.md",
+      "status": "unresolved"
+    },
+    {
+      "ruleId": "fact-coverage-unknown",
+      "factId": "poolSize",
+      "trial": {
+        "stamp": "cc-B-r0-R02",
+        "arm": "B",
+        "scenario": "R02"
+      },
+      "role": "after",
+      "source": "b/results/cc-B-r0-R02/R02/live/lakes/docs/ops/release.md",
+      "status": "unresolved"
+    },
+    {
+      "ruleId": "fact-coverage-unknown",
+      "factId": "acquireTimeout",
+      "trial": {
+        "stamp": "cc-B-r0-R02",
+        "arm": "B",
+        "scenario": "R02"
+      },
+      "role": "after",
+      "source": "b/results/cc-B-r0-R02/R02/live/lakes/docs/ops/release.md",
+      "status": "unresolved"
+    },
+    {
+      "ruleId": "fact-coverage-unknown",
+      "factId": "startupMigrations",
+      "trial": {
+        "stamp": "cc-B-r0-R02",
+        "arm": "B",
+        "scenario": "R02"
+      },
+      "role": "after",
+      "source": "b/results/cc-B-r0-R02/R02/live/lakes/docs/ops/release.md",
+      "status": "unresolved"
+    }
+  ]
+}

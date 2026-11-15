@@ -148,6 +148,18 @@ or rubric data.
 - `docs-recording` verifies the plugin's HMAC-signed journal against the host
   tool trail, then checks the written bytes. A refused write retains zero
   recording credit; attempts are counted separately.
+- The full recorded-evidence analyser is also available offline:
+
+    ```sh
+    otc replay --manifest <campaign.json> \
+      --evidence-root <recorded-evidence-root> --out <fresh-report-dir>
+    ```
+
+    It validates the declared campaign, loads explicit evidence states, and
+    produces accounting, utility/opportunity counts, retrieval measures,
+    preservation, guardrails, pairing, bounds, screening, decision and stable
+    reports. It makes no model call. `--allow-legacy-unbound` is the explicit
+    legacy-answer escape; `--rerender` replaces an existing output.
 
 Model judging is intentionally not implemented in this build. A campaign that
 declares `assessment.judge` is refused rather than silently treated as
@@ -161,6 +173,14 @@ docs cases) the journal directory. Capabilities are dropped and
 network so a loopback provider proxy is reachable; that is **not** network
 isolation and OTC does not describe it as provider-only egress. Credentials
 travel through a 0600 env file, never argv, logs or receipts.
+
+## Docs evaluator capability
+
+`src/evaluators/docs` carries the established docs analysis semantics, not a
+narrower recording-only criterion: recording credit, utility and opportunity
+counts, retrieval, preservation, guardrails, pairing/bounds, screening,
+decision and reporting. `docs/capability-matrix.md` maps every capability to
+its original implementation, tests, parity evidence and remaining owner.
 
 ## Historical compatibility
 

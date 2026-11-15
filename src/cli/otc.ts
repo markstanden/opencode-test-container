@@ -14,6 +14,7 @@ import { assessCampaign } from "../campaign/assess.ts";
 import { closeCampaign } from "../campaign/close.ts";
 import { statusOf } from "../campaign/status.ts";
 import { analyseCampaign } from "../reporting/report.ts";
+import { runAnalysis } from "../evaluators/docs/analysis/replay.ts";
 import { loadCampaignBundle } from "../contracts/validate.ts";
 
 /** The commands `otc` exposes. */
@@ -27,6 +28,7 @@ export const COMMANDS = [
     "close",
     "analyse",
     "status",
+    "replay",
     "help",
     "version",
 ] as const;
@@ -52,6 +54,14 @@ export interface CliOptions {
     dryRun: boolean;
     /** The passthrough value. */
     passthrough: string[];
+    /** The recorded docs campaign manifest (replay). */
+    manifest: string | null;
+    /** The recorded evidence root (replay). */
+    evidenceRoot: string | null;
+    /** Whether to replace an existing analysis output. */
+    rerender: boolean;
+    /** Whether unbound legacy answers are accepted. */
+    allowLegacyUnbound: boolean;
     /** The help value. */
     help: boolean;
 }
@@ -71,6 +81,7 @@ Commands:
   close           Append closure to the ledger (idempotent)
   analyse         Render final analysis after closure
   status          Read-only state and next actions
+  replay          Replay recorded docs evidence through the docs evaluator
   help            This text
   version         Print the package version
 
@@ -80,6 +91,10 @@ Options:
   --out <dir>         Fresh report directory (analyse)
   --slot <id>         Select a slot; repeat or comma-separate
   --passthrough <name> Pass one named environment variable into the trial
+  --manifest <file>   Recorded docs campaign manifest (replay)
+  --evidence-root <dir> Recorded evidence root (replay)
+  --rerender          Replace an existing analysis output (replay)
+  --allow-legacy-unbound Allow unbound legacy answers (replay)
   --dry-run           Plan a trial without dispatching it
   --json              Machine-readable output (status, validate, assess)
   --help              This text
@@ -94,6 +109,7 @@ Examples:
   otc close --root /tmp/otc-run
   otc analyse --root /tmp/otc-run --out /tmp/otc-report
   otc status --root /tmp/otc-run --json
+  otc replay --manifest campaign.json --evidence-root evidence --out report
 `;
 
 /** Parse argv into a command and its options. */
@@ -133,6 +149,12 @@ function applyOption(
         case "--passthrough":
             options.passthrough.push(optionValue(arg, args));
             return true;
+        case "--manifest":
+            options.manifest = optionValue(arg, args);
+            return true;
+        case "--evidence-root":
+            options.evidenceRoot = optionValue(arg, args);
+            return true;
         default:
             return false;
     }
@@ -154,7 +176,10 @@ function parseOptionLoop(options: CliOptions, args: string[]): void {
         if (arg === "--help" || arg === "-h") options.help = true;
         else if (arg === "--json") options.json = true;
         else if (arg === "--dry-run") options.dryRun = true;
-        else if (!applyOption(options, arg, args)) {
+        else if (arg === "--rerender") options.rerender = true;
+        else if (arg === "--allow-legacy-unbound") {
+            options.allowLegacyUnbound = true;
+        } else if (!applyOption(options, arg, args)) {
             throw new UsageError(`unknown option ${arg}`);
         }
     }
@@ -175,6 +200,10 @@ export function parseArgs(argv: readonly string[]): CliOptions {
         json: false,
         dryRun: false,
         passthrough: [],
+        manifest: null,
+        evidenceRoot: null,
+        rerender: false,
+        allowLegacyUnbound: false,
         help: false,
     };
     const args = [...argv];
@@ -405,6 +434,30 @@ function status(options: CliOptions): number {
     return status.state === "blocked" ? 1 : 0;
 }
 
+/** Replay a recorded docs campaign through the checked docs evaluator. */
+function replay(options: CliOptions): number {
+    if (
+        options.manifest === null ||
+        options.evidenceRoot === null ||
+        options.out === null
+    ) {
+        return fail(["replay needs --manifest, --evidence-root and --out"]);
+    }
+    const flags = [
+        "--campaign",
+        options.manifest,
+        "--evidence-root",
+        options.evidenceRoot,
+        "--out",
+        options.out,
+        ...(options.rerender ? ["--rerender"] : []),
+        ...(options.allowLegacyUnbound ? ["--allow-legacy-unbound"] : []),
+    ];
+    const result = runAnalysis(flags);
+    for (const message of result.messages) console.log(message);
+    return result.status;
+}
+
 /** The command dispatch table. */
 const HANDLERS: Partial<
     Record<Command, (options: CliOptions) => number | Promise<number>>
@@ -418,6 +471,7 @@ const HANDLERS: Partial<
     close,
     analyse,
     status,
+    replay,
 };
 
 const invokedDirectly =

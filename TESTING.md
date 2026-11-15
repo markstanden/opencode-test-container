@@ -32,12 +32,23 @@ installed JavaScript shape, not only TypeScript source.
 
 ## Coverage populations
 
-- The measured population is `src/**/*.ts`: contracts, lifecycle, adapters,
-  evaluator and CLI modules. `dist/` is generated and not measured.
-- `tests/**` and `rehearsals/**` are not measured sources.
-- The historical prod014 drivers remain in the docs plugin; their old coverage
-  floors are not inherited or claimed here. This package's floor is recorded
-  in `.defined.json` and reviewed with the same SHA.
+`npm run test:coverage` runs `scripts/check-coverage.mjs`, which enforces two
+declared populations:
+
+- **Migrated docs analysis** (`src/evaluators/docs/analysis/**`, excluding the
+  new `replay.ts` CLI): the docs repository's inherited **95/90/95** floors.
+- **All OTC runtime** (`src/**/*.ts`, including contracts, lifecycle, adapters,
+  evaluators and CLI): an explicit initial ratchet of **75/55/80**.
+
+Measured at the reconciliation head: migrated analysis 95.6/90.1/95.9; all
+OTC runtime 85.1/79.4/85.5. The script fails loudly if either population
+drops below its floor, and writes the `coverage/lcov.info` Sonar consumes.
+
+The docs-analysis tests are the established analysis suite ported into
+`tests/docs-analysis`, plus the committed mini replay parity test in
+`tests/contract/docs-parity.test.ts`. The larger recorded confirmation and
+screening corpora were replayed manually; see
+[`docs/capability-matrix.md`](docs/capability-matrix.md).
 
 ## Offline rehearsal
 

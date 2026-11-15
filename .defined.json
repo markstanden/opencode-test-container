@@ -2,7 +2,7 @@
     "version": "b0df20afb0f0",
     "coverage": {
         "node": {
-            "command": "npm run build && mkdir -p coverage && node --test --experimental-test-coverage --test-coverage-include='src/**/*.ts' --test-coverage-exclude='**/*.test.ts' --test-reporter=lcov --test-reporter-destination=coverage/lcov.info 'tests/**/*.test.ts'",
+            "command": "npm run build && node scripts/check-coverage.mjs",
             "minimums": {
                 "line": 75,
                 "branch": 55,
