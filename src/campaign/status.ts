@@ -5,6 +5,7 @@ import { loadPreparedManifest } from "./prepare.ts";
 import { loadFrozen } from "./freeze.ts";
 import { readLedger, trialStarts } from "./ledger.ts";
 import { readAssessments, assessmentPath } from "./assess.ts";
+import { readJudgeAttempts, readSelection } from "./judge.ts";
 import { trialDirectory } from "./run.ts";
 import type { PreparedManifest } from "./prepare.ts";
 
@@ -49,6 +50,19 @@ export interface StatusReport {
     };
     /** The budgets value. */
     budgets: { trials: number; used: number; remaining: number } | null;
+    /** The judgement counts value. */
+    judgement: {
+        /** Slots with a checked selection. */
+        judged: number;
+        /** Completed slots still awaiting a usable judgement. */
+        pending: number;
+        /** Completed slots whose attempts ended without a usable verdict. */
+        failed: number;
+        /** Every recorded judge attempt. */
+        attempts: number;
+        /** Attempts that ended without a usable verdict. */
+        invalid: number;
+    } | null;
     /** The next actions value. */
     nextActions: NextAction[];
     /** The problems value. */
@@ -74,6 +88,58 @@ function lifecycleStateOf(options: {
     return options.frozen ? "frozen" : "prepared";
 }
 
+/** The judgement counts for every scheduled slot. */
+function judgementOf(
+    root: string,
+    manifest: StatusManifest,
+): StatusReport["judgement"] {
+    if (manifest.campaign.assessment.judge === undefined) return null;
+    const slots = manifest.campaign.schedule.slots;
+    let judged = 0;
+    let pending = 0;
+    let failed = 0;
+    let attempts = 0;
+    let invalid = 0;
+    for (const slot of slots) {
+        const recorded = readJudgeAttempts(root, slot.slotId);
+        attempts += recorded.length;
+        invalid += recorded.filter(
+            (attempt) =>
+                attempt.judgementStatus === "invalid-verdict" ||
+                attempt.judgementStatus === "judge-error",
+        ).length;
+        if (readSelection(root, slot.slotId) !== null) {
+            judged += 1;
+        } else if (
+            existsSync(join(trialDirectory(root, slot.slotId), "meta.json"))
+        ) {
+            const terminal = recorded.some(
+                (attempt) =>
+                    attempt.judgementStatus === "invalid-verdict" ||
+                    attempt.judgementStatus === "judge-error",
+            );
+            if (terminal) failed += 1;
+            else pending += 1;
+        }
+    }
+    return { judged, pending, failed, attempts, invalid };
+}
+
+/** The judge action when completed slots are awaiting a checked judgement. */
+function judgeAction(
+    root: string,
+    judgement: StatusReport["judgement"],
+): NextAction[] {
+    return judgement !== null && judgement.pending > 0
+        ? [
+              {
+                  command: `otc judge --root ${JSON.stringify(root)}`,
+                  reason: `${judgement.pending} completed slot(s) have no checked judgement`,
+              },
+          ]
+        : [];
+}
+
 /** Build the actionable next commands from state, never from constants. */
 function nextActionsOf(options: {
     root: string;
@@ -83,6 +149,7 @@ function nextActionsOf(options: {
     starts: number;
     completed: number;
     assessments: number;
+    judgement: StatusReport["judgement"];
 }): NextAction[] {
     const quoted = JSON.stringify(options.root);
     if (!options.frozen) {
@@ -116,6 +183,7 @@ function nextActionsOf(options: {
             reason: "every started slot has evidence; deterministic assessment is pending",
         });
     }
+    actions.push(...judgeAction(options.root, options.judgement));
     if (options.starts > 0 && options.completed === options.starts) {
         actions.push({
             command: `otc close --root ${quoted}`,
@@ -153,6 +221,7 @@ export function statusOf(root: string): StatusReport {
                 unknown: 0,
             },
             budgets: null,
+            judgement: null,
             nextActions: [],
             problems: [prepared.problem],
         };
@@ -186,6 +255,7 @@ export function statusOf(root: string): StatusReport {
         starts: starts.length,
         completed: completed.size,
         assessments: assessments.length,
+        judgement: judgementOf(root, manifest),
     });
     return {
         schemaVersion: 1,
@@ -213,6 +283,7 @@ export function statusOf(root: string): StatusReport {
             used: starts.length,
             remaining: manifest.campaign.budgets.trials - starts.length,
         },
+        judgement: judgementOf(root, manifest),
         nextActions,
         problems,
     };

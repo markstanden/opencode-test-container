@@ -1,7 +1,41 @@
 import { appendLedgerEvent, readLedger, trialStarts } from "./ledger.ts";
-import { loadPreparedManifest } from "./prepare.ts";
+import { loadPreparedManifest, type PreparedManifest } from "./prepare.ts";
 import { loadFrozen } from "./freeze.ts";
 import { readAssessments } from "./assess.ts";
+import { readJudgeAttempts, readSelection } from "./judge.ts";
+import { readClaims } from "../evaluators/docs/analysis/budget.ts";
+import { join } from "node:path";
+
+/** Unsettled spend claims that must stop closure, or an empty list. */
+function unsettledClaims(root: string): string[] {
+    return ["judge", "recovery"].flatMap((kind) =>
+        readClaims(join(root, "evidence"), kind as "judge" | "recovery")
+            .filter((claim) => claim.state !== "closed")
+            .map(
+                (claim) =>
+                    `${kind} claim ${claim.index} is ${claim.state}${claim.stamp === null ? "" : ` for ${claim.stamp}`}`,
+            ),
+    );
+}
+
+/** Completed slots with neither a selected judgement nor a terminal failure. */
+function unjudgedCompleted(
+    root: string,
+    manifest: PreparedManifest,
+    completed: ReadonlySet<string>,
+): string[] {
+    if (manifest.campaign.assessment.judge === undefined) return [];
+    return manifest.campaign.schedule.slots.flatMap((slot) => {
+        if (!completed.has(slot.slotId)) return [];
+        if (readSelection(root, slot.slotId) !== null) return [];
+        const terminal = readJudgeAttempts(root, slot.slotId).some(
+            (attempt) =>
+                attempt.judgementStatus === "invalid-verdict" ||
+                attempt.judgementStatus === "judge-error",
+        );
+        return terminal ? [] : [slot.slotId];
+    });
+}
 
 /** The closure outcome. */
 export type CloseResult =
@@ -50,6 +84,24 @@ export function closeCampaign(
             ok: false,
             problems: [
                 `unresolved trial launch(es): ${unresolved.join(", ")}; closure would hide unknown spend`,
+            ],
+        };
+    }
+    const pending = unjudgedCompleted(root, prepared.manifest, ended);
+    if (pending.length > 0) {
+        return {
+            ok: false,
+            problems: [
+                `unjudged completed slot(s): ${pending.join(", ")}; run otc judge before closure`,
+            ],
+        };
+    }
+    const claims = unsettledClaims(root);
+    if (claims.length > 0) {
+        return {
+            ok: false,
+            problems: [
+                `unsettled judge spend: ${claims.join("; ")}; closure would hide an unknown outcome`,
             ],
         };
     }

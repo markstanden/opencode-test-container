@@ -26,6 +26,14 @@ const POPULATIONS = [
         floors: { line: 75, branch: 55, function: 80 },
     },
     {
+        name: "new OTC lifecycle, adapters and evaluators",
+        include: (file) =>
+            !file.includes("/analysis/") &&
+            !file.includes("/harness/") &&
+            !file.includes("/legacy/"),
+        floors: { line: 82, branch: 66, function: 84 },
+    },
+    {
         name: "migrated docs analysis (previously gated)",
         include: (file) =>
             file.includes("src/evaluators/docs/analysis/") &&

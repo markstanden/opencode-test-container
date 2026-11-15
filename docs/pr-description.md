@@ -7,8 +7,13 @@ Adds `@markstanden/opencode-test-container` (`otc`) as a new package:
 - versioned suite/campaign/subject/runtime contracts with discriminated
   `skill-trigger` and `docs-task` cases;
 - immutable preparation, freeze and delivery checks (resolved image ID, CLI
-  version, subject and prompt hashes);
+  version, subject, prompt and product-checker hashes);
 - explicit scheduled execution through Podman and the real OpenCode CLI;
+- product-supplied primary checks executed in their own no-network container,
+  never mounted into the trial;
+- an arm-blind docs judge using the established prompt/parse/validate/failure
+  classification, with one registered `json-syntax` recovery from identical
+  packet bytes and durable per-slot selection;
 - append-only lifecycle ledger, deterministic assessment, idempotent closure,
   read-only status and derived reports;
 - the established docs analysis implementation (recording credit, utility and
@@ -17,7 +22,8 @@ Adds `@markstanden/opencode-test-container` (`otc`) as a new package:
 - deterministic skill-activation evaluator;
 - emitted-JavaScript `otc` bin proven through `npm pack` in a temporary
   consumer;
-- offline real-adapter rehearsal with a scripted loopback provider;
+- offline real-adapter rehearsals for both the skill/docs baseline and the
+  complete fresh docs lifecycle;
 - explicit legacy readers for frozen prod014 schedule/manifest records.
 
 ## Design
@@ -28,31 +34,45 @@ the glossary and migration table. Core imports only contracts and adapters; it
 never imports a docs checkout or assumes A/B, eight pairs, a judge or a
 provider. Docs semantics live only in `src/evaluators/docs`.
 
+A checker is trusted product data. OTC accepts, stages and executes it; the
+docs repository still owns the case data, truth and checker bytes. The trial
+cannot read the checker, and the judge cannot read the campaign or arm
+identities.
+
 ## Proof
 
-- `npm ci`, `npm test` (60 tests, including packaged CLI), `npm run typecheck`,
-  `defined comply --full` all pass.
-- Measured coverage on the new `src/**/*.ts` population: 81.0 line, 58.5
-  branch, 84.3 function. The explicit initial floor is 75/55/80; this
-  population was never previously gated (the old prod014 drivers remain in the
-  docs repository).
+- `npm ci`, `npm test` (552 tests, including packaged CLI), `npm run
+typecheck`, `defined comply` all pass.
+- Coverage populations, all measured on this head:
+    - migrated docs analysis keeps the inherited 95/90/95 floors
+      (95.6/90.1/95.9);
+    - all OTC runtime has the explicit 75/55/80 ratchet (91.2/79.9/92.3);
+    - the genuinely new lifecycle/adapters/evaluators population has an explicit
+      82/66/84 ratchet (86.6/69.7/88.2).
 - Recorded-evidence parity: committed mini corpus deep-equal; recorded 40-trial
   confirmation and 48-trial screening corpora byte-identical apart from the
   receipt's `renderedAt`.
-- Coverage ownership: migrated analysis keeps the inherited 95/90/95 floors
-  (measured 95.6/90.1/95.9); all OTC runtime has an explicit 75/55/80 initial
-  ratchet (measured 85.1/79.4/85.5).
-- `npm run rehearse:offline`: real Podman image
-  `sha256:58505eac…`, OpenCode 2.2.6, scripted provider. 22 chat requests, 0
-  readiness probes, 0 paid calls. Skill positive/negative/wrong/failed-load
-  and invalid capture; docs useful write and gate-blocked write.
-- Installed tarball runs help, validate, prepare and status from an unrelated
-  directory, with no checkout or `tsx`/Bun dependency.
+- `npm run rehearse:offline`: real Podman image, OpenCode 2.2.6, scripted
+  provider, zero paid calls.
+- `npm run rehearse:fresh-docs`: primary pass/fail, useful and gate-blocked
+  writes, malformed-then-valid judge recovery selecting `attempt-002` with
+  identical packet bytes, exhausted budget refusal, checked selection,
+  closure, analysis and post-close refusal. 6 trial + 5 judge + 1 exhausted
+  scripted chat requests, 0 readiness probes, 0 paid calls.
+- Installed tarball runs the complete offline docs lifecycle from an unrelated
+  directory with spaces, with no checkout or `tsx`/Bun dependency. The receipt
+  records the tarball SHA-256 and npm integrity.
+- The migrated `harness/run.ts` CLI is removed, so no OTC source can spawn the
+  docs repository's `placement-harness/harness.mts`. Only product-supplied
+  suite and checker bytes remain external data.
 
 ## Limits
 
-- Model judging is not implemented; a campaign declaring a judge is refused.
+- The judge is a model call when dispatched; it is not deterministic evidence.
+  The deterministic assessment remains the criterion.
 - `network: "host"` is documented honestly as host networking, not
   provider-only egress.
+- The two larger recorded parity corpora remain external and are not
+  committed; the committed mini corpus enforces the same pipeline.
 - Publishing to npm and creating the remote are external steps; the repository
   is ready to publish.

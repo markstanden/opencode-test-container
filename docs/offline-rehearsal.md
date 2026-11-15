@@ -1,4 +1,6 @@
-# Offline real-adapter rehearsal
+# Offline real-adapter rehearsals
+
+## Baseline (`npm run rehearse:offline`)
 
 Recorded 2026-11-15 from `npm run rehearse:offline` on the dev box.
 
@@ -32,3 +34,41 @@ every slot made at least one provider request.
 
 This proves the machinery and the evidence boundary offline. It is **not**
 evidence of real model quality.
+
+## Fresh docs lifecycle (`npm run rehearse:fresh-docs`)
+
+Same image and scripted provider, plus the product primary check, blind judge
+and recovery path:
+
+| Slot            | Primary | Outcome | Selected attempt | Trial chat | Judge chat |
+| --------------- | ------- | ------- | ---------------- | ---------- | ---------- |
+| useful-write    | pass    | pass    | attempt-001      | 2          | 1          |
+| gate-blocked    | pass    | pass    | attempt-001      | 2          | 1          |
+| primary-failure | fail    | fail    | attempt-001      | 1          | 1          |
+| recovery        | —       | pass    | attempt-002      | 1          | 2          |
+
+The recovery's first judge attempt returned prose, the second a valid
+`none` verdict; both recorded the same `packetSha256`. The separate
+exhausted-budget root refused recovery after one judge claim, made one chat
+request and wrote no selection. The gate-blocked write kept zero credited
+writes. The checker never appeared in the trial workspace or config home.
+Post-close `run` and `judge` both exited 1; analysis after closure recorded all
+four judgements.
+
+Totals: 6 trial + 5 judge + 1 exhausted scripted chat requests, 0 readiness
+probes, 0 paid provider calls.
+
+## Installed tarball (`npm run rehearse:installed`)
+
+The checkout is packed, installed into a consumer directory whose path
+contains a space, and the same fresh docs lifecycle runs through
+`node_modules/.bin/otc`. The 2026-11-15 run used image
+`sha256:58505eac…`, OpenCode 2.2.6 and installed version `0.1.0`; it produced
+the same four-slot result, one recovery, one exhausted refusal and zero paid
+calls. The receipt carries the tarball filename, SHA-256 and npm integrity.
+The development-only provider stays outside the tarball.
+
+The migrated `harness/run.ts` CLI is gone: it could spawn the docs
+repository's old `placement-harness/harness.mts`. The generic evidence guard
+lives at `src/campaign/evidence-guard.ts`; OTC now accepts only product data
+(suite, truth, checker bytes), never a sibling engine.

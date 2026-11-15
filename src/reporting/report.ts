@@ -6,6 +6,7 @@ import { loadPreparedManifest } from "../campaign/prepare.ts";
 import { loadFrozen } from "../campaign/freeze.ts";
 import { readLedger } from "../campaign/ledger.ts";
 import { readAssessments, type StoredAssessment } from "../campaign/assess.ts";
+import { readSelectedJudgement } from "../campaign/judge.ts";
 import { trialDirectory } from "../campaign/run.ts";
 
 /** The derived report document. */
@@ -32,6 +33,8 @@ export interface Report {
         invalid: number;
         unknown: number;
         unrun: number;
+        judged: number;
+        unjudged: number;
     };
     /** The totals value. */
     totals: { pass: number; fail: number; unknown: number };
@@ -48,6 +51,13 @@ export interface Report {
         reasons: string[];
         counts: Record<string, number>;
         usage: Record<string, unknown> | null;
+        judgement: {
+            selectedAttemptId: string;
+            attempts: number;
+            documentationOutcome: string | null;
+            utility: number | null;
+            status: string;
+        } | null;
     }>;
 }
 
@@ -91,13 +101,29 @@ function observedOf(assessment: StoredAssessment): {
     };
 }
 
+/** The selected judgement summary for one slot. */
+function judgementOf(
+    root: string,
+    slotId: string,
+): Report["slots"][number]["judgement"] {
+    const selected = readSelectedJudgement(root, slotId);
+    if (selected === null) return null;
+    return {
+        selectedAttemptId: selected.selection.selectedAttemptId,
+        attempts: selected.selection.attempts.length,
+        documentationOutcome: selected.judgement.documentationOutcome,
+        utility: selected.judgement.utility,
+        status: selected.judgement.status,
+    };
+}
+
 /** The slot table rows. */
 function slotRows(report: Report): string[] {
     return report.slots.map((slot) => {
         const counts = Object.entries(slot.counts)
             .map(([key, value]) => `${key}=${value}`)
             .join(" ");
-        return `| ${slot.slotId} | ${slot.caseId} | ${slot.armId} | ${slot.repetitionId} | ${slot.expected} | ${slot.observed} | ${slot.validity} | ${slot.outcome} | ${counts} |`;
+        return `| ${slot.slotId} | ${slot.caseId} | ${slot.armId} | ${slot.repetitionId} | ${slot.expected} | ${slot.observed} | ${slot.validity} | ${slot.outcome} | ${counts} | ${slot.judgement === null ? "unjudged" : `${slot.judgement.documentationOutcome} (${String(slot.judgement.utility)}); ${slot.judgement.selectedAttemptId}`} |`;
     });
 }
 
@@ -140,14 +166,14 @@ function markdownOf(report: Report): string {
         "",
         "## Denominator",
         "",
-        `Scheduled ${report.denominators.scheduled}; assessed ${report.denominators.assessed}; valid ${report.denominators.valid}; invalid ${report.denominators.invalid}; unknown ${report.denominators.unknown}; unrun ${report.denominators.unrun}.`,
+        `Scheduled ${report.denominators.scheduled}; assessed ${report.denominators.assessed}; valid ${report.denominators.valid}; invalid ${report.denominators.invalid}; unknown ${report.denominators.unknown}; unrun ${report.denominators.unrun}; judged ${report.denominators.judged}; unjudged ${report.denominators.unjudged}.`,
         "",
         `Pass ${report.totals.pass}; fail ${report.totals.fail}; unknown ${report.totals.unknown}. The valid denominator is pass + fail (${report.totals.pass + report.totals.fail}); invalid and unrun runs are excluded and listed below.`,
         "",
         "## Slots",
         "",
-        "| Slot | Case | Arm | Rep | Expected | Observed | Validity | Outcome | Counts |",
-        "| ---- | ---- | --- | --- | -------- | -------- | -------- | ------- | ------ |",
+        "| Slot | Case | Arm | Rep | Expected | Observed | Validity | Outcome | Counts | Judgement |",
+        "| ---- | ---- | --- | --- | -------- | -------- | -------- | ------- | ------ | --------- |",
         ...slotRows(report),
         ...reasonSection(report),
         "",
@@ -212,6 +238,7 @@ export function analyseCampaign(
                 reasons: ["no assessment was recorded"],
                 counts: {},
                 usage: readUsage(root, slot.slotId),
+                judgement: judgementOf(root, slot.slotId),
             };
         }
         const observed = observedOf(assessment);
@@ -225,6 +252,7 @@ export function analyseCampaign(
             outcome: assessment.outcome,
             reasons: assessment.reasons,
             usage: readUsage(root, slot.slotId),
+            judgement: judgementOf(root, slot.slotId),
         };
     });
     const body = {
@@ -241,6 +269,8 @@ export function analyseCampaign(
             invalid: slots.filter((slot) => slot.validity === "invalid").length,
             unknown: slots.filter((slot) => slot.validity === "unknown").length,
             unrun: slots.filter((slot) => slot.validity === "unrun").length,
+            judged: slots.filter((slot) => slot.judgement !== null).length,
+            unjudged: slots.filter((slot) => slot.judgement === null).length,
         },
         totals: {
             pass: slots.filter((slot) => slot.outcome === "pass").length,

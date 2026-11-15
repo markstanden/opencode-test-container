@@ -34,7 +34,9 @@
         "test:unit": "node --test 'tests/unit/**/*.test.ts'",
         "test:coverage": "npm run build && node scripts/check-coverage.mjs",
         "typecheck": "tsc --noEmit",
-        "rehearse:offline": "npm run build && node rehearsals/offline.mts"
+        "rehearse:offline": "npm run build && node rehearsals/offline.mts",
+        "rehearse:fresh-docs": "npm run build && node rehearsals/fresh-docs.mts",
+        "rehearse:installed": "npm run build && node rehearsals/installed.mts"
     },
     "devDependencies": {
         "@types/node": "^26.6.4",

@@ -12,6 +12,10 @@ import {
     type JournalDispatch,
     type JournalVerification,
 } from "./journal.ts";
+import {
+    readPrimaryCheck,
+    type PrimaryCheckRecord,
+} from "../../campaign/primary.ts";
 
 /** The one docs case shape. */
 type DocsCase = Extract<SuiteCase, { kind: "docs-task" }>;
@@ -74,6 +78,12 @@ export interface DocsAssessment {
     };
     /** The target value. */
     target: string | null;
+    /** The independent primary-check result, or null when none was declared. */
+    primary: {
+        id: string;
+        status: PrimaryCheckRecord["status"];
+        exit: number | null;
+    } | null;
     /** The reasons value. */
     reasons: string[];
     /** The usage value. */
@@ -234,6 +244,34 @@ function guardrailReasons(
     ];
 }
 
+/** The readable parts of one docs operation input. */
+function operationInputParts(input: Record<string, unknown>): string[] {
+    const parts: string[] = [];
+    if (typeof input.search === "string")
+        parts.push(`search "${input.search}"`);
+    if (typeof input.read === "string") parts.push(`read ${input.read}`);
+    if (typeof input.check === "string") parts.push(`check ${input.check}`);
+    const add = input.add;
+    if (typeof add === "object" && add !== null) {
+        const declaration = add as Record<string, unknown>;
+        parts.push(
+            `${String(declaration.mode ?? "create")} ${String(declaration.path ?? "(body)")}`,
+        );
+    }
+    return parts;
+}
+
+/** One verified docs operation, rendered for the judge. */
+function operationLine(entry: Record<string, unknown>): string {
+    const surface = entry.surface === "codemode-twin" ? "twin" : "native";
+    const input =
+        typeof entry.input === "object" && entry.input !== null
+            ? (entry.input as Record<string, unknown>)
+            : {};
+    const parts = operationInputParts(input);
+    return `${String(entry.status ?? "unknown")} ${surface} ${parts.join("; ") || "help"}`;
+}
+
 /** Verify the captured journal against the host trail. */
 function verificationOf(
     trialDir: string,
@@ -251,21 +289,40 @@ function verificationOf(
     });
 }
 
+/** Whether an absent journal contradicts the case's declared operation need. */
+function journalAbsenceProblem(
+    testCase: DocsCase,
+    verification: JournalVerification,
+    host: ReturnType<typeof hostDispatchesFromTrail>,
+): string | null {
+    if (verification.state !== "absent") {
+        return verification.state === "verified"
+            ? null
+            : `docs journal is ${verification.state}; no operation is credited`;
+    }
+    const dispatched = host.nativeCalls.length + host.dispatches.length;
+    const expectsOperations =
+        (testCase.criterion?.minVerifiedCalls ?? 0) > 0 ||
+        testCase.expectedDocs.kind !== "none";
+    return dispatched > 0 || expectsOperations
+        ? "docs journal is absent; no operation is credited"
+        : null;
+}
+
 /** Capture integrity problems for a docs trial. */
 function docsIntegrity(
+    testCase: DocsCase,
     meta: TrialMeta,
     verification: JournalVerification,
+    host: ReturnType<typeof hostDispatchesFromTrail>,
 ): string[] {
     const integrity: string[] = [];
     if (meta.captureValid !== true)
         integrity.push(...(meta.captureProblems ?? []));
     if (meta.exit !== 0)
         integrity.push(`container exited ${String(meta.exit)}`);
-    if (verification.state !== "verified") {
-        integrity.push(
-            `docs journal is ${verification.state}; no operation is credited`,
-        );
-    }
+    const absence = journalAbsenceProblem(testCase, verification, host);
+    if (absence !== null) integrity.push(absence);
     if (verification.rejected.length > 0) {
         integrity.push(
             `${verification.rejected.length} journal line(s) were rejected: ${verification.rejected
@@ -274,6 +331,38 @@ function docsIntegrity(
         );
     }
     return integrity;
+}
+
+/** Why a declared primary check stops assessment before the criterion. */
+function primarySeparation(
+    testCase: DocsCase,
+    record: PrimaryCheckRecord | null,
+): { validity: "invalid" | "unknown"; reasons: string[] } | null {
+    if (testCase.primaryCheck === undefined || record === null) {
+        return testCase.primaryCheck === undefined
+            ? null
+            : {
+                  validity: "invalid",
+                  reasons: [
+                      `primary check ${testCase.primaryCheck.id} has no recorded result`,
+                  ],
+              };
+    }
+    return record.status === "timeout" || record.status === "error"
+        ? {
+              validity: "unknown",
+              reasons: [
+                  `primary check ${record.id} ${record.status}: ${record.reason ?? record.stderr.trim()}`,
+              ],
+          }
+        : null;
+}
+
+/** A failed primary check adds one non-compensable criterion reason. */
+function primaryFailure(record: PrimaryCheckRecord | null): string[] {
+    return record !== null && record.status === "fail"
+        ? [`primary check ${record.id} failed (exit ${String(record.exit)})`]
+        : [];
 }
 
 /** Apply the docs criterion to credited evidence and the final workspace. */
@@ -354,6 +443,15 @@ export function assessDocsTrial(options: {
 }): DocsAssessment {
     const { testCase, trialDir } = options;
     const meta = readMeta(join(trialDir, "meta.json"));
+    const primaryRecord = readPrimaryCheck(trialDir);
+    const primary =
+        primaryRecord === null
+            ? null
+            : {
+                  id: primaryRecord.id,
+                  status: primaryRecord.status,
+                  exit: primaryRecord.exit,
+              };
     const base = {
         schemaVersion: 1 as const,
         kind: "docs-recording" as const,
@@ -385,6 +483,7 @@ export function assessDocsTrial(options: {
                 problems: ["trial evidence is missing"],
             },
             target: null,
+            primary,
             reasons: ["trial evidence is missing"],
             usage: null,
             answered: false,
@@ -414,7 +513,7 @@ export function assessDocsTrial(options: {
             (record) => docsVerbOf(record.input) === "search",
         ).length,
     };
-    const integrity = docsIntegrity(meta, verification);
+    const integrity = docsIntegrity(testCase, meta, verification, host);
     if (integrity.length > 0) {
         return {
             ...base,
@@ -423,7 +522,24 @@ export function assessDocsTrial(options: {
             counts,
             journal: journalSummary(verification),
             target: null,
+            primary,
             reasons: integrity,
+            usage: readUsage(join(trialDir, "usage.json")),
+            answered: trail.text.trim() !== "",
+            assessedAt: options.assessedAt,
+        };
+    }
+    const separation = primarySeparation(testCase, primaryRecord);
+    if (separation !== null) {
+        return {
+            ...base,
+            validity: separation.validity,
+            outcome: "unknown",
+            counts,
+            journal: journalSummary(verification),
+            target: null,
+            primary,
+            reasons: separation.reasons,
             usage: readUsage(join(trialDir, "usage.json")),
             answered: trail.text.trim() !== "",
             assessedAt: options.assessedAt,
@@ -436,6 +552,7 @@ export function assessDocsTrial(options: {
         options.workspace,
         options.prepared,
     );
+    reasons.push(...primaryFailure(primaryRecord));
     const outcome: DocsOutcome = reasons.length === 0 ? "pass" : "fail";
     return {
         ...base,
@@ -444,6 +561,7 @@ export function assessDocsTrial(options: {
         counts,
         journal: journalSummary(verification),
         target: testCase.expectedDocs.target ?? null,
+        primary,
         reasons,
         usage: readUsage(join(trialDir, "usage.json")),
         answered: trail.text.trim() !== "",
@@ -473,6 +591,37 @@ export function journalSummary(
         state: verification.state,
         credited: verification.credited.length,
         rejected: verification.rejected.length,
+        problems: verification.problems,
+    };
+}
+
+/**
+ * The judge-visible docs operations for one trial: credited journal records
+ * only. An unattributable journal yields no lines and an explicit problem.
+ * @param trialDir The trial evidence directory.
+ * @returns The rendered operations and the verification state.
+ */
+export function creditedOperationLines(trialDir: string): {
+    state: JournalVerification["state"];
+    lines: string[];
+    problems: string[];
+} {
+    if (!existsSync(join(trialDir, "journal", "docs-operations.jsonl"))) {
+        return { state: "absent", lines: [], problems: [] };
+    }
+    const events = existsSync(join(trialDir, "events.jsonl"))
+        ? readFileSync(join(trialDir, "events.jsonl"), "utf8")
+        : "";
+    const tools = existsSync(join(trialDir, "tools.jsonl"))
+        ? readFileSync(join(trialDir, "tools.jsonl"), "utf8")
+        : "";
+    const verification = verificationOf(trialDir, events, tools);
+    const lines = verification.credited.map((entry) =>
+        operationLine(entry.record),
+    );
+    return {
+        state: verification.state,
+        lines,
         problems: verification.problems,
     };
 }

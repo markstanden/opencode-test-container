@@ -66,6 +66,18 @@ export interface SkillTriggerCase extends CaseBase {
     allowMissingTarget?: boolean;
 }
 
+/** A product-supplied, immutable primary check for one docs case. */
+export interface PrimaryCheckSpec {
+    /** Stable checker identity recorded with every result. */
+    id: string;
+    /** Source directory, resolved relative to the suite document. */
+    directory: string;
+    /** Script inside that directory; the fixed interpreter is `node`. */
+    script: string;
+    /** Wall-clock bound; defaults to 30000. */
+    timeoutMs?: number;
+}
+
 /** A case that expects a docs write, or a deliberate refused write. */
 export interface DocsTaskCase extends CaseBase {
     /** The kind value. */
@@ -78,6 +90,28 @@ export interface DocsTaskCase extends CaseBase {
     guardrails?: DocsGuardrails;
     /** Workspace-relative lake root; defaults to `docs`. */
     lakeRoot?: string;
+    /** Arm-blind facts the judge may use; never mounted in the trial. */
+    truth?: string;
+    /** The product's independent primary check, executed after the trial. */
+    primaryCheck?: PrimaryCheckSpec;
+}
+
+/** One declared judge-recovery registration, validated by the analysis policy. */
+export interface RecoveryDeclaration {
+    /** The schema version value. */
+    version: number;
+    /** The eligible failure classes. */
+    eligibleFailureClasses: string[];
+    /** Whether completion evidence is mandatory. */
+    requiresCompletionEvidence: boolean;
+    /** Recoveries per failed slot. */
+    maxRecoveriesPerSlot: number;
+    /** Campaign-wide recovery attempts. */
+    recoveryCeiling: number;
+    /** Total judge attempts, initial assessments plus recoveries. */
+    totalJudgeAttempts: number;
+    /** Requests per attempt the adapter exposes, or null when unavailable. */
+    providerRequestLimit: number | null;
 }
 
 /** One reusable, discriminated case definition. */
@@ -194,7 +228,9 @@ export interface AssessmentSpec {
     /** The kind value. */
     kind: AssessmentKind;
     /** A model judge is optional and never implied by a deterministic suite. */
-    judge?: { model: string };
+    judge?: { model: string; timeoutMs?: number };
+    /** An explicit recovery registration; absent means no retry. */
+    recovery?: RecoveryDeclaration;
 }
 
 /** A versioned campaign document. */

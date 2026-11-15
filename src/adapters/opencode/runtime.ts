@@ -115,6 +115,40 @@ export function writeConfigHome(
 }
 
 /**
+ * Write the judge's neutral config home: no skills, no plugins, only the
+ * judge model route. The judge never sees an arm's staged subjects.
+ * @param directory The attempt directory.
+ * @param campaign The frozen campaign.
+ * @param model The judge model route.
+ * @returns The config-home path.
+ */
+export function writeJudgeConfigHome(
+    directory: string,
+    campaign: Campaign,
+    model: string,
+): string {
+    const configHome = join(directory, "config-home");
+    const opencode = join(configHome, "opencode");
+    mkdirSync(opencode, { recursive: true });
+    writeFileSync(
+        join(opencode, "opencode.json"),
+        `${JSON.stringify(
+            {
+                $schema: "https://opencode.ai/config.json",
+                model,
+                ...(campaign.permissions === undefined
+                    ? {}
+                    : { permissions: campaign.permissions }),
+            },
+            null,
+            2,
+        )}\n`,
+        "utf8",
+    );
+    return configHome;
+}
+
+/**
  * Environment for one headless session. Ambient OpenCode session identity is
  * removed; credentials and routing arrive only through declared names.
  * @param base The host environment.

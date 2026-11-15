@@ -12,6 +12,7 @@ import type {
     InstructionSubject,
     PluginSubject,
     ProviderRoute,
+    RecoveryDeclaration,
     RuntimeSpec,
     SkillSubject,
     SkillTriggerCase,
@@ -379,6 +380,78 @@ function guardrailsOf(
     };
 }
 
+/** The required path fields of a primary-check declaration. */
+function primaryIdentity(
+    value: Record<string, unknown>,
+    where: string,
+    problems: string[],
+): { id: string; directory: string; script: string } | null {
+    const id = requiredId(value, "id", `${where}.primaryCheck`, problems);
+    const directory = isSourcePath(value.directory);
+    if (!directory) {
+        problems.push(
+            `${where}.primaryCheck.directory must be a non-blank path without NUL`,
+        );
+    }
+    const script = isSafeRelativePath(value.script);
+    if (!script) {
+        problems.push(
+            `${where}.primaryCheck.script must be a safe relative path`,
+        );
+    }
+    if (id === undefined || !directory || !script) return null;
+    return {
+        id,
+        directory: value.directory as string,
+        script: value.script as string,
+    };
+}
+
+/** An optional positive-integer timeout, or undefined when invalid. */
+function positiveTimeout(
+    value: unknown,
+    where: string,
+    problems: string[],
+): number | undefined {
+    if (value === undefined) return undefined;
+    const ok =
+        typeof value === "number" && Number.isInteger(value) && value > 0;
+    if (!ok) {
+        problems.push(`${where} must be a positive integer`);
+        return undefined;
+    }
+    return value;
+}
+
+/** Validate one product-supplied primary-check declaration. */
+function primaryCheckOf(
+    value: unknown,
+    where: string,
+    problems: string[],
+): DocsTaskCase["primaryCheck"] {
+    if (value === undefined) return undefined;
+    if (!isRecord(value)) {
+        problems.push(`${where}.primaryCheck must be an object`);
+        return undefined;
+    }
+    const identity = primaryIdentity(value, where, problems);
+    const timeoutMs = positiveTimeout(
+        value.timeoutMs,
+        `${where}.primaryCheck.timeoutMs`,
+        problems,
+    );
+    if (
+        identity === null ||
+        (value.timeoutMs !== undefined && timeoutMs === undefined)
+    ) {
+        return undefined;
+    }
+    return {
+        ...identity,
+        ...(timeoutMs === undefined ? {} : { timeoutMs }),
+    };
+}
+
 /** Validate one docs-task case without exposing its truth to a trial. */
 function docsCase(
     record: Record<string, unknown>,
@@ -389,7 +462,12 @@ function docsCase(
     const expectedDocs = expectedDocsOf(record.expectedDocs, where, problems);
     const criterion = criterionOf(record.criterion, where, problems);
     const guardrails = guardrailsOf(record.guardrails, where, problems);
+    const primaryCheck = primaryCheckOf(record.primaryCheck, where, problems);
     if (base === null || expectedDocs === undefined) return null;
+    if (record.truth !== undefined && !isText(record.truth)) {
+        problems.push(`${where}.truth must be a non-blank string`);
+        return null;
+    }
     return {
         ...base,
         kind: "docs-task",
@@ -399,6 +477,8 @@ function docsCase(
         ...(typeof record.lakeRoot === "string"
             ? { lakeRoot: record.lakeRoot }
             : {}),
+        ...(typeof record.truth === "string" ? { truth: record.truth } : {}),
+        ...(primaryCheck === undefined ? {} : { primaryCheck }),
     };
 }
 
@@ -917,6 +997,156 @@ function budgetsOf(
     return { trials, judgeAttempts };
 }
 
+/** One non-negative integer field, or undefined when invalid. */
+function nonNegativeCount(
+    value: unknown,
+    where: string,
+    problems: string[],
+): number | undefined {
+    if (typeof value === "number" && Number.isInteger(value) && value >= 0) {
+        return value;
+    }
+    problems.push(`${where} must be a non-negative integer`);
+    return undefined;
+}
+
+/** The string-list field of a recovery registration. */
+function recoveryClasses(value: unknown, problems: string[]): string[] | null {
+    if (!Array.isArray(value) || !value.every(isText)) {
+        problems.push(
+            "campaign.assessment.recovery.eligibleFailureClasses must be strings",
+        );
+        return null;
+    }
+    return value.filter(isText);
+}
+
+/** Whether a provider-request limit is null or a positive integer. */
+function validRequestLimit(value: unknown): boolean {
+    return (
+        value === null || (typeof value === "number" && Number.isInteger(value))
+    );
+}
+
+/** Validate the optional recovery registration's shape. */
+/** The four numeric fields of a recovery registration. */
+function recoveryCounts(
+    value: Record<string, unknown>,
+    problems: string[],
+): {
+    version: number;
+    maxRecoveriesPerSlot: number;
+    recoveryCeiling: number;
+    totalJudgeAttempts: number;
+} | null {
+    const version = nonNegativeCount(
+        value.version,
+        "campaign.assessment.recovery.version",
+        problems,
+    );
+    const maxRecoveriesPerSlot = nonNegativeCount(
+        value.maxRecoveriesPerSlot,
+        "campaign.assessment.recovery.maxRecoveriesPerSlot",
+        problems,
+    );
+    const recoveryCeiling = nonNegativeCount(
+        value.recoveryCeiling,
+        "campaign.assessment.recovery.recoveryCeiling",
+        problems,
+    );
+    const totalJudgeAttempts = nonNegativeCount(
+        value.totalJudgeAttempts,
+        "campaign.assessment.recovery.totalJudgeAttempts",
+        problems,
+    );
+    return version === undefined ||
+        maxRecoveriesPerSlot === undefined ||
+        recoveryCeiling === undefined ||
+        totalJudgeAttempts === undefined
+        ? null
+        : {
+              version,
+              maxRecoveriesPerSlot,
+              recoveryCeiling,
+              totalJudgeAttempts,
+          };
+}
+
+/** Validate the optional recovery registration's shape. */
+function recoveryOf(
+    value: unknown,
+    problems: string[],
+): RecoveryDeclaration | undefined {
+    if (!isRecord(value)) {
+        problems.push("campaign.assessment.recovery must be an object");
+        return undefined;
+    }
+    const counts = recoveryCounts(value, problems);
+    if (counts === null) return undefined;
+    const classes = recoveryClasses(value.eligibleFailureClasses, problems);
+    if (classes === null) return undefined;
+    if (typeof value.requiresCompletionEvidence !== "boolean") {
+        problems.push(
+            "campaign.assessment.recovery.requiresCompletionEvidence must be a boolean",
+        );
+        return undefined;
+    }
+    const limit = value.providerRequestLimit;
+    if (!validRequestLimit(limit)) {
+        problems.push(
+            "campaign.assessment.recovery.providerRequestLimit must be an integer or null",
+        );
+        return undefined;
+    }
+    return {
+        ...counts,
+        eligibleFailureClasses: classes,
+        requiresCompletionEvidence: value.requiresCompletionEvidence,
+        providerRequestLimit: limit as number | null,
+    };
+}
+
+/** The one accepted assessment kind, or undefined with a problem. */
+function assessmentKind(
+    value: unknown,
+    problems: string[],
+): AssessmentKind | undefined {
+    if (value === "skill-activation" || value === "docs-recording") {
+        return value;
+    }
+    problems.push(
+        'campaign.assessment.kind must be "skill-activation" or "docs-recording"',
+    );
+    return undefined;
+}
+
+/** The optional judge block, or undefined with a problem. */
+function judgeOf(
+    value: unknown,
+    problems: string[],
+): NonNullable<Campaign["assessment"]["judge"]> | undefined {
+    if (
+        !isRecord(value) ||
+        !isText(value.model) ||
+        !value.model.includes("/")
+    ) {
+        problems.push("campaign.assessment.judge.model must be provider/model");
+        return undefined;
+    }
+    const timeoutMs = positiveTimeout(
+        value.timeoutMs,
+        "campaign.assessment.judge.timeoutMs",
+        problems,
+    );
+    if (value.timeoutMs !== undefined && timeoutMs === undefined) {
+        return undefined;
+    }
+    return {
+        model: value.model,
+        ...(timeoutMs === undefined ? {} : { timeoutMs }),
+    };
+}
+
 /** Parse the campaign assessment block. */
 function assessmentOf(
     value: unknown,
@@ -926,25 +1156,34 @@ function assessmentOf(
         problems.push("campaign.assessment must be an object");
         return undefined;
     }
-    if (value.kind !== "skill-activation" && value.kind !== "docs-recording") {
+    const kind = assessmentKind(value.kind, problems);
+    if (kind === undefined) return undefined;
+    const composed = assessmentComposition(value, kind, problems);
+    return composed === null ? undefined : { kind, ...composed };
+}
+
+/** The optional judge and recovery blocks, or null after a problem. */
+function assessmentComposition(
+    value: Record<string, unknown>,
+    kind: AssessmentKind,
+    problems: string[],
+): Pick<Campaign["assessment"], "judge" | "recovery"> | null {
+    const recovery =
+        value.recovery === undefined
+            ? undefined
+            : recoveryOf(value.recovery, problems);
+    if (recovery !== undefined && kind !== "docs-recording") {
         problems.push(
-            'campaign.assessment.kind must be "skill-activation" or "docs-recording"',
+            "campaign.assessment.recovery is only supported for docs-recording",
         );
-        return undefined;
+        return null;
     }
-    const assessment: Campaign["assessment"] = {
-        kind: value.kind as AssessmentKind,
-    };
-    if (value.judge === undefined) return assessment;
-    if (
-        !isRecord(value.judge) ||
-        !isText(value.judge.model) ||
-        !value.judge.model.includes("/")
-    ) {
-        problems.push("campaign.assessment.judge.model must be provider/model");
-        return undefined;
+    if (value.judge === undefined) {
+        return recovery === undefined ? {} : { recovery };
     }
-    return { ...assessment, judge: { model: value.judge.model } };
+    const judge = judgeOf(value.judge, problems);
+    if (judge === undefined) return null;
+    return { judge, ...(recovery === undefined ? {} : { recovery }) };
 }
 
 /** Whether every mandatory campaign part parsed without problems. */

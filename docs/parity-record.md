@@ -43,6 +43,24 @@ Evidence: `/home/mark/tmp/docs-desc-fresh-20261110` (48 trials, six arms).
 Result: all three artefacts byte-identical; decision `not-defined`; utility
 24; 6 screening findings.
 
+## Fresh lifecycle rehearsal
+
+`npm run rehearse:fresh-docs` (2026-11-15, real Podman image
+`sha256:58505eac…`, OpenCode 2.2.6, scripted loopback provider) ran four docs
+slots and a separate exhausted-budget root:
+
+| Slot            | Primary | Outcome | Selected attempt | Judge requests |
+| --------------- | ------- | ------- | ---------------- | -------------- |
+| useful-write    | pass    | pass    | attempt-001      | 1              |
+| gate-blocked    | pass    | pass    | attempt-001      | 1              |
+| primary-failure | fail    | fail    | attempt-001      | 1              |
+| recovery        | —       | pass    | attempt-002      | 2              |
+
+The recovery's two attempts recorded the same `packetSha256`; the exhausted
+root refused the second dispatch after one claim and wrote no selection.
+Closure, analysis and post-close refusals held. Scripted chat requests: 6
+trial + 5 judge + 1 exhausted; readiness probes: 0; paid provider calls: 0.
+
 ## Limits
 
 - The two larger corpora are ~56 MB and are not committed; the committed mini

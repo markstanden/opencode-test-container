@@ -7,6 +7,13 @@
  */
 
 export { canonicalJson, sha256Bytes, sha256Of } from "./contracts/canonical.ts";
+export {
+    EVALUATOR_VERSION,
+    PACKAGE_NAME,
+    packageVersion,
+    toolIdentity,
+} from "./contracts/version.ts";
+export type { ToolIdentity } from "./contracts/version.ts";
 export type {
     Arm,
     AssessmentKind,
@@ -15,7 +22,9 @@ export type {
     DocsTaskCase,
     ExpectedDocs,
     LifecycleState,
+    PrimaryCheckSpec,
     ProviderRoute,
+    RecoveryDeclaration,
     RuntimeSpec,
     SkillTriggerCase,
     Slot,
@@ -63,6 +72,25 @@ export {
     trialDirectory,
 } from "./campaign/run.ts";
 export type { RunSummary, TrialMeta } from "./campaign/run.ts";
+export {
+    judgeCampaign,
+    readJudgeAttempts,
+    readSelectedJudgement,
+    readSelection,
+    selectionPath,
+} from "./campaign/judge.ts";
+export type {
+    JudgeAttemptMeta,
+    JudgeSummary,
+    SelectedJudgement,
+    StoredJudgement,
+} from "./campaign/judge.ts";
+export {
+    executePrimaryCheck,
+    primaryCheckPlan,
+    readPrimaryCheck,
+} from "./campaign/primary.ts";
+export type { PrimaryCheckRecord } from "./campaign/primary.ts";
 export {
     assessCampaign,
     assessmentPath,

@@ -10,6 +10,7 @@ import {
     preparedDifferences,
     type PreparedManifest,
 } from "./prepare.ts";
+import type { ToolIdentity } from "../contracts/version.ts";
 
 /** The immutable freeze receipt. */
 export interface FrozenRecord {
@@ -37,6 +38,10 @@ export interface FrozenRecord {
     workspacesSha256: string;
     /** The prompts sha256 value. */
     promptsSha256: string;
+    /** The staged primary-check payload sha256 value. */
+    primaryChecksSha256: string;
+    /** The artefact that froze this campaign. */
+    tool: ToolIdentity;
     /** The image value. */
     image: string;
     /** The image id value. */
@@ -79,6 +84,7 @@ const FROZEN_TEXT_FIELDS = [
     "subjectsSha256",
     "workspacesSha256",
     "promptsSha256",
+    "primaryChecksSha256",
     "image",
     "imageId",
     "opencodeVersion",
@@ -99,6 +105,16 @@ function frozenShapeProblems(
         typeof record.provider.model !== "string"
     ) {
         problems.push(`${path}.provider must name route and model`);
+    }
+    if (
+        !isRecord(record.tool) ||
+        typeof record.tool.name !== "string" ||
+        typeof record.tool.version !== "string" ||
+        typeof record.tool.evaluatorVersion !== "number"
+    ) {
+        problems.push(
+            `${path}.tool must name name, version and evaluatorVersion`,
+        );
     }
     if (record.schemaVersion !== 1 || record.kind !== "otc-freeze") {
         problems.push(`${path} is not a schemaVersion 1 otc-freeze record`);
@@ -151,6 +167,8 @@ export function identityOf(record: FrozenRecord): FreezeIdentity {
         subjectsSha256: record.subjectsSha256,
         workspacesSha256: record.workspacesSha256,
         promptsSha256: record.promptsSha256,
+        primaryChecksSha256: record.primaryChecksSha256,
+        tool: record.tool,
         image: record.image,
         imageId: record.imageId,
         opencodeVersion: record.opencodeVersion,
@@ -175,6 +193,8 @@ export function freezeDifferences(
         subjectsSha256: manifest.subjectsSha256,
         workspacesSha256: manifest.workspacesSha256,
         promptsSha256: manifest.promptsSha256,
+        primaryChecksSha256: manifest.primaryChecksSha256,
+        tool: manifest.tool,
         image: manifest.campaign.runtime.image,
         imageId: manifest.campaign.runtime.imageId ?? frozen.imageId,
         opencodeVersion: manifest.campaign.runtime.opencodeVersion,
@@ -273,6 +293,8 @@ export async function freezeCampaign(
         subjectsSha256: manifest.subjectsSha256,
         workspacesSha256: manifest.workspacesSha256,
         promptsSha256: manifest.promptsSha256,
+        primaryChecksSha256: manifest.primaryChecksSha256,
+        tool: manifest.tool,
         image: manifest.campaign.runtime.image,
         imageId: image.imageId,
         opencodeVersion: image.opencodeVersion,

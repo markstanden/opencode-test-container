@@ -36,6 +36,7 @@ import {
 import type { CommandResult } from "../adapters/process.ts";
 import { deliveryCheck, loadFrozen, type FrozenRecord } from "./freeze.ts";
 import { stageTree } from "./inventory.ts";
+import { executePrimaryCheck } from "./primary.ts";
 import {
     appendLedgerEvent,
     readLedger,
@@ -450,9 +451,16 @@ function writeTrialEvidence(
     result: CommandResult,
     trail: DecodedTrail,
     meta: TrialMeta,
+    answerInWorkspace: boolean,
 ): void {
     writeFileSync(join(trialDir, "events.jsonl"), result.stdout, "utf8");
     writeFileSync(join(trialDir, "answer.md"), trail.text, "utf8");
+    if (answerInWorkspace) {
+        const answerPath = join(trialDir, "workspace", "answer.md");
+        if (!existsSync(answerPath)) {
+            writeFileSync(answerPath, trail.text, "utf8");
+        }
+    }
     writeFileSync(
         join(trialDir, "tools.jsonl"),
         trail.calls.length === 0
@@ -481,11 +489,12 @@ async function executeSlot(options: {
     manifest: PreparedManifest;
     frozen: FrozenRecord;
     slot: Slot;
+    testCase: SuiteCase;
     planned: { plan: ContainerPlan; argv: string[]; configSha256: string };
     trialDir: string;
     execute: (plan: ContainerPlan) => Promise<CommandResult>;
     now: () => string;
-}): Promise<TrialMeta> {
+}): Promise<{ meta: TrialMeta; primaryProblems: string[] }> {
     const { root, manifest, frozen, slot, planned, trialDir, execute, now } =
         options;
     const startedAt = now();
@@ -556,7 +565,13 @@ async function executeSlot(options: {
         imageId: frozen.imageId,
         completedAt,
     };
-    writeTrialEvidence(trialDir, result, trail, meta);
+    writeTrialEvidence(
+        trialDir,
+        result,
+        trail,
+        meta,
+        options.testCase.kind === "docs-task",
+    );
     appendLedgerEvent(
         root,
         {
@@ -569,7 +584,45 @@ async function executeSlot(options: {
         },
         completedAt,
     );
-    return meta;
+    const preparedCase = manifest.cases.find(
+        (entry) => entry.caseId === slot.caseId,
+    );
+    if (
+        options.testCase.kind !== "docs-task" ||
+        options.testCase.primaryCheck === undefined ||
+        preparedCase === undefined
+    ) {
+        return { meta, primaryProblems: [] };
+    }
+    const checked = await executePrimaryCheck({
+        root,
+        testCase: options.testCase,
+        prepared: preparedCase,
+        trialDir,
+        workspace: join(trialDir, "workspace"),
+        imageId: frozen.imageId,
+        run: (plan) => execute(plan),
+        now,
+    });
+    if (checked.record !== null) {
+        appendLedgerEvent(
+            root,
+            {
+                event: "primary-check",
+                campaignId: manifest.campaignId,
+                slotId: slot.slotId,
+                checkerId: checked.record.id,
+                status: checked.record.status,
+                exit: checked.record.exit,
+                sourceHash: checked.record.sourceHash,
+            },
+            now(),
+        );
+    }
+    return {
+        meta,
+        primaryProblems: checked.problem === null ? [] : [checked.problem],
+    };
 }
 
 /** Resolve the selected slots, refusing an unknown selector. */
@@ -712,6 +765,7 @@ async function dispatchSlot(options: {
         manifest,
         frozen,
         slot,
+        testCase,
         planned,
         trialDir,
         execute,
@@ -720,8 +774,11 @@ async function dispatchSlot(options: {
     return {
         ran: true,
         refused: false,
-        problems: metaProblems(slot.slotId, meta),
-        stop: shouldStop(manifest, meta),
+        problems: [
+            ...metaProblems(slot.slotId, meta.meta),
+            ...meta.primaryProblems,
+        ],
+        stop: shouldStop(manifest, meta.meta),
     };
 }
 

@@ -47,10 +47,14 @@ describe("installed-shape CLI", () => {
     });
 
     it("prints help from an unrelated directory", () => {
+        // Act
         const result = otc(["--help"], work);
+
+        // Assert
         assert.equal(result.status, 0);
         assert.match(result.stdout, /otc — an isolated test sandbox/);
         assert.match(result.stdout, /delivery-check/);
+        assert.match(result.stdout, /judge/);
     });
 
     it("prints a version", () => {
@@ -116,7 +120,7 @@ describe("installed-shape CLI", () => {
 
 describe("packaged consumer", () => {
     it("installs the tarball and runs the binary with no repository paths", () => {
-        const consumer = mkdtempSync(join(tmpdir(), "otc-consumer-"));
+        const consumer = mkdtempSync(join(tmpdir(), "otc consumer-"));
         try {
             writeFileSync(
                 join(consumer, "package.json"),
@@ -162,7 +166,7 @@ describe("packaged consumer", () => {
             );
             assert.equal(validate.status, 0, validate.stderr);
             assert.match(validate.stdout, /skill-basic/);
-            const root = join(consumer, "installed-root");
+            const root = join(consumer, "installed root");
             const prepared = spawnSync(
                 binary,
                 [

@@ -4,18 +4,19 @@
  * command validates at its boundary, prints actionable problems, and exits
  * 0 (ok), 1 (operational failure) or 2 (usage/validation refusal).
  */
-import { readFileSync, realpathSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { prepareCampaign, prepareSummary } from "../campaign/prepare.ts";
 import { deliveryCheck, freezeCampaign } from "../campaign/freeze.ts";
 import { runCampaign } from "../campaign/run.ts";
+import { judgeCampaign } from "../campaign/judge.ts";
 import { assessCampaign } from "../campaign/assess.ts";
 import { closeCampaign } from "../campaign/close.ts";
 import { statusOf } from "../campaign/status.ts";
 import { analyseCampaign } from "../reporting/report.ts";
 import { runAnalysis } from "../evaluators/docs/analysis/replay.ts";
 import { loadCampaignBundle } from "../contracts/validate.ts";
+import { packageVersion } from "../contracts/version.ts";
 
 /** The commands `otc` exposes. */
 export const COMMANDS = [
@@ -24,6 +25,7 @@ export const COMMANDS = [
     "delivery-check",
     "freeze",
     "run",
+    "judge",
     "assess",
     "close",
     "analyse",
@@ -77,6 +79,7 @@ Commands:
   delivery-check  Recheck staged payloads and the freeze receipt
   freeze          Resolve the image ID and freeze all input identities
   run             Execute scheduled slots through Podman and OpenCode
+  judge           Blindly judge completed docs trials from checked evidence
   assess          Deterministically assess captured evidence
   close           Append closure to the ledger (idempotent)
   analyse         Render final analysis after closure
@@ -105,6 +108,7 @@ Examples:
   otc freeze --root /tmp/otc-run
   otc run --root /tmp/otc-run --dry-run
   otc run --root /tmp/otc-run
+  otc judge --root /tmp/otc-run
   otc assess --root /tmp/otc-run
   otc close --root /tmp/otc-run
   otc analyse --root /tmp/otc-run --out /tmp/otc-report
@@ -245,30 +249,6 @@ function fail(problems: string[], code = 2): number {
     return code;
 }
 
-/** Read the package version from the built package metadata. */
-async function version(): Promise<string> {
-    const here = dirname(fileURLToPath(import.meta.url));
-    for (const candidate of [
-        join(here, "..", "..", "package.json"),
-        join(here, "..", "package.json"),
-    ]) {
-        try {
-            const parsed: unknown = JSON.parse(readFileSync(candidate, "utf8"));
-            if (
-                typeof parsed === "object" &&
-                parsed !== null &&
-                "version" in parsed &&
-                typeof parsed.version === "string"
-            ) {
-                return parsed.version;
-            }
-        } catch {
-            // try the next candidate
-        }
-    }
-    return "unknown";
-}
-
 /**
  * Run one command and return its exit code.
  * @param argv Arguments after the executable.
@@ -291,7 +271,7 @@ export async function main(argv: readonly string[]): Promise<number> {
         return 0;
     }
     if (options.command === "version") {
-        console.log(await version());
+        console.log(packageVersion());
         return 0;
     }
     if (options.command === "analyse" && options.out === null) {
@@ -366,6 +346,30 @@ async function run(options: CliOptions): Promise<number> {
     } else {
         for (const slotId of summary.ran) {
             console.log(`${options.dryRun ? "planned" : "ran"} ${slotId}`);
+        }
+        for (const problem of summary.problems) {
+            console.error(`otc: ${problem}`);
+        }
+    }
+    return summary.ok ? 0 : 1;
+}
+
+/** Blindly judge selected docs slots from checked evidence. */
+async function judge(options: CliOptions): Promise<number> {
+    const summary = await judgeCampaign(requireRoot(options), {
+        ...(options.slots.length === 0 ? {} : { slotIds: options.slots }),
+        dryRun: options.dryRun,
+    });
+    if (options.json) {
+        console.log(JSON.stringify(summary, null, 2));
+    } else {
+        for (const slotId of summary.judged) {
+            console.log(
+                `${options.dryRun ? "would judge" : "judged"} ${slotId}`,
+            );
+        }
+        for (const slotId of summary.skipped) {
+            console.log(`already judged ${slotId}`);
         }
         for (const problem of summary.problems) {
             console.error(`otc: ${problem}`);
@@ -467,6 +471,7 @@ const HANDLERS: Partial<
     "delivery-check": checkDelivery,
     freeze,
     run,
+    judge,
     assess,
     close,
     analyse,

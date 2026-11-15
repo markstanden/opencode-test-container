@@ -27,6 +27,7 @@ import {
 import { realpathSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import { inventory, stageTree, type Inventory } from "./inventory.ts";
+import { toolIdentity, type ToolIdentity } from "../contracts/version.ts";
 
 /** Resolve a declared local subject source. */
 function sourcePath(
@@ -69,6 +70,15 @@ export interface PreparedCase {
     promptSha256: string;
     /** The workspace value. */
     workspace: Inventory;
+    /** The staged product primary check, when the case declares one. */
+    primaryCheck?: {
+        id: string;
+        /** Root-relative staged directory. */
+        directory: string;
+        script: string;
+        timeoutMs: number;
+        inventory: Inventory;
+    };
 }
 
 /** The immutable record of everything preparation staged. */
@@ -93,6 +103,10 @@ export interface PreparedManifest {
     workspacesSha256: string;
     /** The prompts sha256 value. */
     promptsSha256: string;
+    /** The product primary-check payloads sha256; empty object when none. */
+    primaryChecksSha256: string;
+    /** The artefact that prepared this manifest. */
+    tool: ToolIdentity;
     /** The suite value. */
     suite: Suite;
     /** The campaign value. */
@@ -323,6 +337,7 @@ function stageArm(
     problems: string[],
 ): StagedArm | null {
     const destination = join(root, "prepare", "subjects", arm.armId);
+    mkdirSync(destination, { recursive: true });
     const reserved = new Set<string>();
     const staged: StagedArm = {
         armId: arm.armId,
@@ -370,7 +385,63 @@ function stageArm(
     return staged;
 }
 
-/** Stage one case's prompt and pristine workspace. */
+/** Stage one case's product primary checker, never into the trial payload. */
+function stagePrimaryCheck(
+    testCase: SuiteCase,
+    suiteDir: string,
+    root: string,
+    problems: string[],
+): PreparedCase["primaryCheck"] | undefined {
+    if (testCase.kind !== "docs-task" || testCase.primaryCheck === undefined) {
+        return undefined;
+    }
+    const spec = testCase.primaryCheck;
+    const checked = sourcePath(suiteDir, spec.directory);
+    if (!checked.ok) {
+        problems.push(
+            `case ${testCase.caseId} primary check: ${checked.problem}`,
+        );
+        return undefined;
+    }
+    if (!lstatSync(checked.path).isDirectory()) {
+        problems.push(
+            `case ${testCase.caseId} primary check: directory is not a directory`,
+        );
+        return undefined;
+    }
+    const relativePath = `primary-checks/${testCase.caseId}`;
+    const target = join(root, "prepare", relativePath);
+    const staged = stageTree(checked.path, target);
+    if (!staged.ok) {
+        problems.push(
+            `case ${testCase.caseId} primary check: ${staged.problem}`,
+        );
+        return undefined;
+    }
+    const script = join(target, spec.script);
+    if (!existsSync(script) || !lstatSync(script).isFile()) {
+        problems.push(
+            `case ${testCase.caseId} primary check: ${spec.script} is not a file`,
+        );
+        return undefined;
+    }
+    const stagedInventory = inventory(target);
+    if (!stagedInventory.ok) {
+        problems.push(
+            `case ${testCase.caseId} primary check: ${stagedInventory.problem}`,
+        );
+        return undefined;
+    }
+    return {
+        id: spec.id,
+        directory: relativePath,
+        script: spec.script,
+        timeoutMs: spec.timeoutMs ?? 30_000,
+        inventory: stagedInventory.entries,
+    };
+}
+
+/** Stage one case's prompt, pristine workspace and optional checker. */
 function stageCase(
     testCase: SuiteCase,
     suiteDir: string,
@@ -405,6 +476,7 @@ function stageCase(
     for (const [path, contents] of Object.entries(testCase.files ?? {})) {
         write(join(workspace, path), contents);
     }
+    const primaryCheck = stagePrimaryCheck(testCase, suiteDir, root, problems);
     const stagedWorkspace = inventory(workspace);
     if (!stagedWorkspace.ok) {
         problems.push(`case ${testCase.caseId}: ${stagedWorkspace.problem}`);
@@ -418,6 +490,7 @@ function stageCase(
             ),
         ),
         workspace: stagedWorkspace.entries,
+        ...(primaryCheck === undefined ? {} : { primaryCheck }),
     };
 }
 
@@ -482,6 +555,11 @@ export function prepareCampaign(
             cases.map((testCase) => [testCase.caseId, testCase.promptSha256]),
         ),
     );
+    const primaryCheckEntries = cases.flatMap((testCase) =>
+        testCase.primaryCheck === undefined
+            ? []
+            : [[testCase.caseId, testCase.primaryCheck.inventory] as const],
+    );
     const manifest: PreparedManifest = {
         schemaVersion: 1,
         campaignId: bundle.campaign.campaignId,
@@ -493,6 +571,8 @@ export function prepareCampaign(
         subjectsSha256,
         workspacesSha256,
         promptsSha256,
+        primaryChecksSha256: sha256Of(Object.fromEntries(primaryCheckEntries)),
+        tool: toolIdentity(),
         suite: bundle.suite,
         campaign,
         subjects,
@@ -571,21 +651,32 @@ export function preparedDifferences(
         )) {
             problems.push(`workspaces/${testCase.caseId}: ${difference}`);
         }
-        const prompt = join(
-            root,
-            "prepare",
-            "prompts",
-            `${testCase.caseId}.txt`,
-        );
-        if (!existsSync(prompt)) {
-            problems.push(`missing prompts/${testCase.caseId}.txt`);
-        } else if (
-            sha256Bytes(readFileSync(prompt)) !== testCase.promptSha256
-        ) {
-            problems.push(`changed prompts/${testCase.caseId}.txt`);
-        }
+        const promptProblem = promptDifference(root, testCase);
+        if (promptProblem !== null) problems.push(promptProblem);
+        problems.push(...primaryCheckDifferences(root, testCase));
     }
     return problems;
+}
+
+/** The prompt identity difference for one case, or null when intact. */
+function promptDifference(root: string, testCase: PreparedCase): string | null {
+    const prompt = join(root, "prepare", "prompts", `${testCase.caseId}.txt`);
+    if (!existsSync(prompt)) return `missing prompts/${testCase.caseId}.txt`;
+    return sha256Bytes(readFileSync(prompt)) !== testCase.promptSha256
+        ? `changed prompts/${testCase.caseId}.txt`
+        : null;
+}
+
+/** The staged primary-check differences for one case. */
+function primaryCheckDifferences(
+    root: string,
+    testCase: PreparedCase,
+): string[] {
+    if (testCase.primaryCheck === undefined) return [];
+    const checker = join(root, "prepare", testCase.primaryCheck.directory);
+    return inventoryDifferencesOf(checker, testCase.primaryCheck.inventory).map(
+        (difference) => `primary-checks/${testCase.caseId}: ${difference}`,
+    );
 }
 
 /** Inventory differences with a missing-directory distinction. */

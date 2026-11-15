@@ -3,11 +3,12 @@
 An isolated test sandbox for OpenCode plugins, skills and agent instructions.
 
 `otc` prepares an immutable campaign, freezes every input identity, runs each
-scheduled slot in a Podman sandbox through the real OpenCode CLI, assesses the
-captured evidence deterministically, closes the ledger and renders a report.
-It makes no model call of its own: a campaign either uses a scripted loopback
-provider (offline) or the host provider route the runtime declares (potentially
-paid).
+scheduled slot in a Podman sandbox through the real OpenCode CLI, executes the
+product's primary check, assesses the captured evidence deterministically,
+optionally dispatches an arm-blind judge, closes the ledger and renders a
+report. The judge is the only model call OTC makes; a campaign either uses a
+scripted loopback provider (offline) or the host provider route the runtime
+declares (potentially paid).
 
 ```sh
 npm install --global @markstanden/opencode-test-container
@@ -41,6 +42,7 @@ otc prepare  --campaign examples/skills/campaign.json --root /tmp/otc-run
 otc freeze   --root /tmp/otc-run
 otc run      --root /tmp/otc-run --dry-run   # inspect the plan, no dispatch
 otc run      --root /tmp/otc-run             # real Podman + OpenCode
+otc judge    --root /tmp/otc-run             # optional blind judge, if declared
 otc assess   --root /tmp/otc-run             # deterministic, zero judge calls
 otc close    --root /tmp/otc-run
 otc analyse  --root /tmp/otc-run --out /tmp/otc-report
@@ -81,8 +83,12 @@ evaluator; cases are discriminated.
 ```
 
 Docs cases use `kind: "docs-task"`, `expectedDocs`, an optional `criterion`
-and deterministic `guardrails`. They are assessed from the plugin's signed
-operation journal, never from a transcript claim.
+and deterministic `guardrails`. An optional `primaryCheck` names a
+product-supplied checker directory and script; it is staged read-only and run
+in its own no-network container after the trial, never mounted into the trial.
+`truth` is arm-blind judge context and never enters a workspace. Docs evidence
+is assessed from the plugin's signed operation journal, never from a transcript
+claim.
 
 ## Campaign format
 
@@ -125,10 +131,34 @@ operation journal, never from a transcript claim.
         "network": "host",
         "passthroughEnv": ["PROVIDER_API_KEY"],
     },
-    "budgets": { "trials": 1, "judgeAttempts": 0 },
+    "budgets": { "trials": 1, "judgeAttempts": 2 },
     "assessment": { "kind": "skill-activation" },
 }
 ```
+
+A docs campaign may declare a judge and a narrow recovery registration:
+
+```jsonc
+"budgets": { "trials": 4, "judgeAttempts": 8 },
+"assessment": {
+    "kind": "docs-recording",
+    "judge": { "model": "provider/model", "timeoutMs": 180000 },
+    "recovery": {
+        "version": 1,
+        "eligibleFailureClasses": ["json-syntax"],
+        "requiresCompletionEvidence": true,
+        "maxRecoveriesPerSlot": 1,
+        "recoveryCeiling": 4,
+        "totalJudgeAttempts": 8,
+        "providerRequestLimit": null
+    }
+}
+```
+
+`judgeAttempts` counts dispatches, not HTTP requests. Each attempt is claimed
+durably before it starts; a reserved or spawned claim keeps consuming budget.
+"none" in `network` is the only true no-egress mode; without `judgeAttempts`
+a campaign makes no model call of its own.
 
 Subject sources may be local paths; they are copied into
 `prepare/subjects/<armId>` before dispatch. Relative paths resolve against the
@@ -161,9 +191,19 @@ or rubric data.
     reports. It makes no model call. `--allow-legacy-unbound` is the explicit
     legacy-answer escape; `--rerender` replaces an existing output.
 
-Model judging is intentionally not implemented in this build. A campaign that
-declares `assessment.judge` is refused rather than silently treated as
-deterministic.
+- An optional docs judge is arm-blind by construction: the packet contains the
+  task, standing permission, authored truth, before/after lake documents,
+  changed paths, primary-check output, verified docs operations and the final
+  answer. It contains no arm label, campaign identity, evidence root or prior
+  verdict. The established parser and validator classify a usable judgement or
+  an explicit `json-syntax`, `schema`, `semantic`, `empty-or-truncated` or
+  `transport-or-process` failure. Only `json-syntax` is recoverable, and only
+  once, from identical packet bytes under a registered policy and durable
+  ceilings.
+
+Model judging is not a deterministic pass/fail substitute: the deterministic
+assessment remains the criterion, and the judge records the documentation
+outcome and utility. A campaign that declares a judge is not refused.
 
 ## Sandbox limits
 
@@ -173,6 +213,11 @@ docs cases) the journal directory. Capabilities are dropped and
 network so a loopback provider proxy is reachable; that is **not** network
 isolation and OTC does not describe it as provider-only egress. Credentials
 travel through a 0600 env file, never argv, logs or receipts.
+
+A product primary checker runs in a separate `network: "none"` container with
+only the completed workspace, the pristine workspace and the staged checker
+mounted read-only. The judge runs in another neutral container with no arm
+subjects, no campaign manifest and no evidence root.
 
 ## Docs evaluator capability
 
@@ -196,4 +241,12 @@ rehearsal is separate from `npm test`:
 
 ```sh
 npm run rehearse:offline
+npm run rehearse:fresh-docs
+npm run rehearse:installed
 ```
+
+The second rehearsal exercises the complete fresh docs lifecycle: primary
+check, blind judge, one recovery, an exhausted budget, checked selection,
+closure, analysis and post-close refusal. The third packs and installs the
+tarball and repeats the same lifecycle through the installed binary; see
+[TESTING.md](TESTING.md).

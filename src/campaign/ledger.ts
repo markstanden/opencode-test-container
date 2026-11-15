@@ -6,7 +6,10 @@ import { isRecord } from "../contracts/validate.ts";
 export const LEDGER_EVENTS = [
     "trial-start",
     "trial-end",
+    "primary-check",
     "assessment",
+    "judge-attempt",
+    "judge-selection",
     "close",
 ] as const;
 

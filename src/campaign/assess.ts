@@ -115,15 +115,9 @@ function tally(summary: AssessmentSummary, assessment: StoredAssessment): void {
  * @param options.now The now value.
  */
 /** Why assessment is refused now, or null when it may proceed. */
-function assessmentRefusal(
-    root: string,
-    manifest: PreparedManifest,
-): string | null {
+function assessmentRefusal(root: string): string | null {
     const frozen = loadFrozen(root);
     if (!frozen.ok) return frozen.problem;
-    if (manifest.campaign.assessment.judge !== undefined) {
-        return "this build has no model-judge implementation; use a deterministic assessment kind";
-    }
     const ledger = readLedger(root);
     return ledger.state === "malformed"
         ? `attempt ledger is malformed: ${ledger.problems.join("; ")}`
@@ -242,7 +236,7 @@ export function assessCampaign(
             problems: [prepared.problem],
         };
     }
-    const refusal = assessmentRefusal(root, prepared.manifest);
+    const refusal = assessmentRefusal(root);
     if (refusal !== null) {
         return { ok: false, summary: emptySummary(), problems: [refusal] };
     }
