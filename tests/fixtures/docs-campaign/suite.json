@@ -1,0 +1,62 @@
+{
+    "schemaVersion": 1,
+    "suiteId": "docs-unit",
+    "description": "Fresh docs lifecycle with a product primary check and a blind judge.",
+    "assessment": "docs-recording",
+    "cases": [
+        {
+            "caseId": "useful-write",
+            "kind": "docs-task",
+            "prompt": "Record the OpenTelemetry span convention in the repo lake.",
+            "fixture": "workspace",
+            "lakeRoot": "docs",
+            "truth": "The repository convention is to name spans after the operation.",
+            "expectedDocs": {
+                "kind": "create",
+                "target": "notes/otel.md",
+                "retains": ["OpenTelemetry"]
+            },
+            "criterion": {
+                "minVerifiedCalls": 0
+            },
+            "primaryCheck": {
+                "id": "pass",
+                "directory": "checkers",
+                "script": "pass.mjs"
+            }
+        },
+        {
+            "caseId": "restraint",
+            "kind": "docs-task",
+            "prompt": "Rename one local variable.",
+            "fixture": "workspace",
+            "lakeRoot": "docs",
+            "truth": "A local rename is transient and not worth recording.",
+            "expectedDocs": {
+                "kind": "none"
+            },
+            "criterion": {
+                "minVerifiedCalls": 0
+            }
+        },
+        {
+            "caseId": "primary-failure",
+            "kind": "docs-task",
+            "prompt": "Rename one local variable and leave the lake untouched.",
+            "fixture": "workspace",
+            "lakeRoot": "docs",
+            "truth": "The practical task fails independently of documentation.",
+            "expectedDocs": {
+                "kind": "none"
+            },
+            "criterion": {
+                "minVerifiedCalls": 0
+            },
+            "primaryCheck": {
+                "id": "fail",
+                "directory": "checkers",
+                "script": "fail.mjs"
+            }
+        }
+    ]
+}

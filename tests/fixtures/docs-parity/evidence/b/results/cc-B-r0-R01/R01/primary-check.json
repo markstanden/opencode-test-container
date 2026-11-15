@@ -1,0 +1,19 @@
+{
+  "id": "r01-csv-bom",
+  "script": "R01.mjs",
+  "sourceHash": "6a5f7b2f8f34569e1c2d32826429a280bb0a7297326089071f5c5d44963a305b",
+  "command": "/usr/local/bin/node",
+  "args": [
+    "/harness/primary-checks/R01.mjs",
+    "/results/cc-B-r0-R01/R01/live/work",
+    "/fixtures/R01/work"
+  ],
+  "timeoutMs": 120000,
+  "startedAt": "2026-11-10T18:22:10.243Z",
+  "durationMs": 225,
+  "stdout": "\n> test\n> node --test\n\n✔ parses a vendor file with a UTF-8 BOM (0.820932ms)\n✔ parses plain UTF-8 without a BOM (0.151164ms)\nℹ tests 2\nℹ suites 0\nℹ pass 2\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 84.237025\nR01 primary check: pass\n",
+  "stderr": "",
+  "status": "pass",
+  "exit": 0,
+  "signal": null
+}

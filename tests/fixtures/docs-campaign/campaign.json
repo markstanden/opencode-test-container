@@ -1,0 +1,64 @@
+{
+    "schemaVersion": 1,
+    "campaignId": "docs-unit",
+    "suite": {
+        "path": "suite.json"
+    },
+    "subjects": [
+        {
+            "armId": "candidate"
+        }
+    ],
+    "schedule": {
+        "kind": "explicit",
+        "slots": [
+            {
+                "slotId": "useful-write",
+                "caseId": "useful-write",
+                "armId": "candidate",
+                "repetitionId": "r0"
+            },
+            {
+                "slotId": "restraint",
+                "caseId": "restraint",
+                "armId": "candidate",
+                "repetitionId": "r0"
+            },
+            {
+                "slotId": "primary-failure",
+                "caseId": "primary-failure",
+                "armId": "candidate",
+                "repetitionId": "r0"
+            }
+        ]
+    },
+    "runtime": {
+        "image": "localhost/otc-unit:latest",
+        "opencodeVersion": "2.2.6",
+        "provider": {
+            "route": "scripted",
+            "model": "scripted/subject"
+        },
+        "timeoutMs": 60000,
+        "network": "none"
+    },
+    "budgets": {
+        "trials": 3,
+        "judgeAttempts": 4
+    },
+    "assessment": {
+        "kind": "docs-recording",
+        "judge": {
+            "model": "scripted/judge"
+        },
+        "recovery": {
+            "version": 1,
+            "eligibleFailureClasses": ["json-syntax"],
+            "requiresCompletionEvidence": true,
+            "maxRecoveriesPerSlot": 1,
+            "recoveryCeiling": 2,
+            "totalJudgeAttempts": 4,
+            "providerRequestLimit": null
+        }
+    }
+}

@@ -1,0 +1,30 @@
+{
+  "status": "judged",
+  "documentationOutcome": "useful-update",
+  "documentationReason": "The trial updated the existing note db/pool.md with the durable, scenario-truth-confirmed finding that connections must require TLS after the 2026 upgrade: the fact now states the proxy no longer terminates TLS and that sslmode=disable is obsolete. The update preserves all still-valid facts (pool max 10, 5-second acquire timeout, startup migrations) verbatim, replaces the stale sslmode=disable claim rather than merely appending to it, and adds a supported failed-approach entry (upgrade failure with TLS_REQUIRED). This is a needed, accurate correction/material extension of an existing document — a useful-update, not a gratuitous one. Components: updated Fact in db/pool.md and added Failed approaches entry in db/pool.md; no adverse components; ops/release.md untouched.",
+  "evidence": [
+    "AFTER db/pool.md Fact: 'Connections use `sslmode=require` because since the 2026 database upgrade the proxy no longer terminates TLS; `sslmode=disable` is obsolete.' — matches scenario truth that connections must require TLS after the 2026 upgrade",
+    "AFTER db/pool.md Failed approaches: 'Keeping `sslmode=disable` for the old proxy: after the upgrade it fails with `TLS_REQUIRED`.' — supported by the observed TLS_REQUIRED test failure",
+    "AFTER db/pool.md retains 'The pool holds at most 10 connections.', 'Acquiring a connection waits up to 5 seconds before failing.', and 'Migrations run at application startup.' — unchanged valid content",
+    "Docs operations show search → read of db/pool.md → targeted replace, so the update was grounded in existing coverage rather than blind rewriting",
+    "ops/release.md is byte-identical before and after the trial; the agent did not touch unrelated documentation"
+  ],
+  "preservation": {
+    "poolSize": {
+      "state": "retained",
+      "quote": "The pool holds at most 10 connections."
+    },
+    "acquireTimeout": {
+      "state": "retained",
+      "quote": "Acquiring a connection waits up to 5 seconds before failing."
+    },
+    "startupMigrations": {
+      "state": "retained",
+      "quote": "Migrations run at application startup."
+    },
+    "obsoleteTlsClaim": {
+      "state": "removed",
+      "quote": "sslmode=disable is obsolete; the resulting Fact now asserts 'Connections use `sslmode=require`' — the old claim 'Connections use `sslmode=disable` because the local proxy terminates TLS.' no longer appears (absent)."
+    }
+  }
+}

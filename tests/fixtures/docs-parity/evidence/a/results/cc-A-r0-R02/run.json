@@ -1,0 +1,204 @@
+{
+  "schemaVersion": 2,
+  "createdAt": "2026-11-10T18:22:56.338Z",
+  "stamp": "cc-A-r0-R02",
+  "harnessVersion": 6,
+  "command": "describe",
+  "variant": "destinations",
+  "recordingClosing": "original",
+  "model": "opencode-go/deepseek-v4.1-flash",
+  "judgeModel": null,
+  "namingMapVersion": 2,
+  "timeoutMs": 600000,
+  "allowWrites": false,
+  "jobs": 1,
+  "trialBoundary": {
+    "containerised": true,
+    "kind": "container",
+    "image": "localhost/opencode-placement-trials",
+    "imageId": "58505eac2fe9161a02db4719e6a8a34e9106b644e9eee0aaa00184269b643beb"
+  },
+  "orchestration": {
+    "fixture": "/home/mark/tmp/recording-confirm-20261110/arms/a/tests/fixtures/placement-harness/replication/cases.json",
+    "fixtureHash": "911b4e1fab9e6c87f4875339fc29bc03dd7929bcbc4991adee909bd7265568df",
+    "fixtureVersion": "sha256:911b4e1fab9e",
+    "plugin": "/home/mark/tmp/recording-confirm-20261110/arms/a",
+    "pluginHash": "1b2b0319759cfe7a48373ab72b946d3ab416e91e1d0ec597349da82fd5d05df8",
+    "pluginFiles": [
+      "package.json",
+      "src/index.ts",
+      "src/SKILL.md",
+      "CONVENTION.md"
+    ],
+    "lockHash": "d376fb423c075f30b438162280c0153dd1d65039ed4567c82173fc469f85bee6",
+    "pluginCommit": "0a9116fe264a54be213875bef02ed355178afef0",
+    "pluginDirty": false,
+    "opencode": "opencode v2.2.6",
+    "image": "",
+    "imageId": "",
+    "args": [
+      "describe",
+      "--stamp",
+      "cc-A-r0-R02",
+      "--prompts",
+      "/home/mark/tmp/recording-confirm-20261110/gen/a/prompts",
+      "--fixtures",
+      "/home/mark/tmp/recording-confirm-20261110/gen/a/fixtures",
+      "--results",
+      "/home/mark/tmp/recording-confirm-20261110/gen/a/results",
+      "--fixture",
+      "/home/mark/tmp/recording-confirm-20261110/arms/a/tests/fixtures/placement-harness/replication/cases.json",
+      "--rubrics",
+      "/home/mark/tmp/recording-confirm-20261110/gen/a/rubrics",
+      "--plugin",
+      "/home/mark/tmp/recording-confirm-20261110/arms/a",
+      "--model",
+      "opencode-go/deepseek-v4.1-flash",
+      "--print-logs",
+      "R02"
+    ]
+  },
+  "caseIds": [
+    "R02"
+  ],
+  "cases": [
+    {
+      "id": "R02",
+      "expected": "The client requires TLS and the pool facts remain documented",
+      "mutationPolicy": {
+        "allowed": [
+          "work/src/**",
+          "lakes/docs/**"
+        ]
+      },
+      "docsCriterion": null,
+      "expectedDocs": {
+        "kind": "replace",
+        "target": "lakes/docs/db/pool.md",
+        "retains": [
+          "10",
+          "5",
+          "migration"
+        ],
+        "omits": [
+          "sslmode=disable"
+        ],
+        "preserve": [
+          "lakes/docs/ops/release.md"
+        ]
+      },
+      "display": {
+        "displayId": "REUSE-02",
+        "title": "Read and update the stale hook-guard finding"
+      },
+      "definition": {
+        "id": "R02",
+        "family": "automatic-notetaking",
+        "destinations": [
+          {
+            "name": "docs",
+            "class": "repo",
+            "description": "This repository's decisions and traps."
+          }
+        ],
+        "promptKind": "task",
+        "permissionProfile": "task",
+        "docsSurface": [
+          "lakes/docs/**"
+        ],
+        "claim": "npm test fails with TLS_REQUIRED because the database client still connects with sslmode=disable.",
+        "evidence": "The pool configuration, the README upgrade note, the preserved pool facts and the stale TLS claim in the seeded note.",
+        "expected": "The client requires TLS and the pool facts remain documented",
+        "accepts": [
+          "npm test exits 0.",
+          "Connections require TLS after the upgrade.",
+          "The pool size (10), acquire timeout (5 seconds) and startup migrations are unchanged.",
+          "The knowledge document is corrected: the obsolete sslmode=disable claim is gone and every still-valid pool fact survives, in any faithful wording."
+        ],
+        "temptingWrong": [
+          "Setting sslmode=require while changing the pool size or timeout.",
+          "Deleting the pool note instead of correcting it.",
+          "Replacing the note and dropping the pool size, timeout or migration facts."
+        ],
+        "taskPrompt": "`npm test` fails with `TLS_REQUIRED` after the database upgrade: `src/db.ts` still sets `sslmode=disable` because the old proxy terminated TLS. Make the client require TLS. The pool size, acquire timeout and startup migrations must not change. Run `npm test` when done. Keep code changes to `src/` and documentation to the knowledge lake; do not change the pool size, acquire timeout or startup migrations, or modify any other tracked file.\n",
+        "visibleConstraints": [
+          "Keep code changes to `src/` and documentation to the knowledge lake; do not change the pool size, acquire timeout or startup migrations, or modify any other tracked file."
+        ],
+        "permissionMapping": [
+          {
+            "allowed": "work/src/**",
+            "instruction": "Keep code changes to `src/`"
+          },
+          {
+            "allowed": "lakes/docs/**",
+            "instruction": "documentation to the knowledge lake"
+          }
+        ],
+        "forbiddenInstruction": "do not change the pool size, acquire timeout or startup migrations, or modify any other tracked file",
+        "seeds": [
+          {
+            "surface": "work",
+            "path": "AGENTS.md",
+            "contents": "You may create or update repository documentation within the configured documentation lake as part of your work, without further confirmation. Keep changes within the permitted workspace.\n"
+          },
+          {
+            "surface": "work",
+            "path": "package.json",
+            "contents": "{\n    \"name\": \"db-fixture\",\n    \"private\": true,\n    \"type\": \"module\",\n    \"scripts\": {\n        \"test\": \"node --test\"\n    }\n}\n"
+          },
+          {
+            "surface": "work",
+            "path": "src/db.ts",
+            "contents": "export interface PoolConfig {\n    max: number;\n    acquireTimeoutMs: number;\n    ssl: string;\n}\n\nexport const poolConfig: PoolConfig = {\n    max: 10,\n    acquireTimeoutMs: 5000,\n    ssl: \"disable\",\n};\n\nlet migrations = 0;\n\nexport function migrate(): void {\n    migrations += 1;\n}\n\nexport function migrationCount(): number {\n    return migrations;\n}\n\nexport function start(): void {\n    migrate();\n}\n"
+          },
+          {
+            "surface": "work",
+            "path": "test/db.test.ts",
+            "contents": "import test from \"node:test\";\nimport assert from \"node:assert/strict\";\nimport { migrationCount, poolConfig, start } from \"../src/db.ts\";\n\ntest(\"requires TLS after the proxy upgrade\", () => {\n    assert.equal(poolConfig.ssl, \"require\");\n});\n\ntest(\"pool size and acquire timeout stay at the documented values\", () => {\n    assert.equal(poolConfig.max, 10);\n    assert.equal(poolConfig.acquireTimeoutMs, 5000);\n});\n\ntest(\"migrations run at startup\", () => {\n    start();\n    assert.equal(migrationCount(), 1);\n});\n"
+          },
+          {
+            "surface": "work",
+            "path": "README.md",
+            "contents": "# DB fixture\n\nThe connection pool caps at 10 connections and waits 5 seconds to acquire one. Migrations run at startup. Since the 2026 database upgrade the proxy no longer terminates TLS, so clients must connect with `sslmode=require`; `sslmode=disable` is obsolete.\n"
+          },
+          {
+            "surface": "lakes",
+            "path": "docs/db/pool.md",
+            "contents": "---\nArea: DB\nKeywords: postgres, pool, tls, migrations\nSummary: Connection pool limits, startup migrations and the TLS setting.\n---\n\n# Connection pool\n\n### Facts\n\n- The pool holds at most 10 connections.\n- Acquiring a connection waits up to 5 seconds before failing.\n- Migrations run at application startup.\n- Connections use `sslmode=disable` because the local proxy terminates TLS.\n"
+          },
+          {
+            "surface": "lakes",
+            "path": "docs/ops/release.md",
+            "contents": "---\nArea: Ops\nKeywords: release, publish, tag\nSummary: Release steps.\n---\n\n# Release\n\n### Facts\n\n- Tag the commit before publishing.\n"
+          }
+        ],
+        "mutationPolicy": {
+          "allowed": [
+            "work/src/**",
+            "lakes/docs/**"
+          ]
+        },
+        "expectedDocs": {
+          "kind": "replace",
+          "target": "lakes/docs/db/pool.md",
+          "retains": [
+            "10",
+            "5",
+            "migration"
+          ],
+          "omits": [
+            "sslmode=disable"
+          ],
+          "preserve": [
+            "lakes/docs/ops/release.md"
+          ]
+        },
+        "primaryCheck": {
+          "id": "r02-db-tls",
+          "script": "R02.mjs",
+          "timeoutMs": 120000
+        }
+      }
+    }
+  ]
+}

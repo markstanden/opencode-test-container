@@ -1,0 +1,72 @@
+{
+  "command": "opencode",
+  "args": [
+    "run",
+    "--standalone",
+    "--auto",
+    "--archived",
+    "--title",
+    "placement-R02",
+    "--model",
+    "opencode-go/deepseek-v4.1-flash",
+    "--format",
+    "json",
+    "--print-logs",
+    "`npm test` fails with `TLS_REQUIRED` after the database upgrade: `src/db.ts` still sets `sslmode=disable` because the old proxy terminated TLS. Make the client require TLS. The pool size, acquire timeout and startup migrations must not change. Run `npm test` when done. Keep code changes to `src/` and documentation to the knowledge lake; do not change the pool size, acquire timeout or startup migrations, or modify any other tracked file.\n"
+  ],
+  "cwd": "/results/cc-A-r0-R02/R02/live/work",
+  "pwd": "/results/cc-A-r0-R02/R02/live/work",
+  "startedAt": "2026-11-10T18:22:56.708Z",
+  "promptSha256": "2e29e8281c31c766f273472bd8fd733007e877b00039b00205478057e08f7fab",
+  "config": {
+    "$schema": "https://opencode.ai/config.json",
+    "model": "opencode-go/deepseek-v4.1-flash",
+    "plugins": [
+      {
+        "package": "/repo",
+        "options": {
+          "lakes": [
+            {
+              "class": "repo",
+              "root": "../lakes/docs",
+              "name": "docs",
+              "description": "This repository's decisions and traps."
+            }
+          ]
+        }
+      }
+    ],
+    "permissions": [
+      {
+        "action": "shell",
+        "resource": "*",
+        "effect": "deny"
+      },
+      {
+        "action": "edit",
+        "resource": "*",
+        "effect": "deny"
+      },
+      {
+        "action": "external_directory",
+        "resource": "*",
+        "effect": "deny"
+      },
+      {
+        "action": "shell",
+        "resource": "*",
+        "effect": "allow"
+      },
+      {
+        "action": "edit",
+        "resource": "*",
+        "effect": "allow"
+      },
+      {
+        "action": "external_directory",
+        "resource": "*",
+        "effect": "allow"
+      }
+    ]
+  }
+}

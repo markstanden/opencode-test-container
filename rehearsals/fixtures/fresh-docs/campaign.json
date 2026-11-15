@@ -1,0 +1,88 @@
+{
+    "schemaVersion": 1,
+    "campaignId": "fresh-docs-rehearsal",
+    "suite": {
+        "path": "suite.json"
+    },
+    "subjects": [
+        {
+            "armId": "docs-plugin",
+            "plugins": [
+                {
+                    "id": "docs",
+                    "path": "DOCS_PLUGIN_PATH"
+                }
+            ]
+        }
+    ],
+    "schedule": {
+        "kind": "explicit",
+        "slots": [
+            {
+                "slotId": "useful-write",
+                "caseId": "useful-write",
+                "armId": "docs-plugin",
+                "repetitionId": "r0"
+            },
+            {
+                "slotId": "gate-blocked",
+                "caseId": "gate-blocked",
+                "armId": "docs-plugin",
+                "repetitionId": "r0"
+            },
+            {
+                "slotId": "primary-failure",
+                "caseId": "primary-failure",
+                "armId": "docs-plugin",
+                "repetitionId": "r0"
+            },
+            {
+                "slotId": "recovery",
+                "caseId": "recovery",
+                "armId": "docs-plugin",
+                "repetitionId": "r0"
+            }
+        ]
+    },
+    "runtime": {
+        "image": "localhost/opencode-placement-trials:latest",
+        "opencodeVersion": "2.2.6",
+        "provider": {
+            "route": "scripted",
+            "model": "zai-coding-plan/glm-5.3-flash",
+            "overlay": {
+                "providers": {
+                    "zai-coding-plan": {
+                        "settings": {
+                            "baseURL": "http://127.0.0.1:8799/v1"
+                        }
+                    }
+                }
+            }
+        },
+        "timeoutMs": 180000,
+        "network": "host",
+        "passthroughEnv": ["ZAI_API_KEY"]
+    },
+    "budgets": {
+        "trials": 4,
+        "judgeAttempts": 8
+    },
+    "assessment": {
+        "kind": "docs-recording",
+        "judge": {
+            "model": "zai-coding-plan/glm-5.3-flash",
+            "timeoutMs": 180000
+        },
+        "recovery": {
+            "version": 1,
+            "eligibleFailureClasses": ["json-syntax"],
+            "requiresCompletionEvidence": true,
+            "maxRecoveriesPerSlot": 1,
+            "recoveryCeiling": 4,
+            "totalJudgeAttempts": 8,
+            "providerRequestLimit": null
+        }
+    },
+    "stopOnFirstFailure": false
+}

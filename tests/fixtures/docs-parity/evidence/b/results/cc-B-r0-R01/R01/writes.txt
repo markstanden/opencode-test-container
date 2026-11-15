@@ -1,0 +1,3 @@
+added: lakes/docs/ops/.docs-lock (dir)
+added: lakes/docs/ops/csv-bom.md (file)
+modified: work/src/csv.ts (content)

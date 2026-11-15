@@ -1,0 +1,16 @@
+{
+  "stamp": "cc-A-r0-R02",
+  "caseId": "R02",
+  "judgeModel": "opencode-go/glm-5.3-flash",
+  "status": "finished",
+  "startedAt": "2026-11-10T18:23:12.837Z",
+  "exit": 0,
+  "state": {
+    "documentsChanged": true,
+    "createdPaths": [],
+    "modifiedPaths": [
+      "db/pool.md"
+    ],
+    "removedPaths": []
+  }
+}

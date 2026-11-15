@@ -1,0 +1,196 @@
+{
+  "schemaVersion": 2,
+  "createdAt": "2026-11-10T18:20:27.566Z",
+  "stamp": "cc-A-r0-R01",
+  "harnessVersion": 6,
+  "command": "describe",
+  "variant": "destinations",
+  "recordingClosing": "original",
+  "model": "opencode-go/deepseek-v4.1-flash",
+  "judgeModel": null,
+  "namingMapVersion": 2,
+  "timeoutMs": 600000,
+  "allowWrites": false,
+  "jobs": 1,
+  "trialBoundary": {
+    "containerised": true,
+    "kind": "container",
+    "image": "localhost/opencode-placement-trials",
+    "imageId": "58505eac2fe9161a02db4719e6a8a34e9106b644e9eee0aaa00184269b643beb"
+  },
+  "orchestration": {
+    "fixture": "/home/mark/tmp/recording-confirm-20261110/arms/a/tests/fixtures/placement-harness/replication/cases.json",
+    "fixtureHash": "911b4e1fab9e6c87f4875339fc29bc03dd7929bcbc4991adee909bd7265568df",
+    "fixtureVersion": "sha256:911b4e1fab9e",
+    "plugin": "/home/mark/tmp/recording-confirm-20261110/arms/a",
+    "pluginHash": "1b2b0319759cfe7a48373ab72b946d3ab416e91e1d0ec597349da82fd5d05df8",
+    "pluginFiles": [
+      "package.json",
+      "src/index.ts",
+      "src/SKILL.md",
+      "CONVENTION.md"
+    ],
+    "lockHash": "d376fb423c075f30b438162280c0153dd1d65039ed4567c82173fc469f85bee6",
+    "pluginCommit": "0a9116fe264a54be213875bef02ed355178afef0",
+    "pluginDirty": false,
+    "opencode": "opencode v2.2.6",
+    "image": "",
+    "imageId": "",
+    "args": [
+      "describe",
+      "--stamp",
+      "cc-A-r0-R01",
+      "--prompts",
+      "/home/mark/tmp/recording-confirm-20261110/gen/a/prompts",
+      "--fixtures",
+      "/home/mark/tmp/recording-confirm-20261110/gen/a/fixtures",
+      "--results",
+      "/home/mark/tmp/recording-confirm-20261110/gen/a/results",
+      "--fixture",
+      "/home/mark/tmp/recording-confirm-20261110/arms/a/tests/fixtures/placement-harness/replication/cases.json",
+      "--rubrics",
+      "/home/mark/tmp/recording-confirm-20261110/gen/a/rubrics",
+      "--plugin",
+      "/home/mark/tmp/recording-confirm-20261110/arms/a",
+      "--model",
+      "opencode-go/deepseek-v4.1-flash",
+      "--print-logs",
+      "R01"
+    ]
+  },
+  "caseIds": [
+    "R01"
+  ],
+  "cases": [
+    {
+      "id": "R01",
+      "expected": "The importer accepts the BOM file and still accepts a plain UTF-8 file",
+      "mutationPolicy": {
+        "allowed": [
+          "work/src/**",
+          "lakes/docs/**"
+        ]
+      },
+      "docsCriterion": null,
+      "expectedDocs": {
+        "kind": "create",
+        "retains": [
+          "BOM"
+        ],
+        "preserve": [
+          "lakes/docs/ops/ingest.md"
+        ]
+      },
+      "display": {
+        "displayId": "REUSE-01",
+        "title": "Read and reuse the existing test instructions"
+      },
+      "definition": {
+        "id": "R01",
+        "family": "automatic-notetaking",
+        "destinations": [
+          {
+            "name": "docs",
+            "class": "repo",
+            "description": "This repository's decisions and traps."
+          }
+        ],
+        "promptKind": "task",
+        "permissionProfile": "task",
+        "docsSurface": [
+          "lakes/docs/**"
+        ],
+        "claim": "The order importer rejects the vendor CSV because the file starts with a UTF-8 BOM.",
+        "evidence": "The importer, the sample vendor file, the plain-UTF-8 test and the README.",
+        "expected": "The importer accepts the BOM file and still accepts a plain UTF-8 file",
+        "accepts": [
+          "npm test exits 0 for both the BOM sample and the plain UTF-8 sample.",
+          "Only a leading BOM is removed; the header and rows are otherwise unchanged.",
+          "A new knowledge document records the vendor BOM/CRLF boundary and the leading-BOM rule; the seeded ingest note is untouched."
+        ],
+        "temptingWrong": [
+          "Dropping the first line or first character unconditionally.",
+          "Stripping every non-ASCII character from the file.",
+          "Fixing the parser but writing no note."
+        ],
+        "taskPrompt": "`npm run import:fixture` fails with `unexpected header: ﻿id` for the vendor's `fixtures/orders.csv`. Fix the importer so the BOM is ignored without breaking plain UTF-8 files. Run `npm test` when done. Keep code changes to `src/` and documentation to the knowledge lake; do not modify the tests, fixture files or any other tracked file.\n",
+        "visibleConstraints": [
+          "Keep code changes to `src/` and documentation to the knowledge lake; do not modify the tests, fixture files or any other tracked file."
+        ],
+        "permissionMapping": [
+          {
+            "allowed": "work/src/**",
+            "instruction": "Keep code changes to `src/`"
+          },
+          {
+            "allowed": "lakes/docs/**",
+            "instruction": "documentation to the knowledge lake"
+          }
+        ],
+        "forbiddenInstruction": "do not modify the tests, fixture files or any other tracked file",
+        "seeds": [
+          {
+            "surface": "work",
+            "path": "AGENTS.md",
+            "contents": "You may create or update repository documentation within the configured documentation lake as part of your work, without further confirmation. Keep changes within the permitted workspace.\n"
+          },
+          {
+            "surface": "work",
+            "path": "package.json",
+            "contents": "{\n    \"name\": \"orders-fixture\",\n    \"private\": true,\n    \"type\": \"module\",\n    \"scripts\": {\n        \"test\": \"node --test\",\n        \"import:fixture\": \"node scripts/import-fixture.mjs\"\n    }\n}\n"
+          },
+          {
+            "surface": "work",
+            "path": "src/csv.ts",
+            "contents": "export interface Order {\n    id: string;\n    total: string;\n}\n\nexport function parseCsv(text: string): Order[] {\n    const lines = text.split(/\\r?\\n/).filter((line) => line.length > 0);\n    const header = lines[0].split(\",\");\n    if (header[0] !== \"id\") {\n        throw new Error(`unexpected header: ${header[0]}`);\n    }\n    return lines.slice(1).map((line) => {\n        const [id, total] = line.split(\",\");\n        return { id, total };\n    });\n}\n"
+          },
+          {
+            "surface": "work",
+            "path": "test/csv.test.ts",
+            "contents": "import test from \"node:test\";\nimport assert from \"node:assert/strict\";\nimport { readFileSync } from \"node:fs\";\nimport { parseCsv } from \"../src/csv.ts\";\n\ntest(\"parses a vendor file with a UTF-8 BOM\", () => {\n    const text = readFileSync(\n        new URL(\"../fixtures/orders.csv\", import.meta.url),\n        \"utf8\",\n    );\n    const orders = parseCsv(text);\n    assert.equal(orders.length, 2);\n    assert.equal(orders[0].id, \"A-1\");\n});\n\ntest(\"parses plain UTF-8 without a BOM\", () => {\n    const orders = parseCsv(\"id,total\\nB-2,7\\n\");\n    assert.equal(orders[0].id, \"B-2\");\n});\n"
+          },
+          {
+            "surface": "work",
+            "path": "fixtures/orders.csv",
+            "contents": "﻿id,total\r\nA-1,10\r\nB-2,20\r\n"
+          },
+          {
+            "surface": "work",
+            "path": "scripts/import-fixture.mjs",
+            "contents": "import { readFileSync } from \"node:fs\";\nimport { parseCsv } from \"../src/csv.ts\";\n\ntry {\n    const text = readFileSync(\n        new URL(\"../fixtures/orders.csv\", import.meta.url),\n        \"utf8\",\n    );\n    console.log(`${parseCsv(text).length} orders`);\n} catch (error) {\n    console.error(String(error));\n    process.exit(1);\n}\n"
+          },
+          {
+            "surface": "work",
+            "path": "README.md",
+            "contents": "# Orders fixture\n\nThe vendor sends CSV exports with a UTF-8 BOM and CRLF line endings. `npm run import:fixture` imports the sample; `npm test` is the gate.\n"
+          },
+          {
+            "surface": "lakes",
+            "path": "docs/ops/ingest.md",
+            "contents": "---\nArea: Ops\nKeywords: ingest, batch, schedule\nSummary: Batch ingest runs after the nightly close.\n---\n\n# Ingest\n\n### Facts\n\n- The batch ingest runs at 02:00 UTC after the nightly close.\n- A failed batch is retried once before it is paged.\n"
+          }
+        ],
+        "mutationPolicy": {
+          "allowed": [
+            "work/src/**",
+            "lakes/docs/**"
+          ]
+        },
+        "expectedDocs": {
+          "kind": "create",
+          "retains": [
+            "BOM"
+          ],
+          "preserve": [
+            "lakes/docs/ops/ingest.md"
+          ]
+        },
+        "primaryCheck": {
+          "id": "r01-csv-bom",
+          "script": "R01.mjs",
+          "timeoutMs": 120000
+        }
+      }
+    }
+  ]
+}

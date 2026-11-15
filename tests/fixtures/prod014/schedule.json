@@ -1,0 +1,134 @@
+{
+    "campaign": "pd-20261111",
+    "generator": "declared pair order; AB/BA alternating; adjacent pair slots",
+    "slots": [
+        {
+            "slot": 1,
+            "pairId": "P01",
+            "repetition": 0,
+            "scenario": "R01",
+            "arm": "A",
+            "stamp": "pd-A-r0-R01"
+        },
+        {
+            "slot": 2,
+            "pairId": "P01",
+            "repetition": 0,
+            "scenario": "R01",
+            "arm": "B",
+            "stamp": "pd-B-r0-R01"
+        },
+        {
+            "slot": 3,
+            "pairId": "P02",
+            "repetition": 0,
+            "scenario": "S02",
+            "arm": "B",
+            "stamp": "pd-B-r0-S02"
+        },
+        {
+            "slot": 4,
+            "pairId": "P02",
+            "repetition": 0,
+            "scenario": "S02",
+            "arm": "A",
+            "stamp": "pd-A-r0-S02"
+        },
+        {
+            "slot": 5,
+            "pairId": "P03",
+            "repetition": 0,
+            "scenario": "R02",
+            "arm": "A",
+            "stamp": "pd-A-r0-R02"
+        },
+        {
+            "slot": 6,
+            "pairId": "P03",
+            "repetition": 0,
+            "scenario": "R02",
+            "arm": "B",
+            "stamp": "pd-B-r0-R02"
+        },
+        {
+            "slot": 7,
+            "pairId": "P04",
+            "repetition": 0,
+            "scenario": "R03",
+            "arm": "B",
+            "stamp": "pd-B-r0-R03"
+        },
+        {
+            "slot": 8,
+            "pairId": "P04",
+            "repetition": 0,
+            "scenario": "R03",
+            "arm": "A",
+            "stamp": "pd-A-r0-R03"
+        },
+        {
+            "slot": 9,
+            "pairId": "P05",
+            "repetition": 0,
+            "scenario": "S05",
+            "arm": "A",
+            "stamp": "pd-A-r0-S05"
+        },
+        {
+            "slot": 10,
+            "pairId": "P05",
+            "repetition": 0,
+            "scenario": "S05",
+            "arm": "B",
+            "stamp": "pd-B-r0-S05"
+        },
+        {
+            "slot": 11,
+            "pairId": "P06",
+            "repetition": 0,
+            "scenario": "S06",
+            "arm": "B",
+            "stamp": "pd-B-r0-S06"
+        },
+        {
+            "slot": 12,
+            "pairId": "P06",
+            "repetition": 0,
+            "scenario": "S06",
+            "arm": "A",
+            "stamp": "pd-A-r0-S06"
+        },
+        {
+            "slot": 13,
+            "pairId": "P07",
+            "repetition": 0,
+            "scenario": "S07",
+            "arm": "A",
+            "stamp": "pd-A-r0-S07"
+        },
+        {
+            "slot": 14,
+            "pairId": "P07",
+            "repetition": 0,
+            "scenario": "S07",
+            "arm": "B",
+            "stamp": "pd-B-r0-S07"
+        },
+        {
+            "slot": 15,
+            "pairId": "P08",
+            "repetition": 0,
+            "scenario": "R04",
+            "arm": "B",
+            "stamp": "pd-B-r0-R04"
+        },
+        {
+            "slot": 16,
+            "pairId": "P08",
+            "repetition": 0,
+            "scenario": "R04",
+            "arm": "A",
+            "stamp": "pd-A-r0-R04"
+        }
+    ]
+}

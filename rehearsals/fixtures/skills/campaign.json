@@ -1,0 +1,85 @@
+{
+    "schemaVersion": 1,
+    "campaignId": "skill-rehearsal-local",
+    "suite": {
+        "path": "suite.json"
+    },
+    "subjects": [
+        {
+            "armId": "skill-only",
+            "skills": [
+                {
+                    "id": "otel-helper",
+                    "path": "skills/otel-helper"
+                },
+                {
+                    "id": "other-skill",
+                    "path": "skills/other-skill"
+                }
+            ]
+        }
+    ],
+    "schedule": {
+        "kind": "explicit",
+        "slots": [
+            {
+                "slotId": "positive",
+                "caseId": "positive",
+                "armId": "skill-only",
+                "repetitionId": "r0"
+            },
+            {
+                "slotId": "negative",
+                "caseId": "negative",
+                "armId": "skill-only",
+                "repetitionId": "r0"
+            },
+            {
+                "slotId": "wrong-skill",
+                "caseId": "wrong-skill",
+                "armId": "skill-only",
+                "repetitionId": "r0"
+            },
+            {
+                "slotId": "failed-load",
+                "caseId": "failed-load",
+                "armId": "skill-only",
+                "repetitionId": "r0"
+            },
+            {
+                "slotId": "invalid-capture",
+                "caseId": "invalid-capture",
+                "armId": "skill-only",
+                "repetitionId": "r0"
+            }
+        ]
+    },
+    "runtime": {
+        "image": "localhost/opencode-placement-trials:latest",
+        "opencodeVersion": "2.2.6",
+        "provider": {
+            "route": "scripted",
+            "model": "zai-coding-plan/glm-5.3-flash",
+            "overlay": {
+                "providers": {
+                    "zai-coding-plan": {
+                        "settings": {
+                            "baseURL": "http://127.0.0.1:8799/v1"
+                        }
+                    }
+                }
+            }
+        },
+        "timeoutMs": 180000,
+        "network": "host",
+        "passthroughEnv": ["ZAI_API_KEY"]
+    },
+    "budgets": {
+        "trials": 5,
+        "judgeAttempts": 0
+    },
+    "assessment": {
+        "kind": "skill-activation"
+    },
+    "stopOnFirstFailure": false
+}

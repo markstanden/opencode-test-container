@@ -1,0 +1,83 @@
+{
+    "schemaVersion": 1,
+    "suiteId": "fresh-docs-rehearsal",
+    "description": "Fresh docs lifecycle: primary checks, blind judge and one recovery.",
+    "assessment": "docs-recording",
+    "cases": [
+        {
+            "caseId": "useful-write",
+            "kind": "docs-task",
+            "prompt": "Record the OpenTelemetry span convention in the repo lake.",
+            "lakeRoot": "docs",
+            "fixture": "workspace",
+            "truth": "The repository convention is to name spans after the operation.",
+            "expectedDocs": {
+                "kind": "create",
+                "target": "notes/otel.md",
+                "retains": ["OpenTelemetry"]
+            },
+            "criterion": {
+                "minVerifiedCalls": 1,
+                "verbs": ["add"]
+            },
+            "primaryCheck": {
+                "id": "pass",
+                "directory": "checkers",
+                "script": "pass.mjs"
+            }
+        },
+        {
+            "caseId": "gate-blocked",
+            "kind": "docs-task",
+            "prompt": "Attempt the invalid docs write with a blank summary.",
+            "lakeRoot": "docs",
+            "fixture": "workspace",
+            "truth": "A blank summary must be refused and leaves no document.",
+            "expectedDocs": {
+                "kind": "none"
+            },
+            "criterion": {
+                "minVerifiedCalls": 1,
+                "verbs": ["add"]
+            },
+            "primaryCheck": {
+                "id": "pass",
+                "directory": "checkers",
+                "script": "pass.mjs"
+            }
+        },
+        {
+            "caseId": "primary-failure",
+            "kind": "docs-task",
+            "prompt": "Summarise the workflow without changing the lake.",
+            "lakeRoot": "docs",
+            "fixture": "workspace",
+            "truth": "The practical task fails independently of documentation.",
+            "expectedDocs": {
+                "kind": "none"
+            },
+            "criterion": {
+                "minVerifiedCalls": 0
+            },
+            "primaryCheck": {
+                "id": "fail",
+                "directory": "checkers",
+                "script": "fail.mjs"
+            }
+        },
+        {
+            "caseId": "recovery",
+            "kind": "docs-task",
+            "prompt": "Rename one local variable and leave the lake untouched.",
+            "lakeRoot": "docs",
+            "fixture": "workspace",
+            "truth": "A local rename is transient and not worth recording.",
+            "expectedDocs": {
+                "kind": "none"
+            },
+            "criterion": {
+                "minVerifiedCalls": 0
+            }
+        }
+    ]
+}

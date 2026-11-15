@@ -1,0 +1,72 @@
+{
+  "command": "opencode",
+  "args": [
+    "run",
+    "--standalone",
+    "--auto",
+    "--archived",
+    "--title",
+    "placement-R01",
+    "--model",
+    "opencode-go/deepseek-v4.1-flash",
+    "--format",
+    "json",
+    "--print-logs",
+    "`npm run import:fixture` fails with `unexpected header: ﻿id` for the vendor's `fixtures/orders.csv`. Fix the importer so the BOM is ignored without breaking plain UTF-8 files. Run `npm test` when done. Keep code changes to `src/` and documentation to the knowledge lake; do not modify the tests, fixture files or any other tracked file.\n"
+  ],
+  "cwd": "/results/cc-A-r0-R01/R01/live/work",
+  "pwd": "/results/cc-A-r0-R01/R01/live/work",
+  "startedAt": "2026-11-10T18:20:27.937Z",
+  "promptSha256": "e55029855b41b17724b934e2ad25ce533ac99e0f194867546763845bf9e539d7",
+  "config": {
+    "$schema": "https://opencode.ai/config.json",
+    "model": "opencode-go/deepseek-v4.1-flash",
+    "plugins": [
+      {
+        "package": "/repo",
+        "options": {
+          "lakes": [
+            {
+              "class": "repo",
+              "root": "../lakes/docs",
+              "name": "docs",
+              "description": "This repository's decisions and traps."
+            }
+          ]
+        }
+      }
+    ],
+    "permissions": [
+      {
+        "action": "shell",
+        "resource": "*",
+        "effect": "deny"
+      },
+      {
+        "action": "edit",
+        "resource": "*",
+        "effect": "deny"
+      },
+      {
+        "action": "external_directory",
+        "resource": "*",
+        "effect": "deny"
+      },
+      {
+        "action": "shell",
+        "resource": "*",
+        "effect": "allow"
+      },
+      {
+        "action": "edit",
+        "resource": "*",
+        "effect": "allow"
+      },
+      {
+        "action": "external_directory",
+        "resource": "*",
+        "effect": "allow"
+      }
+    ]
+  }
+}

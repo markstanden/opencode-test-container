@@ -1,0 +1,16 @@
+{
+  "stamp": "cc-A-r0-R01",
+  "caseId": "R01",
+  "judgeModel": "opencode-go/glm-5.3-flash",
+  "status": "finished",
+  "startedAt": "2026-11-10T18:21:36.924Z",
+  "exit": 0,
+  "state": {
+    "documentsChanged": true,
+    "createdPaths": [
+      "ops/csv-bom.md"
+    ],
+    "modifiedPaths": [],
+    "removedPaths": []
+  }
+}

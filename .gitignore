@@ -1,0 +1,9 @@
+node_modules/
+dist/
+coverage/
+*.log
+!tests/fixtures/docs-parity/evidence/**/*.log
+.otc/
+
+# Scratch handoff plans (never committed)
+docs/plans/

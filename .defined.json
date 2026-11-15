@@ -1,0 +1,26 @@
+{
+    "version": "07145f9e654d",
+    "coverage": {
+        "node": {
+            "command": "npm run build && node scripts/check-coverage.mjs",
+            "minimums": {
+                "line": 75,
+                "branch": 55,
+                "function": 80
+            }
+        }
+    },
+    "node": {
+        "packages": [
+            {
+                "dir": ".",
+                "checks": [
+                    {
+                        "name": "typecheck",
+                        "command": "tsc --noEmit"
+                    }
+                ]
+            }
+        ]
+    }
+}

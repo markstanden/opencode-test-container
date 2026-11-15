@@ -1,0 +1,38 @@
+{
+    "schemaVersion": 1,
+    "suiteId": "docs-rehearsal",
+    "description": "Signed-journal docs recording, useful write and gate-blocked refusal.",
+    "assessment": "docs-recording",
+    "cases": [
+        {
+            "caseId": "useful-write",
+            "kind": "docs-task",
+            "prompt": "Record the OpenTelemetry span convention in the repo lake.",
+            "lakeRoot": "docs",
+            "expectedDocs": {
+                "kind": "create",
+                "target": "notes/otel.md",
+                "retains": ["OpenTelemetry"]
+            },
+            "criterion": {
+                "minVerifiedCalls": 1,
+                "verbs": ["add"]
+            },
+            "fixture": "workspace"
+        },
+        {
+            "caseId": "gate-blocked",
+            "kind": "docs-task",
+            "prompt": "Attempt the invalid docs write with a blank summary.",
+            "lakeRoot": "docs",
+            "expectedDocs": {
+                "kind": "none"
+            },
+            "criterion": {
+                "minVerifiedCalls": 1,
+                "verbs": ["add"]
+            },
+            "fixture": "workspace"
+        }
+    ]
+}
