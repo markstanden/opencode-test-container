@@ -19,3 +19,6 @@
 *.gz binary
 *.7z binary
 *.pdf binary
+
+# Recorded evidence is byte-exact, including CRLF in seeded fixture files.
+tests/fixtures/docs-parity/evidence/** -text
