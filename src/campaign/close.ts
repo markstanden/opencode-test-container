@@ -71,6 +71,12 @@ function closureRefusals(
             `unresolved trial launch(es): ${unresolved.join(", ")}; closure would hide unknown spend`,
         ];
     }
+    const claims = unsettledClaims(root);
+    if (claims.length > 0) {
+        return [
+            `unsettled judge spend: ${claims.join("; ")}; closure would hide an unknown outcome`,
+        ];
+    }
     const packetProblems = manifest.campaign.schedule.slots.flatMap((slot) =>
         packetIntegrityProblems(root, manifest, slot).map(
             (problem) => `${slot.slotId}: ${problem}`,
@@ -78,12 +84,6 @@ function closureRefusals(
     );
     if (packetProblems.length > 0) {
         return ["judge packet integrity failed", ...packetProblems];
-    }
-    const claims = unsettledClaims(root);
-    if (claims.length > 0) {
-        return [
-            `unsettled judge spend: ${claims.join("; ")}; closure would hide an unknown outcome`,
-        ];
     }
     const policy = policyOf(manifest);
     if (!policy.ok) return policy.problems;

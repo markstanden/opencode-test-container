@@ -1189,7 +1189,7 @@ export function packetIntegrityProblems(
     slot: Slot,
 ): string[] {
     const recorded = recordedAttempts(root, slot.slotId);
-    if (recorded.attempts.length === 0) return [];
+    if (recorded.attempts.length === 0) return recorded.problems;
     const testCase = manifest.suite.cases.find(
         (entry) => entry.caseId === slot.caseId,
     );
