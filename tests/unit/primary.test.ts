@@ -238,7 +238,7 @@ describe("product primary check", () => {
             manifest.tool?.name,
             "@markstanden/opencode-test-container",
         );
-        assert.equal(manifest.tool?.version, "0.1.0");
+        assert.equal(manifest.tool?.version, toolIdentity().version);
         assert.equal(manifest.tool?.evaluatorVersion, 1);
         assert.deepEqual(problems, []);
     });
