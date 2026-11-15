@@ -11,7 +11,10 @@ Adds `@markstanden/opencode-test-container` (`otc`) as a new package:
 - explicit scheduled execution through Podman and the real OpenCode CLI;
 - append-only lifecycle ledger, deterministic assessment, idempotent closure,
   read-only status and derived reports;
-- signed docs-journal evaluator and deterministic skill-activation evaluator;
+- the established docs analysis implementation (recording credit, utility and
+  opportunity counts, retrieval, preservation, guardrails, pairing/bounds,
+  screening, decision and reporting) with its ported contract suite;
+- deterministic skill-activation evaluator;
 - emitted-JavaScript `otc` bin proven through `npm pack` in a temporary
   consumer;
 - offline real-adapter rehearsal with a scripted loopback provider;
@@ -33,6 +36,12 @@ provider. Docs semantics live only in `src/evaluators/docs`.
   branch, 84.3 function. The explicit initial floor is 75/55/80; this
   population was never previously gated (the old prod014 drivers remain in the
   docs repository).
+- Recorded-evidence parity: committed mini corpus deep-equal; recorded 40-trial
+  confirmation and 48-trial screening corpora byte-identical apart from the
+  receipt's `renderedAt`.
+- Coverage ownership: migrated analysis keeps the inherited 95/90/95 floors
+  (measured 95.6/90.1/95.9); all OTC runtime has an explicit 75/55/80 initial
+  ratchet (measured 85.1/79.4/85.5).
 - `npm run rehearse:offline`: real Podman image
   `sha256:58505eac…`, OpenCode 2.2.6, scripted provider. 22 chat requests, 0
   readiness probes, 0 paid calls. Skill positive/negative/wrong/failed-load
