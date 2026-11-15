@@ -1,5 +1,5 @@
 {
-    "version": "b0df20afb0f0",
+    "version": "fab0236a327e",
     "coverage": {
         "node": {
             "command": "npm run build && node scripts/check-coverage.mjs",
