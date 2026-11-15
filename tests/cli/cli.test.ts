@@ -47,8 +47,11 @@ describe("installed-shape CLI", () => {
     });
 
     it("prints help from an unrelated directory", () => {
+        // Arrange
+        const cwd = work;
+
         // Act
-        const result = otc(["--help"], work);
+        const result = otc(["--help"], cwd);
 
         // Assert
         assert.equal(result.status, 0);
