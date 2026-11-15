@@ -18,6 +18,7 @@ import { runCampaign } from "../../src/campaign/run.ts";
 import { assessDocsTrial } from "../../src/evaluators/docs/assess.ts";
 import { runCommand, type CommandResult } from "../../src/adapters/process.ts";
 import type { ContainerPlan } from "../../src/adapters/podman/container.ts";
+import { toolIdentity } from "../../src/contracts/version.ts";
 import type { DocsTaskCase } from "../../src/contracts/types.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -260,6 +261,54 @@ describe("product primary check", () => {
             problems.join("; "),
         );
         writeFileSync(path, original, "utf8");
+    });
+
+    it("refuses dispatch when the executing tool differs from the freeze", async () => {
+        // Arrange
+        const fixture = fixtureCampaign();
+        const localRoot = join(fixture.dir, "root");
+        const prepared = prepareCampaign(fixture.campaignPath, localRoot);
+        assert.equal(prepared.ok, true);
+        const frozen = await freezeCampaign(
+            localRoot,
+            fakeImage as typeof runCommand,
+        );
+        assert.equal(frozen.ok, true);
+        const current = toolIdentity();
+
+        // Act
+        const delivery = deliveryCheck(localRoot, {
+            ...current,
+            version: "99.0.0",
+        });
+        const summary = await runCampaign(
+            localRoot,
+            { slotIds: ["primary-failure"] },
+            {
+                runContainer: fakeContainer(),
+                tool: { ...current, version: "99.0.0" },
+            },
+        );
+
+        // Assert
+        assert.equal(
+            delivery.some((problem) => /version/.test(problem)),
+            true,
+            delivery.join("; "),
+        );
+        assert.equal(summary.ok, false);
+        assert.equal(
+            summary.problems.some((problem) => /tool/.test(problem)),
+            true,
+            summary.problems.join("; "),
+        );
+        assert.equal(
+            existsSync(
+                join(localRoot, "evidence", "trials", "primary-failure"),
+            ),
+            false,
+        );
+        rmSync(fixture.dir, { recursive: true, force: true });
     });
 
     it("runs the checker in a separate no-network container with read-only evidence", async () => {

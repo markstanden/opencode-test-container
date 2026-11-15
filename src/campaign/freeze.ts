@@ -10,7 +10,11 @@ import {
     preparedDifferences,
     type PreparedManifest,
 } from "./prepare.ts";
-import type { ToolIdentity } from "../contracts/version.ts";
+import {
+    toolIdentity,
+    toolIdentityProblems,
+    type ToolIdentity,
+} from "../contracts/version.ts";
 
 /** The immutable freeze receipt. */
 export interface FrozenRecord {
@@ -91,6 +95,19 @@ const FROZEN_TEXT_FIELDS = [
     "frozenAt",
 ] as const;
 
+/** Check the freeze record's tool identity shape. */
+function toolShapeProblems(tool: unknown, path: string): string[] {
+    return !isRecord(tool) ||
+        typeof tool.name !== "string" ||
+        typeof tool.version !== "string" ||
+        typeof tool.evaluatorVersion !== "number" ||
+        typeof tool.artifactSha256 !== "string"
+        ? [
+              `${path}.tool must name name, version, evaluatorVersion and artifactSha256`,
+          ]
+        : [];
+}
+
 /** Check a freeze record's shape. */
 function frozenShapeProblems(
     record: Record<string, unknown>,
@@ -106,16 +123,7 @@ function frozenShapeProblems(
     ) {
         problems.push(`${path}.provider must name route and model`);
     }
-    if (
-        !isRecord(record.tool) ||
-        typeof record.tool.name !== "string" ||
-        typeof record.tool.version !== "string" ||
-        typeof record.tool.evaluatorVersion !== "number"
-    ) {
-        problems.push(
-            `${path}.tool must name name, version and evaluatorVersion`,
-        );
-    }
+    problems.push(...toolShapeProblems(record.tool, path));
     if (record.schemaVersion !== 1 || record.kind !== "otc-freeze") {
         problems.push(`${path} is not a schemaVersion 1 otc-freeze record`);
     }
@@ -180,6 +188,7 @@ export function identityOf(record: FrozenRecord): FreezeIdentity {
 export function freezeDifferences(
     manifest: PreparedManifest,
     frozen: FrozenRecord,
+    current: ToolIdentity = toolIdentity(),
 ): string[] {
     const observed: FreezeIdentity = {
         schemaVersion: 1,
@@ -194,7 +203,7 @@ export function freezeDifferences(
         workspacesSha256: manifest.workspacesSha256,
         promptsSha256: manifest.promptsSha256,
         primaryChecksSha256: manifest.primaryChecksSha256,
-        tool: manifest.tool,
+        tool: current,
         image: manifest.campaign.runtime.image,
         imageId: manifest.campaign.runtime.imageId ?? frozen.imageId,
         opencodeVersion: manifest.campaign.runtime.opencodeVersion,
@@ -236,6 +245,35 @@ export function inputDifferences(
     return problems;
 }
 
+/** The state of an existing freeze receipt, if one exists. */
+function existingFreeze(
+    root: string,
+    manifest: PreparedManifest,
+    current: ToolIdentity,
+):
+    | { kind: "none" }
+    | { kind: "ok"; record: FrozenRecord }
+    | { kind: "refuse"; problems: string[] } {
+    if (!existsSync(frozenPath(root))) return { kind: "none" };
+    const existing = loadFrozen(root);
+    if (!existing.ok) {
+        return {
+            kind: "refuse",
+            problems: [existing.problem],
+        };
+    }
+    const drift = freezeDifferences(manifest, existing.record, current);
+    return drift.length === 0
+        ? { kind: "ok", record: existing.record }
+        : {
+              kind: "refuse",
+              problems: [
+                  "already frozen with different inputs; use a fresh root",
+                  ...drift,
+              ],
+          };
+}
+
 /**
  * Freeze a prepared campaign: resolve the image to its immutable identity,
  * verify the CLI version it contains, and record all input identities.
@@ -260,19 +298,31 @@ export async function freezeCampaign(
             ],
         };
     }
-    const existing = existsSync(frozenPath(root)) ? loadFrozen(root) : null;
-    if (existing !== null && existing.ok) {
-        const drift = freezeDifferences(manifest, existing.record);
-        if (drift.length === 0) {
-            return { ok: true, record: existing.record, alreadyFrozen: true };
-        }
+    const current = toolIdentity();
+    if (manifest.tool === undefined) {
         return {
             ok: false,
             problems: [
-                "already frozen with different inputs; use a fresh root",
-                ...drift,
+                "prepared manifest has no tool identity; prepare a fresh root",
             ],
         };
+    }
+    const toolDrift = toolIdentityProblems(manifest.tool, current);
+    if (toolDrift.length > 0) {
+        return {
+            ok: false,
+            problems: [
+                "prepared payload was produced by a different executing tool",
+                ...toolDrift,
+            ],
+        };
+    }
+    const existing = existingFreeze(root, manifest, current);
+    if (existing.kind === "ok") {
+        return { ok: true, record: existing.record, alreadyFrozen: true };
+    }
+    if (existing.kind === "refuse") {
+        return { ok: false, problems: existing.problems };
     }
     const resolved = await resolveImage(
         manifest.campaign.runtime.imageId ?? manifest.campaign.runtime.image,
@@ -294,7 +344,7 @@ export async function freezeCampaign(
         workspacesSha256: manifest.workspacesSha256,
         promptsSha256: manifest.promptsSha256,
         primaryChecksSha256: manifest.primaryChecksSha256,
-        tool: manifest.tool,
+        tool: current,
         image: manifest.campaign.runtime.image,
         imageId: image.imageId,
         opencodeVersion: image.opencodeVersion,
@@ -321,7 +371,10 @@ export async function freezeCampaign(
  * @param root The campaign root.
  * @returns Differences; empty means delivery is intact.
  */
-export function deliveryCheck(root: string): string[] {
+export function deliveryCheck(
+    root: string,
+    current: ToolIdentity = toolIdentity(),
+): string[] {
     const frozen = loadFrozen(root);
     const prepared = loadPreparedManifest(root);
     if (!frozen.ok) return [frozen.problem];
@@ -333,9 +386,11 @@ export function deliveryCheck(root: string): string[] {
     for (const difference of freezeDifferences(
         prepared.manifest,
         frozen.record,
+        current,
     )) {
         problems.push(difference);
     }
+    problems.push(...toolIdentityProblems(frozen.record.tool, current));
     for (const arm of prepared.manifest.subjects) {
         if (arm.plugins.length > 0) {
             for (const plugin of arm.plugins) {

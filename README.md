@@ -205,6 +205,16 @@ Model judging is not a deterministic pass/fail substitute: the deterministic
 assessment remains the criterion, and the judge records the documentation
 outcome and utility. A campaign that declares a judge is not refused.
 
+A selection is accepted only through one checked reader shared by judge,
+status, closure and reporting: attempt set, packet identity, policy hash,
+judgement hash, outcome/utility and the judged mutation state are re-derived.
+Judge and recovery claims live under `campaign root/evidence`; a recovery
+settles both, and an interrupted claim stays visible and blocks closure. The
+judge's standing-permission block comes from the pristine prepared workspace,
+never the trial's live `AGENTS.md`. Before dispatch, the executing artifact
+hash is compared with the freeze, so changed code under the same package
+version is refused.
+
 ## Sandbox limits
 
 The container is read-only apart from the trial workspace, `/tmp` and (for

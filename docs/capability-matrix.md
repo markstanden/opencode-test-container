@@ -46,6 +46,18 @@ harness:
 | Closure / analysis       | `campaign/close.ts`, `reporting/report.ts`        | pending judgement and unsettled claims block closure            |
 | Status                   | `campaign/status.ts`                              | read-only counts, judgement and next actions                    |
 
+Evidence guarantees added at the repair head:
+
+- one checked-selection reader is used by judge, status, closure and reporting;
+  a readable object is not a judgement;
+- judge and recovery claims share `<root>/evidence` as their only location and
+  both are settled by the dispatch outcome;
+- the judge's standing permission comes from the pristine prepared workspace,
+  never the trial's live `AGENTS.md`, so A/B instruction overlays stay out of
+  the packet;
+- the executing tool's artifact hash is compared with the freeze before
+  dispatch, detecting changed code under the same package version.
+
 ## Semantic parity runs
 
 All runs replay recorded evidence offline; no model call was made.

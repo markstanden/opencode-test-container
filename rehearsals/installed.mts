@@ -20,6 +20,7 @@ import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { artifactSha256 } from "../src/contracts/version.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "..");
@@ -98,7 +99,8 @@ function packAndInstall(
 function installedRehearsal(
     binary: string,
     work: string,
-): Record<string, unknown> {
+    consumer: string,
+): { receipt: Record<string, unknown>; identity: Record<string, unknown> } {
     const rehearsal = run(
         process.execPath,
         [join(HERE, "fresh-docs.mts"), work],
@@ -114,10 +116,41 @@ function installedRehearsal(
     if (!existsSync(receiptPath)) {
         throw new Error("installed rehearsal wrote no receipt");
     }
-    return JSON.parse(readFileSync(receiptPath, "utf8")) as Record<
-        string,
-        unknown
-    >;
+    const root = join(work, "campaign", "root");
+    const frozen = JSON.parse(
+        readFileSync(join(root, "prepare", "frozen.json"), "utf8"),
+    ) as { tool: { version: string; artifactSha256: string } };
+    const status = run(binary, ["status", "--root", root, "--json"], consumer);
+    if (status.status !== 0) throw new Error(status.stderr);
+    const statusTool = (
+        JSON.parse(status.stdout) as {
+            tool: { version: string; artifactSha256: string };
+        }
+    ).tool;
+    const installedRoot = join(
+        consumer,
+        "node_modules",
+        "@markstanden",
+        "opencode-test-container",
+    );
+    const artifact = artifactSha256(installedRoot);
+    if (frozen.tool.artifactSha256 !== artifact) {
+        throw new Error("installed artifact hash does not match the freeze");
+    }
+    if (statusTool.artifactSha256 !== artifact) {
+        throw new Error("status reports a different artifact hash");
+    }
+    return {
+        receipt: JSON.parse(readFileSync(receiptPath, "utf8")) as Record<
+            string,
+            unknown
+        >,
+        identity: {
+            frozen: frozen.tool,
+            status: statusTool,
+            artifact,
+        },
+    };
 }
 
 /** The main proof. */
@@ -127,11 +160,13 @@ function main(): void {
     const work = join(root, "rehearsal work");
     try {
         const installed = packAndInstall(root, consumer);
+        const rehearsal = installedRehearsal(installed.binary, work, consumer);
         const proof = {
             schemaVersion: 1,
             consumer,
             installed,
-            rehearsal: installedRehearsal(installed.binary, work),
+            identity: rehearsal.identity,
+            rehearsal: rehearsal.receipt,
         };
         writeFileSync(
             join(root, "installed-rehearsal.json"),

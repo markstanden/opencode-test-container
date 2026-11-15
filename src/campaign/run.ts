@@ -11,6 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { sha256Bytes, sha256Of } from "../contracts/canonical.ts";
+import type { ToolIdentity } from "../contracts/version.ts";
 import type { Arm, Campaign, Slot, SuiteCase } from "../contracts/types.ts";
 import {
     decodeTrail,
@@ -141,6 +142,8 @@ export interface RunDeps {
     runContainer?: (plan: ContainerPlan) => Promise<CommandResult>;
     /** The now value. */
     now?: () => string;
+    /** The executing tool identity, injected for drift tests. */
+    tool?: ToolIdentity;
 }
 
 /** Path of one trial's evidence directory. */
@@ -783,7 +786,10 @@ async function dispatchSlot(options: {
 }
 
 /** The validated state a run needs, or the refusal. */
-function runState(root: string):
+function runState(
+    root: string,
+    current?: ToolIdentity,
+):
     | {
           ok: true;
           manifest: PreparedManifest;
@@ -795,7 +801,10 @@ function runState(root: string):
     if (!prepared.ok) return { ok: false, problems: [prepared.problem] };
     const frozen = loadFrozen(root);
     if (!frozen.ok) return { ok: false, problems: [frozen.problem] };
-    const differences = deliveryCheck(root);
+    const differences =
+        current === undefined
+            ? deliveryCheck(root)
+            : deliveryCheck(root, current);
     if (differences.length > 0) {
         return {
             ok: false,
@@ -846,7 +855,7 @@ export async function runCampaign(
     } = {},
     deps: RunDeps = {},
 ): Promise<RunSummary> {
-    const state = runState(root);
+    const state = runState(root, deps.tool);
     if (!state.ok) {
         return { ok: false, ran: [], refused: [], problems: state.problems };
     }

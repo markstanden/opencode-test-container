@@ -48,7 +48,7 @@ declared populations:
   standalone measurement of it.
 
 Measured at the reconciliation head: migrated analysis 95.6/90.1/95.9; all
-OTC runtime 91.2/79.9/92.3; new OTC lifecycle/adapters/evaluators 86.6/69.7/88.2.
+OTC runtime 91.6/79.9/92.9; new OTC lifecycle/adapters/evaluators 87.6/70.5/89.7.
 The script fails loudly if any population drops below its floor, and writes the
 `coverage/lcov.info` Sonar consumes.
 

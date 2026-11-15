@@ -18,6 +18,7 @@ import {
 } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { sha256Bytes, sha256Of } from "../contracts/canonical.ts";
+import type { ToolIdentity } from "../contracts/version.ts";
 import type { Campaign, DocsTaskCase, Slot } from "../contracts/types.ts";
 import { isRecord } from "../contracts/validate.ts";
 import {
@@ -164,11 +165,30 @@ export interface JudgeDeps {
     runContainer?: (plan: ContainerPlan) => Promise<CommandResult>;
     /** The now value. */
     now?: () => string;
+    /** The executing tool identity, injected for drift tests. */
+    tool?: ToolIdentity;
 }
 
 /** The path of one slot's judgement evidence. */
 export function judgeDirectory(root: string, slotId: string): string {
     return join(root, "evidence", "judgements", slotId);
+}
+
+/** The one canonical claims location: the campaign evidence root. */
+export function claimsRoot(root: string): string {
+    return join(root, "evidence");
+}
+
+/** One dispatch's durable claims: a judge claim, plus a recovery claim. */
+interface DispatchClaims {
+    judge: BudgetClaim;
+    recovery?: BudgetClaim;
+}
+
+/** Release reservations that provably dispatched nothing. */
+function releaseClaims(claims: DispatchClaims): void {
+    releaseClaim(claims.judge);
+    if (claims.recovery !== undefined) releaseClaim(claims.recovery);
 }
 
 /** The path of one slot's checked selection. */
@@ -324,13 +344,33 @@ function primaryEvidence(trialDir: string): {
     };
 }
 
+/** The documentation mutation state for one slot. */
+function docStateFor(
+    root: string,
+    slot: Slot,
+    testCase: DocsTaskCase,
+): DocState {
+    const lakeRoot = testCase.lakeRoot ?? "docs";
+    const beforeDocs = lakeDocuments(
+        join(root, "prepare", "workspaces", testCase.caseId, lakeRoot),
+    );
+    const afterDocs = lakeDocuments(
+        join(trialDirectory(root, slot.slotId), "workspace", lakeRoot),
+    );
+    const change = docChanges(beforeDocs, afterDocs);
+    return {
+        documentsChanged: change.documentsChanged,
+        createdPaths: change.createdPaths,
+        modifiedPaths: change.modifiedPaths,
+    };
+}
+
 /** The packet and mutation state for one slot. */
 function buildPacket(options: {
     root: string;
     manifest: PreparedManifest;
     slot: Slot;
     testCase: DocsTaskCase;
-    prepared: PreparedCase;
 }): { packet: string; state: DocState } {
     const { root, slot, testCase } = options;
     const trialDir = trialDirectory(root, slot.slotId);
@@ -339,18 +379,15 @@ function buildPacket(options: {
         join(root, "prepare", "workspaces", testCase.caseId, lakeRoot),
     );
     const afterDocs = lakeDocuments(join(trialDir, "workspace", lakeRoot));
-    const change = docChanges(beforeDocs, afterDocs);
-    const state: DocState = {
-        documentsChanged: change.documentsChanged,
-        createdPaths: change.createdPaths,
-        modifiedPaths: change.modifiedPaths,
-    };
+    const state = docStateFor(root, slot, testCase);
     const operations = creditedOperationLines(trialDir);
     const packet = buildAcPrompt({
         taskPrompt: textOf(
             join(root, "prepare", "prompts", `${testCase.caseId}.txt`),
         ),
-        standingPermission: textOf(join(trialDir, "workspace", "AGENTS.md")),
+        standingPermission: textOf(
+            join(root, "prepare", "workspaces", testCase.caseId, "AGENTS.md"),
+        ),
         scenarioTruth: testCase.truth ?? "",
         beforeDocs,
         afterDocs,
@@ -757,40 +794,25 @@ function storeSelection(options: {
     return { ok: true, selection };
 }
 
-/** Validate an existing selection against recorded attempts. */
-function existingSelection(
-    root: string,
-    slot: Slot,
-    attempts: RecordedAttempt[],
-    policy: RecoveryPolicy | null,
+/** The registered recovery policy, or a parse refusal. */
+export function policyOf(
+    manifest: PreparedManifest,
 ):
-    | { ok: true; selection: SelectionRecord }
+    | { ok: true; policy: RecoveryPolicy | null }
     | { ok: false; problems: string[] } {
-    const value = readObject(selectionPath(root, slot.slotId));
-    if (value === null) {
-        return {
-            ok: false,
-            problems: [`selection for ${slot.slotId} is unreadable`],
-        };
-    }
-    const problems = selectionProblems(value, {
-        stamp: slot.slotId,
-        arm: slot.armId,
-        scenario: slot.caseId,
-        attemptIds: attempts.map((entry) => entry.attemptId),
-        manifestAttemptId: null,
-        policy,
-        attemptFacts: Object.fromEntries(
-            attempts.map((entry) => [entry.attemptId, entry.facts]),
-        ),
-    });
-    return problems.length > 0
-        ? { ok: false, problems }
-        : { ok: true, selection: value as unknown as SelectionRecord };
+    const declared = manifest.campaign.assessment.recovery;
+    if (declared === undefined) return { ok: true, policy: null };
+    const parsed = parseRecoveryPolicy(declared);
+    return parsed.ok
+        ? { ok: true, policy: parsed.policy }
+        : { ok: false, problems: parsed.problems };
 }
 
 /** The validated state a judge run needs, or the refusal. */
-function judgeState(root: string):
+function judgeState(
+    root: string,
+    current?: ToolIdentity,
+):
     | {
           ok: true;
           manifest: PreparedManifest;
@@ -802,7 +824,10 @@ function judgeState(root: string):
     if (!prepared.ok) return { ok: false, problems: [prepared.problem] };
     const frozen = loadFrozen(root);
     if (!frozen.ok) return { ok: false, problems: [frozen.problem] };
-    const differences = deliveryCheck(root);
+    const differences =
+        current === undefined
+            ? deliveryCheck(root)
+            : deliveryCheck(root, current);
     if (differences.length > 0) {
         return {
             ok: false,
@@ -826,22 +851,13 @@ function judgeState(root: string):
             ],
         };
     }
-    const declared = prepared.manifest.campaign.assessment.recovery;
-    if (declared === undefined) {
-        return {
-            ok: true,
-            manifest: prepared.manifest,
-            frozen: frozen.record,
-            policy: null,
-        };
-    }
-    const parsed = parseRecoveryPolicy(declared);
-    if (!parsed.ok) return { ok: false, problems: parsed.problems };
+    const policy = policyOf(prepared.manifest);
+    if (!policy.ok) return { ok: false, problems: policy.problems };
     return {
         ok: true,
         manifest: prepared.manifest,
         frozen: frozen.record,
-        policy: parsed.policy,
+        policy: policy.policy,
     };
 }
 
@@ -870,7 +886,7 @@ function claimInitial(
             problem: `judge budget is zero for ${slot.slotId}`,
         };
     }
-    const claimed = claimBudget(root, "judge", ceiling, {
+    const claimed = claimBudget(claimsRoot(root), "judge", ceiling, {
         stamp: slot.slotId,
         attemptId,
         key: `${slot.slotId}/${attemptId}`,
@@ -893,7 +909,7 @@ async function dispatchAttempt(options: {
     packetSha256: string;
     judgeModel: string;
     state: DocState;
-    claim: BudgetClaim;
+    claims: DispatchClaims;
     execute: (plan: ContainerPlan) => Promise<CommandResult>;
     now: () => string;
 }): Promise<
@@ -909,7 +925,7 @@ async function dispatchAttempt(options: {
     });
     const claimDir = claimAttemptDir(attemptDir);
     if (!claimDir.ok) {
-        releaseClaim(options.claim);
+        releaseClaims(options.claims);
         return {
             ok: false,
             problem: `refusing to overwrite judge attempt ${options.attemptId}: ${claimDir.reason}`,
@@ -956,11 +972,22 @@ async function dispatchAttempt(options: {
         options.packet,
         "utf8",
     );
-    const spawned = advanceClaim(options.claim, "spawned", {
-        stamp: options.slot.slotId,
-        attemptId: options.attemptId,
-        note: "judge dispatch started",
-    });
+    const spawned = {
+        judge: advanceClaim(options.claims.judge, "spawned", {
+            stamp: options.slot.slotId,
+            attemptId: options.attemptId,
+            note: "judge dispatch started",
+        }),
+        ...(options.claims.recovery === undefined
+            ? {}
+            : {
+                  recovery: advanceClaim(options.claims.recovery, "spawned", {
+                      stamp: options.slot.slotId,
+                      attemptId: options.attemptId,
+                      note: "recovery dispatch started",
+                  }),
+              }),
+    };
     let result: CommandResult;
     try {
         result = await options.execute(planned.plan);
@@ -988,11 +1015,18 @@ async function dispatchAttempt(options: {
         outcome,
         usage: outcome.usage,
     });
-    advanceClaim(spawned, "closed", {
+    advanceClaim(spawned.judge, "closed", {
         note: outcome.status,
         stamp: options.slot.slotId,
         attemptId: options.attemptId,
     });
+    if (spawned.recovery !== undefined) {
+        advanceClaim(spawned.recovery, "closed", {
+            note: outcome.status,
+            stamp: options.slot.slotId,
+            attemptId: options.attemptId,
+        });
+    }
     appendLedgerEvent(
         options.root,
         {
@@ -1077,6 +1111,307 @@ function recordSelection(options: {
     return { ok: true };
 }
 
+/** One checked per-slot selection and the evidence it names. */
+export interface CheckedSelection {
+    /** The checked selection record. */
+    selection: SelectionRecord;
+    /** The selected attempt's metadata. */
+    meta: JudgeAttemptMeta;
+    /** The selected attempt's stored judgement. */
+    judgement: StoredJudgement;
+}
+
+/** The identity and attempt-set checks for one raw selection. */
+function selectionRecordProblems(
+    root: string,
+    manifest: PreparedManifest,
+    slot: Slot,
+    policy: RecoveryPolicy | null,
+): {
+    problems: string[];
+    selection: SelectionRecord | null;
+    attempts: RecordedAttempt[];
+} {
+    const problems: string[] = [];
+    const recorded = recordedAttempts(root, slot.slotId);
+    problems.push(...recorded.problems);
+    const raw = readObject(selectionPath(root, slot.slotId));
+    if (raw === null) {
+        return {
+            problems: [
+                ...problems,
+                `selection for ${slot.slotId} is missing or unreadable`,
+            ],
+            selection: null,
+            attempts: recorded.attempts,
+        };
+    }
+    problems.push(
+        ...selectionProblems(raw, {
+            stamp: slot.slotId,
+            arm: slot.armId,
+            scenario: slot.caseId,
+            attemptIds: recorded.attempts.map((entry) => entry.attemptId),
+            manifestAttemptId: null,
+            policy,
+            attemptFacts: Object.fromEntries(
+                recorded.attempts.map((entry) => [
+                    entry.attemptId,
+                    entry.facts,
+                ]),
+            ),
+        }),
+    );
+    const selection = raw as unknown as SelectionRecord;
+    const policyHash = policy === null ? null : recoveryPolicySha256(policy);
+    if (selection.policySha256 !== policyHash) {
+        problems.push(
+            "selection policySha256 does not match the registered policy",
+        );
+    }
+    const packets = new Set(
+        recorded.attempts.map((entry) => entry.facts.packetSha256),
+    );
+    if (packets.size > 1) {
+        problems.push("selection attempts were judged from different packets");
+    }
+    return { problems, selection, attempts: recorded.attempts };
+}
+
+/** The selected attempt, or the reason it is absent. */
+function selectedAttempt(
+    attempts: RecordedAttempt[],
+    selection: SelectionRecord,
+): { problems: string[]; selected: RecordedAttempt | null } {
+    const selected = attempts.find(
+        (entry) => entry.attemptId === selection.selectedAttemptId,
+    );
+    return selected === undefined
+        ? {
+              problems: [
+                  `selection names an absent attempt ${String(selection.selectedAttemptId)}`,
+              ],
+              selected: null,
+          }
+        : { problems: [], selected };
+}
+
+/** The stored judgement's identity, hash and outcome shape. */
+function judgementShapeProblems(
+    judgement: Record<string, unknown>,
+    slot: Slot,
+    attemptId: string,
+): string[] {
+    if (
+        judgement.status !== "judged" ||
+        judgement.slotId !== slot.slotId ||
+        judgement.attemptId !== attemptId ||
+        !isRecord(judgement.value)
+    ) {
+        return [`selection ${attemptId} does not hold a usable judgement`];
+    }
+    return [];
+}
+
+/** The selected attempt and its stored judgement checks. */
+function judgementRecordProblems(
+    root: string,
+    slot: Slot,
+    testCase: DocsTaskCase,
+    attempts: RecordedAttempt[],
+    selection: SelectionRecord,
+): {
+    problems: string[];
+    meta: JudgeAttemptMeta | null;
+    judgement: StoredJudgement | null;
+} {
+    const chosen = selectedAttempt(attempts, selection);
+    if (chosen.selected === null) {
+        return {
+            problems: chosen.problems,
+            meta: null,
+            judgement: null,
+        };
+    }
+    const selected = chosen.selected;
+    const problems =
+        selected.meta.judgementStatus === "judged"
+            ? []
+            : [`selection names an unusable attempt ${selected.attemptId}`];
+    const judgement = readObject(
+        join(
+            attemptDirectory(root, slot.slotId, selected.attemptId),
+            "judgement.json",
+        ),
+    );
+    if (judgement === null) {
+        return {
+            problems: [
+                ...problems,
+                `selection ${selected.attemptId} has no readable judgement`,
+            ],
+            meta: selected.meta,
+            judgement: null,
+        };
+    }
+    const shape = judgementShapeProblems(judgement, slot, selected.attemptId);
+    if (shape.length > 0) {
+        return {
+            problems: [...problems, ...shape],
+            meta: selected.meta,
+            judgement: null,
+        };
+    }
+    if (
+        typeof selected.meta.judgementSha256 !== "string" ||
+        selected.meta.judgementSha256 !== sha256Of(judgement)
+    ) {
+        problems.push(
+            `selection ${selected.attemptId} judgement bytes changed`,
+        );
+    }
+    const value = judgement.value as Record<string, unknown>;
+    const outcome = value.documentationOutcome;
+    if (
+        typeof outcome !== "string" ||
+        judgement.utility !==
+            documentationScore(outcome as DocumentationOutcome)
+    ) {
+        problems.push(
+            `selection ${selected.attemptId} has an inconsistent outcome`,
+        );
+    }
+    problems.push(
+        ...validateAcJudgement(value, docStateFor(root, slot, testCase)),
+    );
+    return {
+        problems,
+        meta: selected.meta,
+        judgement: judgement as unknown as StoredJudgement,
+    };
+}
+
+/**
+ * Re-derive one slot's selection from evidence. A readable object is not a
+ * selection: attempt identity, packet identity, the selected judgement's hash,
+ * its outcome/utility and its agreement with the documented mutation state are
+ * all checked before status, closure, reporting or the judge trust it.
+ * @param options The campaign root, manifest, slot and registered policy.
+ * @returns The checked selection, or every inconsistency found.
+ * @param options.root The campaign root.
+ * @param options.manifest The prepared manifest.
+ * @param options.slot The scheduled slot.
+ * @param options.policy The parsed recovery policy, or null.
+ */
+export function checkedSelection(options: {
+    root: string;
+    manifest: PreparedManifest;
+    slot: Slot;
+    policy: RecoveryPolicy | null;
+}): { ok: true; value: CheckedSelection } | { ok: false; problems: string[] } {
+    const { root, manifest, slot, policy } = options;
+    const testCase = manifest.suite.cases.find(
+        (entry) => entry.caseId === slot.caseId,
+    );
+    if (testCase === undefined || testCase.kind !== "docs-task") {
+        return {
+            ok: false,
+            problems: [`slot ${slot.slotId} has no docs case`],
+        };
+    }
+    const base = selectionRecordProblems(root, manifest, slot, policy);
+    if (base.selection === null) {
+        return { ok: false, problems: base.problems };
+    }
+    const judgement = judgementRecordProblems(
+        root,
+        slot,
+        testCase,
+        base.attempts,
+        base.selection,
+    );
+    const problems = [...base.problems, ...judgement.problems];
+    return problems.length > 0 ||
+        judgement.meta === null ||
+        judgement.judgement === null
+        ? { ok: false, problems }
+        : {
+              ok: true,
+              value: {
+                  selection: base.selection,
+                  meta: judgement.meta,
+                  judgement: judgement.judgement,
+              },
+          };
+}
+
+/**
+ * Load the manifest and policy, then check one slot's selection.
+ * @param root The campaign root.
+ * @param slotId The scheduled slot.
+ * @returns The checked selection, or every inconsistency.
+ */
+export function checkedSelectionForSlot(
+    root: string,
+    slotId: string,
+): { ok: true; value: CheckedSelection } | { ok: false; problems: string[] } {
+    const prepared = loadPreparedManifest(root);
+    if (!prepared.ok) return { ok: false, problems: [prepared.problem] };
+    const slot = prepared.manifest.campaign.schedule.slots.find(
+        (entry) => entry.slotId === slotId,
+    );
+    if (slot === undefined) {
+        return { ok: false, problems: [`unknown slotId ${slotId}`] };
+    }
+    const policy = policyOf(prepared.manifest);
+    if (!policy.ok) return { ok: false, problems: policy.problems };
+    return checkedSelection({
+        root,
+        manifest: prepared.manifest,
+        slot,
+        policy: policy.policy,
+    });
+}
+
+/**
+ * Build the exact judge packet for one slot without dispatching.
+ * @param root The campaign root.
+ * @param slotId The scheduled slot.
+ * @returns The packet and mutation state, or the refusal.
+ */
+export function buildJudgePacketForSlot(
+    root: string,
+    slotId: string,
+):
+    | { ok: true; packet: string; state: DocState }
+    | { ok: false; problems: string[] } {
+    const prepared = loadPreparedManifest(root);
+    if (!prepared.ok) return { ok: false, problems: [prepared.problem] };
+    const slot = prepared.manifest.campaign.schedule.slots.find(
+        (entry) => entry.slotId === slotId,
+    );
+    const testCase = prepared.manifest.suite.cases.find(
+        (entry) => entry.caseId === slot?.caseId,
+    );
+    const preparedCase = prepared.manifest.cases.find(
+        (entry) => entry.caseId === slot?.caseId,
+    );
+    if (
+        slot === undefined ||
+        testCase?.kind !== "docs-task" ||
+        preparedCase === undefined
+    ) {
+        return { ok: false, problems: [`slot ${slotId} has no docs case`] };
+    }
+    const built = buildPacket({
+        root,
+        manifest: prepared.manifest,
+        slot,
+        testCase,
+    });
+    return { ok: true, ...built };
+}
+
 /** Settle a slot that already has a selection or a usable judgement. */
 function settleExisting(options: {
     root: string;
@@ -1089,7 +1424,12 @@ function settleExisting(options: {
 }): { status: "judged" | "skipped" | "refused"; problems: string[] } | null {
     const { root, slot, attempts, policy } = options;
     if (existsSync(selectionPath(root, slot.slotId))) {
-        const checked = existingSelection(root, slot, attempts, policy);
+        const checked = checkedSelection({
+            root,
+            manifest: options.manifest,
+            slot,
+            policy,
+        });
         return checked.ok
             ? { status: "skipped", problems: [] }
             : { status: "refused", problems: checked.problems };
@@ -1114,7 +1454,6 @@ function buildReady(options: {
     manifest: PreparedManifest;
     slot: Slot;
     testCase: DocsTaskCase;
-    prepared: PreparedCase;
 }): { packet: string; state: DocState } | { problem: string } {
     const trialDir = trialDirectory(options.root, options.slot.slotId);
     if (!existsSync(join(trialDir, "meta.json"))) {
@@ -1157,12 +1496,11 @@ function recoveryFacts(
         judgedAttemptIds: attempts
             .filter((entry) => entry.meta.judgementStatus === "judged")
             .map((entry) => entry.attemptId),
-        recoveryClaimsUsed: claimUsage(join(root, "evidence"), "recovery")
-            .claimed,
-        judgeClaimsUsed: claimUsage(join(root, "evidence"), "judge").claimed,
+        recoveryClaimsUsed: claimUsage(claimsRoot(root), "recovery").claimed,
+        judgeClaimsUsed: claimUsage(claimsRoot(root), "judge").claimed,
         ledgerState: "open" as const,
         freezeProblems: [],
-        unresolvedReservations: readClaims(join(root, "evidence"), "judge")
+        unresolvedReservations: readClaims(claimsRoot(root), "judge")
             .filter(
                 (entry) =>
                     entry.stamp === slot.slotId && entry.state !== "closed",
@@ -1179,7 +1517,7 @@ function claimAttempt(options: {
     attempts: RecordedAttempt[];
     policy: RecoveryPolicy | null;
     now: () => string;
-}): { attemptId: string; claim: BudgetClaim } | { problem: string } {
+}): { attemptId: string; claims: DispatchClaims } | { problem: string } {
     if (options.attempts.length === 0) {
         const claimed = claimInitial(
             options.root,
@@ -1189,7 +1527,10 @@ function claimAttempt(options: {
             options.now,
         );
         return claimed.ok
-            ? { attemptId: "attempt-001", claim: claimed.claim }
+            ? {
+                  attemptId: "attempt-001",
+                  claims: { judge: claimed.claim },
+              }
             : { problem: claimed.problem };
     }
     if (options.policy === null) {
@@ -1205,7 +1546,7 @@ function claimAttempt(options: {
         return { problem: `slot ${options.slot.slotId}: ${decision.reason}` };
     }
     const claimed = claimRecoveryBudget(
-        options.root,
+        claimsRoot(options.root),
         {
             ...options.policy,
             totalJudgeAttempts: judgeCeiling(options.manifest, options.policy),
@@ -1218,7 +1559,13 @@ function claimAttempt(options: {
         },
     );
     return claimed.ok
-        ? { attemptId: decision.attemptId, claim: claimed.judge }
+        ? {
+              attemptId: decision.attemptId,
+              claims: {
+                  judge: claimed.judge,
+                  recovery: claimed.recovery,
+              },
+          }
         : { problem: `slot ${options.slot.slotId}: ${claimed.reason}` };
 }
 
@@ -1300,7 +1647,7 @@ async function executeAttempts(options: {
             options.built.packet,
         );
         if ("problem" in ensured) {
-            releaseClaim(claimed.claim);
+            releaseClaims(claimed.claims);
             return { status: "refused", problems: [ensured.problem] };
         }
         packet = ensured;
@@ -1315,7 +1662,7 @@ async function executeAttempts(options: {
             packetSha256: packet.sha256,
             judgeModel: options.judgeModel,
             state: options.built.state,
-            claim: claimed.claim,
+            claims: claimed.claims,
             execute: options.execute,
             now: options.now,
         });
@@ -1433,7 +1780,7 @@ export async function judgeCampaign(
     options: { slotIds?: readonly string[]; dryRun?: boolean } = {},
     deps: JudgeDeps = {},
 ): Promise<JudgeSummary> {
-    const state = judgeState(root);
+    const state = judgeState(root, deps.tool);
     if (!state.ok) {
         return {
             ok: false,
@@ -1473,15 +1820,6 @@ export async function judgeCampaign(
     };
 }
 
-/** Read a slot's checked selection, or null. */
-export function readSelection(
-    root: string,
-    slotId: string,
-): SelectionRecord | null {
-    const value = readObject(selectionPath(root, slotId));
-    return value === null ? null : (value as unknown as SelectionRecord);
-}
-
 /** Read a slot's attempt metadata, sorted by attempt id. */
 export function readJudgeAttempts(
     root: string,
@@ -1516,25 +1854,12 @@ export function readSelectedJudgement(
     root: string,
     slotId: string,
 ): SelectedJudgement | null {
-    const selection = readSelection(root, slotId);
-    if (selection === null) return null;
-    const meta = readObject(
-        join(
-            attemptDirectory(root, slotId, selection.selectedAttemptId),
-            "meta.json",
-        ),
-    );
-    const judgement = readObject(
-        join(
-            attemptDirectory(root, slotId, selection.selectedAttemptId),
-            "judgement.json",
-        ),
-    );
-    return meta === null || judgement === null
-        ? null
-        : {
-              selection,
-              meta: meta as unknown as JudgeAttemptMeta,
-              judgement: judgement as unknown as StoredJudgement,
-          };
+    const checked = checkedSelectionForSlot(root, slotId);
+    return checked.ok
+        ? {
+              selection: checked.value.selection,
+              meta: checked.value.meta,
+              judgement: checked.value.judgement,
+          }
+        : null;
 }

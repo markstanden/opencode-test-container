@@ -5,7 +5,13 @@ import { loadPreparedManifest } from "./prepare.ts";
 import { loadFrozen } from "./freeze.ts";
 import { readLedger, trialStarts } from "./ledger.ts";
 import { readAssessments, assessmentPath } from "./assess.ts";
-import { readJudgeAttempts, readSelection } from "./judge.ts";
+import { checkedSelection, policyOf, readJudgeAttempts } from "./judge.ts";
+import {
+    toolIdentity,
+    toolIdentityProblems,
+    type ToolIdentity,
+} from "../contracts/version.ts";
+import { readClaims } from "../evaluators/docs/analysis/budget.ts";
 import { trialDirectory } from "./run.ts";
 import type { PreparedManifest } from "./prepare.ts";
 
@@ -50,6 +56,8 @@ export interface StatusReport {
     };
     /** The budgets value. */
     budgets: { trials: number; used: number; remaining: number } | null;
+    /** The executing tool identity. */
+    tool: ToolIdentity | null;
     /** The judgement counts value. */
     judgement: {
         /** Slots with a checked selection. */
@@ -62,6 +70,8 @@ export interface StatusReport {
         attempts: number;
         /** Attempts that ended without a usable verdict. */
         invalid: number;
+        /** Durable judge and recovery claims not yet closed. */
+        unsettled: number;
     } | null;
     /** The next actions value. */
     nextActions: NextAction[];
@@ -94,6 +104,7 @@ function judgementOf(
     manifest: StatusManifest,
 ): StatusReport["judgement"] {
     if (manifest.campaign.assessment.judge === undefined) return null;
+    const policy = policyOf(manifest);
     const slots = manifest.campaign.schedule.slots;
     let judged = 0;
     let pending = 0;
@@ -108,7 +119,15 @@ function judgementOf(
                 attempt.judgementStatus === "invalid-verdict" ||
                 attempt.judgementStatus === "judge-error",
         ).length;
-        if (readSelection(root, slot.slotId) !== null) {
+        const checked = policy.ok
+            ? checkedSelection({
+                  root,
+                  manifest,
+                  slot,
+                  policy: policy.policy,
+              })
+            : { ok: false as const, problems: policy.problems };
+        if (checked.ok) {
             judged += 1;
         } else if (
             existsSync(join(trialDirectory(root, slot.slotId), "meta.json"))
@@ -122,7 +141,16 @@ function judgementOf(
             else pending += 1;
         }
     }
-    return { judged, pending, failed, attempts, invalid };
+    const unsettled = ["judge", "recovery"].reduce(
+        (sum, kind) =>
+            sum +
+            readClaims(
+                join(root, "evidence"),
+                kind as "judge" | "recovery",
+            ).filter((claim) => claim.state !== "closed").length,
+        0,
+    );
+    return { judged, pending, failed, attempts, invalid, unsettled };
 }
 
 /** The judge action when completed slots are awaiting a checked judgement. */
@@ -220,6 +248,7 @@ export function statusOf(root: string): StatusReport {
                 fail: 0,
                 unknown: 0,
             },
+            tool: null,
             budgets: null,
             judgement: null,
             nextActions: [],
@@ -240,6 +269,12 @@ export function statusOf(root: string): StatusReport {
     const assessments = readAssessments(root);
     const frozen = loadFrozen(root);
     if (!frozen.ok) problems.push(frozen.problem);
+    const currentTool = toolIdentity();
+    if (frozen.ok) {
+        problems.push(...toolIdentityProblems(frozen.record.tool, currentTool));
+    }
+    const policy = policyOf(manifest);
+    if (!policy.ok) problems.push(...policy.problems);
     const state = lifecycleStateOf({
         root,
         manifest,
@@ -278,6 +313,7 @@ export function statusOf(root: string): StatusReport {
             unknown: assessments.filter((entry) => entry.outcome === "unknown")
                 .length,
         },
+        tool: currentTool,
         budgets: {
             trials: manifest.campaign.budgets.trials,
             used: starts.length,

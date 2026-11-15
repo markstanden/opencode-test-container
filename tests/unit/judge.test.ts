@@ -21,10 +21,13 @@ import { closeCampaign } from "../../src/campaign/close.ts";
 import { statusOf } from "../../src/campaign/status.ts";
 import { analyseCampaign } from "../../src/reporting/report.ts";
 import {
+    buildJudgePacketForSlot,
+    checkedSelectionForSlot,
     judgeCampaign,
     readJudgeAttempts,
-    readSelection,
 } from "../../src/campaign/judge.ts";
+import { readClaims } from "../../src/evaluators/docs/analysis/budget.ts";
+import { toolIdentity } from "../../src/contracts/version.ts";
 import { runCommand, type CommandResult } from "../../src/adapters/process.ts";
 import type { ContainerPlan } from "../../src/adapters/podman/container.ts";
 
@@ -228,6 +231,12 @@ async function campaignRoot(
     return { dir: fixture.dir, root };
 }
 
+/** The checked selection for a slot, or null. */
+function selected(root: string, slotId: string) {
+    const checked = checkedSelectionForSlot(root, slotId);
+    return checked.ok ? checked.value.selection : null;
+}
+
 /** Hash every path under a root. */
 function treeSnapshot(root: string): string {
     const lines: string[] = [];
@@ -275,7 +284,7 @@ describe("blind docs judge", () => {
         // Assert
         assert.equal(summary.ok, true, summary.problems.join("; "));
         assert.deepEqual(summary.judged, ["useful-write", "restraint"]);
-        const useful = readSelection(root, "useful-write");
+        const useful = selected(root, "useful-write");
         assert.notEqual(useful, null);
         assert.equal(useful?.selectedAttemptId, "attempt-001");
         assert.equal(useful?.attempts.length, 1);
@@ -328,7 +337,7 @@ describe("blind docs judge", () => {
         assert.equal(attempts.length, 2);
         assert.equal(attempts[0]?.failureClass, "json-syntax");
         assert.equal(attempts[0]?.packetSha256, attempts[1]?.packetSha256);
-        const selection = readSelection(root, "useful-write");
+        const selection = selected(root, "useful-write");
         assert.equal(selection?.selectedAttemptId, "attempt-002");
         assert.equal(selection?.attempts.length, 2);
     });
@@ -362,7 +371,7 @@ describe("blind docs judge", () => {
         assert.deepEqual(dispatches, ["useful-write/attempt-001"]);
         const attempts = readJudgeAttempts(root, "useful-write");
         assert.equal(attempts[0]?.failureClass, "schema");
-        assert.equal(readSelection(root, "useful-write"), null);
+        assert.equal(selected(root, "useful-write"), null);
     });
 
     it("refuses recovery when the total judge ceiling is exhausted", async () => {
@@ -402,7 +411,7 @@ describe("blind docs judge", () => {
             true,
             summary.problems.join("; "),
         );
-        assert.equal(readSelection(root, "useful-write"), null);
+        assert.equal(selected(root, "useful-write"), null);
     });
 
     it("does not recover an incomplete capture", async () => {
@@ -643,7 +652,7 @@ describe("blind docs judge", () => {
             true,
             summary.problems.join("; "),
         );
-        assert.equal(readSelection(root, "useful-write"), null);
+        assert.equal(selected(root, "useful-write"), null);
     });
 
     it("refuses a changed frozen packet instead of reusing it", async () => {
@@ -772,7 +781,7 @@ describe("blind docs judge", () => {
         assert.deepEqual(dispatches, ["judge"]);
         const attempts = readJudgeAttempts(root, "useful-write");
         assert.equal(attempts[0]?.failureClass, "transport-or-process");
-        assert.equal(readSelection(root, "useful-write"), null);
+        assert.equal(selected(root, "useful-write"), null);
     });
 
     it("refuses an unreadable selection", async () => {
@@ -847,7 +856,7 @@ describe("blind docs judge", () => {
         );
     });
 
-    it("closes after a terminal judge failure and reports it as failed", async () => {
+    it("reports a terminal judge failure as failed", async () => {
         // Arrange
         const { dir, root } = await campaignRoot();
         dirs.push(dir);
@@ -867,11 +876,34 @@ describe("blind docs judge", () => {
 
         // Act
         const status = statusOf(root);
-        const closed = closeCampaign(root, () => "2026-11-15T00:30:00.000Z");
 
         // Assert
         assert.equal(status.judgement?.failed, 1);
         assert.equal(status.judgement?.pending, 0);
+    });
+
+    it("closes after a terminal judge failure", async () => {
+        // Arrange
+        const { dir, root } = await campaignRoot();
+        dirs.push(dir);
+        await judgeCampaign(
+            root,
+            {},
+            {
+                runContainer: container({
+                    judgeResponses: (slotId) =>
+                        slotId === "useful-write"
+                            ? "not json"
+                            : judgement("none"),
+                }),
+                now: () => "2026-11-15T00:10:00.000Z",
+            },
+        );
+
+        // Act
+        const closed = closeCampaign(root, () => "2026-11-15T00:30:00.000Z");
+
+        // Assert
         assert.equal(
             closed.ok,
             true,
@@ -905,7 +937,7 @@ describe("blind docs judge", () => {
             "useful-write/attempt-002",
         ]);
         assert.equal(readJudgeAttempts(root, "useful-write").length, 2);
-        assert.equal(readSelection(root, "useful-write"), null);
+        assert.equal(selected(root, "useful-write"), null);
     });
 
     it("judges a paired two-arm schedule per slot", async () => {
@@ -946,8 +978,8 @@ describe("blind docs judge", () => {
         // Assert
         assert.equal(summary.ok, true, summary.problems.join("; "));
         assert.deepEqual(summary.judged, ["a-useful", "b-useful"]);
-        assert.notEqual(readSelection(root, "a-useful"), null);
-        assert.notEqual(readSelection(root, "b-useful"), null);
+        assert.notEqual(selected(root, "a-useful"), null);
+        assert.notEqual(selected(root, "b-useful"), null);
     });
 
     it("refuses an unreadable attempt as an unresolved reservation", async () => {
@@ -986,5 +1018,359 @@ describe("blind docs judge", () => {
             ),
             true,
         );
+    });
+});
+
+describe("judge evidence guarantees", () => {
+    const dirs: string[] = [];
+
+    after(() => {
+        for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
+    });
+
+    it("never treats a fabricated selection object as judged", async () => {
+        // Arrange
+        const { dir, root } = await campaignRoot();
+        dirs.push(dir);
+        const slotDir = join(root, "evidence", "judgements", "useful-write");
+        mkdirSync(slotDir, { recursive: true });
+        writeFileSync(join(slotDir, "selection.json"), "{}\n", "utf8");
+
+        // Act
+        const checked = checkedSelectionForSlot(root, "useful-write");
+        const status = statusOf(root);
+        const closed = closeCampaign(root, () => "2026-11-15T00:30:00.000Z");
+
+        // Assert
+        assert.equal(checked.ok, false);
+        assert.equal(status.judgement?.judged, 0);
+        assert.equal(status.judgement?.pending, 3);
+        assert.equal(closed.ok, false);
+    });
+
+    it("rejects a selected judgement whose stored verdict was changed", async () => {
+        // Arrange
+        const { dir, root } = await campaignRoot();
+        dirs.push(dir);
+        await judgeCampaign(
+            root,
+            {},
+            {
+                runContainer: container({}),
+                now: () => "2026-11-15T00:10:00.000Z",
+            },
+        );
+        const closed = closeCampaign(root, () => "2026-11-15T00:20:00.000Z");
+        assert.equal(
+            closed.ok,
+            true,
+            closed.ok ? "" : closed.problems.join("; "),
+        );
+        const judgementPath = join(
+            root,
+            "evidence",
+            "judgements",
+            "useful-write",
+            "attempt-001",
+            "judgement.json",
+        );
+        const stored = JSON.parse(readFileSync(judgementPath, "utf8")) as {
+            value: Record<string, unknown>;
+        };
+        stored.value.documentationOutcome = "transient";
+        writeFileSync(
+            judgementPath,
+            `${JSON.stringify(stored, null, 2)}\n`,
+            "utf8",
+        );
+
+        // Act
+        const checked = checkedSelectionForSlot(root, "useful-write");
+        const report = analyseCampaign(
+            root,
+            join(dir, "tampered-report"),
+            () => "2026-11-15T00:40:00.000Z",
+        );
+
+        // Assert
+        assert.equal(checked.ok, false);
+        assert.equal(
+            report.ok,
+            true,
+            report.ok ? "" : report.problems.join("; "),
+        );
+        if (!report.ok) return;
+        assert.equal(report.report.denominators.judged, 2);
+        assert.equal(
+            report.report.slots.find((slot) => slot.slotId === "useful-write")
+                ?.judgement,
+            null,
+        );
+    });
+
+    it("leaves no open claim after a recovery", async () => {
+        // Arrange
+        const { dir, root } = await campaignRoot();
+        dirs.push(dir);
+
+        // Act
+        await judgeCampaign(
+            root,
+            { slotIds: ["useful-write"] },
+            {
+                runContainer: container({
+                    judgeResponses: (slotId, attemptId) =>
+                        attemptId === "attempt-001"
+                            ? "not json"
+                            : judgement("useful-create"),
+                }),
+                now: () => "2026-11-15T00:10:00.000Z",
+            },
+        );
+
+        // Assert
+        assert.equal(existsSync(join(root, "judge")), false);
+        assert.equal(existsSync(join(root, "recovery")), false);
+        const judgeClaims = readClaims(join(root, "evidence"), "judge");
+        const recoveryClaims = readClaims(join(root, "evidence"), "recovery");
+        assert.equal(judgeClaims.length, 2);
+        assert.equal(recoveryClaims.length, 1);
+        assert.deepEqual(
+            judgeClaims.map((claim) => claim.state),
+            ["closed", "closed"],
+        );
+        assert.deepEqual(
+            recoveryClaims.map((claim) => claim.state),
+            ["closed"],
+        );
+    });
+
+    it("keeps an interrupted recovery claim visible", async () => {
+        // Arrange
+        const { dir, root } = await campaignRoot();
+        dirs.push(dir);
+        await judgeCampaign(
+            root,
+            { slotIds: ["restraint", "primary-failure"] },
+            {
+                runContainer: container({}),
+                now: () => "2026-11-15T00:09:00.000Z",
+            },
+        );
+        let judgeCalls = 0;
+
+        // Act
+        await assert.rejects(
+            judgeCampaign(
+                root,
+                { slotIds: ["useful-write"] },
+                {
+                    runContainer: async (plan) => {
+                        if (plan.argv[0] === "node") {
+                            return {
+                                status: 0,
+                                signal: null,
+                                stdout: "",
+                                stderr: "",
+                                timedOut: false,
+                                error: null,
+                            };
+                        }
+                        judgeCalls += 1;
+                        if (judgeCalls === 1) {
+                            return {
+                                status: 0,
+                                signal: null,
+                                stdout: `${textEvent("not json")}\n`,
+                                stderr: "",
+                                timedOut: false,
+                                error: null,
+                            };
+                        }
+                        throw new Error("simulated interrupted recovery");
+                    },
+                    now: () => "2026-11-15T00:10:00.000Z",
+                },
+            ),
+        );
+
+        // Assert
+        const recoveryClaims = readClaims(join(root, "evidence"), "recovery");
+        assert.equal(recoveryClaims.length, 1);
+        assert.equal(recoveryClaims[0]?.state, "spawned");
+        assert.equal(statusOf(root).judgement?.unsettled, 2);
+    });
+
+    it("refuses closure with an interrupted recovery claim", async () => {
+        // Arrange
+        const { dir, root } = await campaignRoot();
+        dirs.push(dir);
+        await judgeCampaign(
+            root,
+            { slotIds: ["restraint", "primary-failure"] },
+            {
+                runContainer: container({}),
+                now: () => "2026-11-15T00:09:00.000Z",
+            },
+        );
+        let judgeCalls = 0;
+        await assert.rejects(
+            judgeCampaign(
+                root,
+                { slotIds: ["useful-write"] },
+                {
+                    runContainer: async (plan) => {
+                        if (plan.argv[0] === "node") {
+                            return {
+                                status: 0,
+                                signal: null,
+                                stdout: "",
+                                stderr: "",
+                                timedOut: false,
+                                error: null,
+                            };
+                        }
+                        judgeCalls += 1;
+                        if (judgeCalls === 1) {
+                            return {
+                                status: 0,
+                                signal: null,
+                                stdout: `${textEvent("not json")}\n`,
+                                stderr: "",
+                                timedOut: false,
+                                error: null,
+                            };
+                        }
+                        throw new Error("simulated interrupted recovery");
+                    },
+                    now: () => "2026-11-15T00:10:00.000Z",
+                },
+            ),
+        );
+
+        // Act
+        const closed = closeCampaign(root, () => "2026-11-15T00:30:00.000Z");
+
+        // Assert
+        assert.equal(closed.ok, false);
+        assert.equal(
+            closed.ok
+                ? false
+                : closed.problems.some((problem) => /unsettled/.test(problem)),
+            true,
+        );
+    });
+
+    it("refuses judgement when the executing tool differs from the freeze", async () => {
+        // Arrange
+        const { dir, root } = await campaignRoot();
+        dirs.push(dir);
+
+        // Act
+        const summary = await judgeCampaign(
+            root,
+            {},
+            {
+                runContainer: container({}),
+                now: () => "2026-11-15T00:10:00.000Z",
+                tool: { ...toolIdentity(), version: "99.0.0" },
+            },
+        );
+
+        // Assert
+        assert.equal(summary.ok, false);
+        assert.equal(
+            summary.problems.some((problem) => /tool/.test(problem)),
+            true,
+            summary.problems.join("; "),
+        );
+        assert.equal(
+            existsSync(join(root, "evidence", "judgements", "useful-write")),
+            false,
+        );
+    });
+
+    it("does not expose either arm's instruction canary to the judge", async () => {
+        // Arrange
+        const dir = mkdtempSync(join(tmpdir(), "otc-judge-canary-"));
+        dirs.push(dir);
+        cpSync(FIXTURE, dir, { recursive: true });
+        rmSync(join(dir, "workspace", "AGENTS.md"), { force: true });
+        writeFileSync(join(dir, "arm-a.md"), "CANARY_ARM_A\n", "utf8");
+        writeFileSync(join(dir, "arm-b.md"), "CANARY_ARM_B\n", "utf8");
+        const campaignPath = join(dir, "campaign.json");
+        const campaign = JSON.parse(readFileSync(campaignPath, "utf8")) as {
+            subjects: unknown[];
+            schedule: { slots: unknown[] };
+            budgets: { trials: number; judgeAttempts: number };
+        };
+        campaign.subjects = [
+            {
+                armId: "a",
+                instructions: [{ id: "a", path: "arm-a.md", as: "AGENTS.md" }],
+            },
+            {
+                armId: "b",
+                instructions: [{ id: "b", path: "arm-b.md", as: "AGENTS.md" }],
+            },
+        ];
+        campaign.schedule.slots = [
+            {
+                slotId: "a-useful",
+                caseId: "useful-write",
+                armId: "a",
+                repetitionId: "r0",
+            },
+            {
+                slotId: "b-useful",
+                caseId: "useful-write",
+                armId: "b",
+                repetitionId: "r0",
+            },
+        ];
+        campaign.budgets.trials = 2;
+        writeFileSync(
+            campaignPath,
+            `${JSON.stringify(campaign, null, 2)}\n`,
+            "utf8",
+        );
+        const root = join(dir, "root");
+        const prepared = prepareCampaign(campaignPath, root);
+        assert.equal(prepared.ok, true);
+        const frozen = await freezeCampaign(
+            root,
+            fakeImage as typeof runCommand,
+        );
+        assert.equal(frozen.ok, true);
+        await runCampaign(
+            root,
+            {},
+            {
+                runContainer: container({}),
+                now: () => "2026-11-15T00:00:00.000Z",
+            },
+        );
+
+        // Act
+        const packetA = buildJudgePacketForSlot(root, "a-useful");
+        const packetB = buildJudgePacketForSlot(root, "b-useful");
+
+        // Assert
+        assert.equal(
+            packetA.ok,
+            true,
+            packetA.ok ? "" : packetA.problems.join("; "),
+        );
+        assert.equal(
+            packetB.ok,
+            true,
+            packetB.ok ? "" : packetB.problems.join("; "),
+        );
+        if (!packetA.ok || !packetB.ok) return;
+        assert.equal(packetA.packet.includes("CANARY_ARM_A"), false);
+        assert.equal(packetA.packet.includes("CANARY_ARM_B"), false);
+        assert.equal(packetB.packet.includes("CANARY_ARM_A"), false);
+        assert.equal(packetB.packet.includes("CANARY_ARM_B"), false);
+        assert.equal(packetA.packet, packetB.packet);
     });
 });

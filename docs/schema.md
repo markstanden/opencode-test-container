@@ -31,7 +31,7 @@ is rendered as `r<N>` only at the adapter boundary.
 | report        | 1       | derived, `reportSha256` over content                                  |
 | ledger event  | 1       | trial, primary-check, assessment, judge and close events              |
 
-`docs-task` cases may also carry `truth` (arm-blind judge context) and`primaryCheck: { id, directory, script, timeoutMs? }`. The checker directory
+`docs-task` cases may also carry `truth` (arm-blind judge context) and `primaryCheck: { id, directory, script, timeoutMs? }`. The checker directory
 is staged under `prepare/primary-checks/<caseId>`; the fixed contract is
 `node /checker/<script> /live /pristine`. It is never mounted into the trial.
 
@@ -41,9 +41,22 @@ recovery budgets count dispatches, not HTTP requests; `providerRequestLimit`
 stays `null` unless an adapter exposes a real request count.
 
 The prepared manifest and freeze receipt also carry
-`tool: { name, version, evaluatorVersion }`, read from the installed package
-metadata. This makes the compiled artifact, the source identity and the frozen
-evaluator semantics traceable without a Git checkout.
+`tool: { name, version, evaluatorVersion, artifactSha256 }`. The artifact hash
+covers the executing runtime tree and package manifest, so a changed build
+under the same version is detectable. `run`, `judge`, `delivery-check` and
+`status` compare the executing identity with the frozen identity before
+dispatch; read-only historical replay does not require it.
+
+Judge and recovery claims live only under
+`<root>/evidence/{judge,recovery}`. A recovery settles both of its claims
+according to the dispatch outcome; an interrupted dispatch keeps the claim
+`spawned` and closure refuses it. Status counts `judged`, `pending`, `failed`,
+`invalid` and `unsettled` from the same checked state.
+
+A selection is trusted only through the shared checked reader: attempt set,
+packet identity, policy hash, selected judgement SHA-256, outcome/utility and
+the judged documentation state are re-derived. A readable object alone is never
+a judgement and never permits closure.
 
 ## New/legacy names
 

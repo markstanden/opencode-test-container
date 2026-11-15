@@ -39,6 +39,25 @@ docs repository still owns the case data, truth and checker bytes. The trial
 cannot read the checker, and the judge cannot read the campaign or arm
 identities.
 
+## Evidence-guarantee repair pass
+
+Four independently reproduced blockers are closed:
+
+- one checked-selection reader is shared by judge, status, closure and report;
+  it re-derives attempt identity, packet identity, policy hash, judgement
+  SHA-256, outcome/utility and the judged mutation state. A readable `{}` is
+  not a judgement and cannot permit closure;
+- judge and recovery claims now share `<root>/evidence`; a recovery settles both
+  claims by dispatch outcome, and an interrupted dispatch leaves visible
+  `spawned` claims that block closure;
+- the judge's standing permission is read from the pristine prepared workspace,
+  never the trial's live `AGENTS.md`; A/B instruction canaries are absent from
+  both packets;
+- the executing tool identity includes an artifact hash and is compared with
+  the freeze before `run`, `judge`, `delivery-check` or `status` trusts it;
+  changed code under the same version is refused. Read-only historical replay
+  remains independent of the freeze.
+
 ## Proof
 
 - `npm ci`, `npm test` (552 tests, including packaged CLI), `npm run
@@ -46,9 +65,9 @@ typecheck`, `defined comply` all pass.
 - Coverage populations, all measured on this head:
     - migrated docs analysis keeps the inherited 95/90/95 floors
       (95.6/90.1/95.9);
-    - all OTC runtime has the explicit 75/55/80 ratchet (91.2/79.9/92.3);
+    - all OTC runtime has the explicit 75/55/80 ratchet (91.6/79.9/92.9);
     - the genuinely new lifecycle/adapters/evaluators population has an explicit
-      82/66/84 ratchet (86.6/69.7/88.2).
+      82/66/84 ratchet (87.6/70.5/89.7).
 - Recorded-evidence parity: committed mini corpus deep-equal; recorded 40-trial
   confirmation and 48-trial screening corpora byte-identical apart from the
   receipt's `renderedAt`.

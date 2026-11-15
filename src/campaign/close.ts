@@ -2,7 +2,7 @@ import { appendLedgerEvent, readLedger, trialStarts } from "./ledger.ts";
 import { loadPreparedManifest, type PreparedManifest } from "./prepare.ts";
 import { loadFrozen } from "./freeze.ts";
 import { readAssessments } from "./assess.ts";
-import { readJudgeAttempts, readSelection } from "./judge.ts";
+import { checkedSelection, policyOf, readJudgeAttempts } from "./judge.ts";
 import { readClaims } from "../evaluators/docs/analysis/budget.ts";
 import { join } from "node:path";
 
@@ -25,9 +25,18 @@ function unjudgedCompleted(
     completed: ReadonlySet<string>,
 ): string[] {
     if (manifest.campaign.assessment.judge === undefined) return [];
+    const policy = policyOf(manifest);
     return manifest.campaign.schedule.slots.flatMap((slot) => {
         if (!completed.has(slot.slotId)) return [];
-        if (readSelection(root, slot.slotId) !== null) return [];
+        const checked = policy.ok
+            ? checkedSelection({
+                  root,
+                  manifest,
+                  slot,
+                  policy: policy.policy,
+              })
+            : { ok: false as const, problems: policy.problems };
+        if (checked.ok) return [];
         const terminal = readJudgeAttempts(root, slot.slotId).some(
             (attempt) =>
                 attempt.judgementStatus === "invalid-verdict" ||
@@ -41,6 +50,37 @@ function unjudgedCompleted(
 export type CloseResult =
     | { ok: true; alreadyClosed: boolean; closedAt: string }
     | { ok: false; problems: string[] };
+
+/** Every reason closure must refuse now, in reporting order. */
+function closureRefusals(
+    root: string,
+    manifest: PreparedManifest,
+    starts: ReturnType<typeof trialStarts>,
+    ended: ReadonlySet<string>,
+): string[] {
+    const unresolved = starts
+        .map((event) => (typeof event.slotId === "string" ? event.slotId : ""))
+        .filter((slotId) => !ended.has(slotId));
+    if (unresolved.length > 0) {
+        return [
+            `unresolved trial launch(es): ${unresolved.join(", ")}; closure would hide unknown spend`,
+        ];
+    }
+    const policy = policyOf(manifest);
+    if (!policy.ok) return policy.problems;
+    const pending = unjudgedCompleted(root, manifest, ended);
+    if (pending.length > 0) {
+        return [
+            `unjudged completed slot(s): ${pending.join(", ")}; run otc judge before closure`,
+        ];
+    }
+    const claims = unsettledClaims(root);
+    return claims.length > 0
+        ? [
+              `unsettled judge spend: ${claims.join("; ")}; closure would hide an unknown outcome`,
+          ]
+        : [];
+}
 
 /**
  * Close a campaign's ledger. Closure is an append-only event and is
@@ -76,34 +116,9 @@ export function closeCampaign(
                 typeof event.slotId === "string" ? event.slotId : "",
             ),
     );
-    const unresolved = starts
-        .map((event) => (typeof event.slotId === "string" ? event.slotId : ""))
-        .filter((slotId) => !ended.has(slotId));
-    if (unresolved.length > 0) {
-        return {
-            ok: false,
-            problems: [
-                `unresolved trial launch(es): ${unresolved.join(", ")}; closure would hide unknown spend`,
-            ],
-        };
-    }
-    const pending = unjudgedCompleted(root, prepared.manifest, ended);
-    if (pending.length > 0) {
-        return {
-            ok: false,
-            problems: [
-                `unjudged completed slot(s): ${pending.join(", ")}; run otc judge before closure`,
-            ],
-        };
-    }
-    const claims = unsettledClaims(root);
-    if (claims.length > 0) {
-        return {
-            ok: false,
-            problems: [
-                `unsettled judge spend: ${claims.join("; ")}; closure would hide an unknown outcome`,
-            ],
-        };
+    const refusals = closureRefusals(root, prepared.manifest, starts, ended);
+    if (refusals.length > 0) {
+        return { ok: false, problems: refusals };
     }
     const assessments = readAssessments(root);
     const closedAt = now();

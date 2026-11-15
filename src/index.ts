@@ -74,12 +74,15 @@ export {
 export type { RunSummary, TrialMeta } from "./campaign/run.ts";
 export {
     judgeCampaign,
+    buildJudgePacketForSlot,
+    checkedSelection,
+    checkedSelectionForSlot,
     readJudgeAttempts,
     readSelectedJudgement,
-    readSelection,
     selectionPath,
 } from "./campaign/judge.ts";
 export type {
+    CheckedSelection,
     JudgeAttemptMeta,
     JudgeSummary,
     SelectedJudgement,

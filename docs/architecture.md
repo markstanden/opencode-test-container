@@ -84,7 +84,9 @@ remain external data; OTC stages, hashes and executes them.
   a separate `network: "none"` container with the completed workspace and the
   pristine workspace read-only. It is never mounted into the trial.
 - The judge runs in a neutral container with the packet read-only, a neutral
-  config home and no arm subjects, campaign manifest or evidence root.
+  config home and no arm subjects, campaign manifest or evidence root. Its
+  standing-permission block comes from the pristine prepared workspace, never
+  the trial's live `AGENTS.md`.
 - Suite, campaign, manifest, truth, criteria and other slots are outside the
   model-visible filesystem.
 - Credentials travel through a 0600 env file; argv and receipts carry names and
