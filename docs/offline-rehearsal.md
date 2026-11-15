@@ -65,7 +65,8 @@ contains a space, and the same fresh docs lifecycle runs through
 `node_modules/.bin/otc`. The 2026-11-15 run used image
 `sha256:58505eac…`, OpenCode 2.2.6 and installed version `0.1.0`; it produced
 the same four-slot result, one recovery, one exhausted refusal and zero paid
-calls. The receipt carries the tarball filename, SHA-256 and npm integrity.
+calls. The receipt records the tarball filename, SHA-256 and npm integrity;
+the exact identity is reported with the handback attestation.
 The development-only provider stays outside the tarball.
 
 The migrated `harness/run.ts` CLI is gone: it could spawn the docs

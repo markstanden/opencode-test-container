@@ -61,7 +61,7 @@ typecheck`, `defined comply` all pass.
   scripted chat requests, 0 readiness probes, 0 paid calls.
 - Installed tarball runs the complete offline docs lifecycle from an unrelated
   directory with spaces, with no checkout or `tsx`/Bun dependency. The receipt
-  records the tarball SHA-256 and npm integrity.
+  records the tarball filename, SHA-256 and npm integrity.
 - The migrated `harness/run.ts` CLI is removed, so no OTC source can spawn the
   docs repository's `placement-harness/harness.mts`. Only product-supplied
   suite and checker bytes remain external data.
