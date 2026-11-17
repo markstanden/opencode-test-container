@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { sha256Bytes } from "./canonical.ts";
+import { environmentNameProblem } from "./env.ts";
 import type {
     Arm,
     AssessmentKind,
@@ -793,6 +794,17 @@ function runtimeExtras(
             "campaign.runtime.passthroughEnv must be environment names",
         );
         return {};
+    }
+    if (Array.isArray(value.passthroughEnv)) {
+        for (const name of value.passthroughEnv as string[]) {
+            const problem = environmentNameProblem(name);
+            if (problem !== null) {
+                problems.push(
+                    `campaign.runtime.passthroughEnv: ${problem}`,
+                );
+                return {};
+            }
+        }
     }
     return {
         ...(typeof value.imageId === "string" && value.imageId !== ""

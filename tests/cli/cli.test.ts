@@ -201,7 +201,9 @@ describe("packaged consumer", () => {
             assert.equal(packed.status, 0, packed.stderr);
             const parsed: unknown = JSON.parse(packed.stdout);
             const entries = (
-                Array.isArray(parsed) ? parsed : Object.values(parsed)
+                Array.isArray(parsed)
+                    ? parsed
+                    : Object.values(parsed as Record<string, unknown>)
             ) as Array<{ filename?: string }>;
             const filename = entries[0]?.filename;
             assert.equal(typeof filename, "string");

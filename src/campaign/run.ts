@@ -19,6 +19,8 @@ import {
     type DecodedTrail,
 } from "../adapters/opencode/events.ts";
 import {
+    environmentFileProblems,
+    environmentFileText,
     opencodeRunArgs,
     providerOverlay,
     sessionEnv,
@@ -30,6 +32,7 @@ import {
     CONTAINER_SUBJECTS,
     CONTAINER_WORKSPACE,
     normaliseMounts,
+    ownedContainerName,
     runContainer,
     type ContainerPlan,
     type Mount,
@@ -106,6 +109,8 @@ export interface TrialMeta {
     timedOut: boolean;
     /** The error value. */
     error: string | null;
+    /** Whether captured output exceeded its byte limit. */
+    overflowed?: boolean;
     /** The duration ms value. */
     durationMs: number;
     /** The capture valid value. */
@@ -255,7 +260,7 @@ function writeTrialEnvironment(
     campaign: Campaign,
     journal: string | null,
     passthrough: readonly string[],
-): { envFile: string; names: string[] } {
+): { ok: true; envFile: string; names: string[] } | { ok: false; problems: string[] } {
     const env = sessionEnv(process.env, {
         configHome: CONTAINER_CONFIG_HOME,
         dataHome: "/tmp/agent-home/.local/share",
@@ -283,16 +288,14 @@ function writeTrialEnvironment(
             : ["DOCS_OPERATION_JOURNAL", "DOCS_OPERATION_JOURNAL_KEY"]),
         ...passthrough,
     ];
+    const problems = environmentFileProblems(env, names, passthrough);
+    if (problems.length > 0) return { ok: false, problems };
     const envFile = join(trialDir, "trial.env");
-    writeFileSync(
-        envFile,
-        `${names
-            .filter((name) => env[name] !== undefined)
-            .map((name) => `${name}=${env[name] ?? ""}`)
-            .join("\n")}\n`,
-        { encoding: "utf8", mode: 0o600 },
-    );
-    return { envFile, names };
+    writeFileSync(envFile, environmentFileText(env, names), {
+        encoding: "utf8",
+        mode: 0o600,
+    });
+    return { ok: true, envFile, names };
 }
 
 /** Stage the workspace, config home and journal for one trial. */
@@ -402,12 +405,14 @@ export function planTrial(options: {
         ...(campaign.runtime.passthroughEnv ?? []),
         ...(options.passthrough ?? []),
     ];
-    const { envFile, names } = writeTrialEnvironment(
+    const environment = writeTrialEnvironment(
         trialDir,
         campaign,
         journal,
         passthrough,
     );
+    if (!environment.ok) return environment;
+    const { envFile, names } = environment;
     const plan: ContainerPlan = {
         imageId: frozen.imageId,
         mounts: trialMounts({
@@ -422,6 +427,16 @@ export function planTrial(options: {
         envNames: [...new Set(names)],
         envFile,
         timeoutMs: campaign.runtime.timeoutMs,
+        name: ownedContainerName(
+            campaign.campaignId,
+            slot.slotId,
+            randomBytes(6).toString("hex"),
+        ),
+        labels: {
+            "otc.owner": "otc",
+            "otc.campaign": campaign.campaignId,
+            "otc.slot": slot.slotId,
+        },
     };
     return { ok: true, plan, argv, configSha256 };
 }
@@ -548,9 +563,15 @@ async function executeSlot(options: {
         startedAt,
     );
     const started = Date.now();
-    const result = await execute(planned.plan);
-    if (planned.plan.envFile !== null) {
-        rmSync(planned.plan.envFile, { force: true });
+    let result: CommandResult;
+    try {
+        result = await execute(planned.plan);
+    } finally {
+        // The env file holds provider credentials; it must disappear on every
+        // path, including a throwing runner.
+        if (planned.plan.envFile !== null) {
+            rmSync(planned.plan.envFile, { force: true });
+        }
     }
     const completedAt = now();
     const trail = decodeTrail(result.stdout);
@@ -566,6 +587,7 @@ async function executeSlot(options: {
         signal: result.signal,
         timedOut: result.timedOut,
         error: result.error,
+        overflowed: result.overflowed === true,
         durationMs: Date.now() - started,
         captureValid: integrity.length === 0,
         captureProblems: integrity,

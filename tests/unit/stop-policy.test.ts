@@ -75,7 +75,7 @@ function policy(version: 1 | 2 | undefined): Campaign {
         budgets: { trials: 1, judgeAttempts: 0 },
         assessment: { kind: "skill-activation" },
         stopOnFirstFailure: true,
-        ...(version === undefined ? {} : { stopPolicy: { version } }),
+        ...(version === 2 ? { stopPolicy: { version: 2 as const } } : {}),
     };
 }
 
@@ -167,7 +167,13 @@ describe("stop-policy truth table", () => {
         assert.equal(judgeShouldStop(policy(1), adverse), false);
         assert.equal(judgeShouldStop(policy(1), broken), true);
         assert.equal(
-            judgeShouldStop({ ...policy(2), stopOnFirstFailure: undefined }, adverse),
+            judgeShouldStop(
+                {
+                    ...policy(2),
+                    stopOnFirstFailure: undefined as unknown as boolean,
+                },
+                adverse,
+            ),
             false,
         );
     });

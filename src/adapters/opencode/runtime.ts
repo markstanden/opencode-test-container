@@ -1,6 +1,10 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Arm, Campaign } from "../../contracts/types.ts";
+import {
+    environmentNameProblem,
+    environmentValueProblem,
+} from "../../contracts/env.ts";
 
 /** One plugin entry handed to OpenCode. */
 export interface PluginEntry {
@@ -193,4 +197,47 @@ export function sessionEnv(
         if (value !== undefined) env[name] = value;
     }
     return env;
+}
+
+/**
+ * Problems with one about-to-be-written environment file. Passthrough names
+ * must be portable and non-reserved; every written value must be safe for an
+ * env file. Messages name the variable, never its value.
+ * @param env The assembled environment.
+ * @param names The names selected for the file.
+ * @param passthrough The caller-declared passthrough names.
+ * @returns Problems; empty means the file may be written.
+ */
+export function environmentFileProblems(
+    env: NodeJS.ProcessEnv,
+    names: readonly string[],
+    passthrough: readonly string[],
+): string[] {
+    const problems = passthrough.flatMap((name) => {
+        const problem = environmentNameProblem(name);
+        return problem === null ? [] : [problem];
+    });
+    for (const name of names) {
+        const value = env[name];
+        if (value === undefined) continue;
+        const problem = environmentValueProblem(name, value);
+        if (problem !== null) problems.push(problem);
+    }
+    return problems;
+}
+
+/**
+ * The exact env-file text for one selected name set.
+ * @param env The assembled environment.
+ * @param names The names to write.
+ * @returns Newline-joined `NAME=value` entries with a trailing newline.
+ */
+export function environmentFileText(
+    env: NodeJS.ProcessEnv,
+    names: readonly string[],
+): string {
+    return `${names
+        .filter((name) => env[name] !== undefined)
+        .map((name) => `${name}=${env[name] ?? ""}`)
+        .join("\n")}\n`;
 }

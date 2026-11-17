@@ -623,7 +623,7 @@ describe("blind docs judge", () => {
         );
     });
 
-    it("refuses a packet that exposes an arm label", async () => {
+    it("refuses a packet that exposes a declared arm identity structurally", async () => {
         // Arrange
         const { dir, root } = await campaignRoot(undefined, {
             suite: (suite) => {
@@ -636,7 +636,7 @@ describe("blind docs judge", () => {
                 );
                 assert.notEqual(useful, undefined);
                 (useful as { truth: string }).truth =
-                    "The candidate arm should win.";
+                    'The selected arm is "candidate".';
             },
         });
         dirs.push(dir);
@@ -659,6 +659,38 @@ describe("blind docs judge", () => {
             summary.problems.join("; "),
         );
         assert.equal(selected(root, "useful-write"), null);
+    });
+
+    it("preserves legitimate task prose that names a candidate", async () => {
+        // Arrange
+        const { dir, root } = await campaignRoot(undefined, {
+            suite: (suite) => {
+                const cases = suite.cases as Array<{
+                    caseId: string;
+                    truth: string;
+                }>;
+                const useful = cases.find(
+                    (entry) => entry.caseId === "useful-write",
+                );
+                assert.notEqual(useful, undefined);
+                (useful as { truth: string }).truth =
+                    "The candidate must name spans after the operation.";
+            },
+        });
+        dirs.push(dir);
+
+        // Act
+        const summary = await judgeCampaign(
+            root,
+            { slotIds: ["useful-write"] },
+            {
+                runContainer: container({}),
+                now: () => "2026-11-15T00:10:00.000Z",
+            },
+        );
+
+        // Assert
+        assert.equal(summary.ok, true, summary.problems.join("; "));
     });
 
     it("refuses a changed frozen packet instead of reusing it", async () => {

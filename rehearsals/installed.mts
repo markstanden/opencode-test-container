@@ -66,7 +66,9 @@ function packAndInstall(
     if (packed.status !== 0) throw new Error(packed.stderr);
     const parsed = JSON.parse(packed.stdout) as unknown;
     const entries = (
-        Array.isArray(parsed) ? parsed : Object.values(parsed)
+        Array.isArray(parsed)
+            ? parsed
+            : Object.values(parsed as Record<string, unknown>)
     ) as Array<{
         filename?: string;
         integrity?: string;

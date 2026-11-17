@@ -22,6 +22,8 @@ import type { ToolIdentity } from "../contracts/version.ts";
 import type { Campaign, DocsTaskCase, Slot } from "../contracts/types.ts";
 import { isRecord } from "../contracts/validate.ts";
 import {
+    environmentFileProblems,
+    environmentFileText,
     opencodeRunArgs,
     providerOverlay,
     sessionEnv,
@@ -29,6 +31,7 @@ import {
 } from "../adapters/opencode/runtime.ts";
 import {
     normaliseMounts,
+    ownedContainerName,
     runContainer,
     type ContainerPlan,
 } from "../adapters/podman/container.ts";
@@ -76,6 +79,7 @@ import {
     readContainedDocuments,
     readContainedFile,
 } from "../evidence/containment.ts";
+import { randomBytes } from "node:crypto";
 import { appendLedgerEvent, readLedger } from "./ledger.ts";
 import { isAdverseOutcome, judgeShouldStop } from "./stop-policy.ts";
 import {
@@ -492,7 +496,7 @@ function judgeMounts(options: {
 function writeJudgeEnvironment(
     attemptDir: string,
     campaign: Campaign,
-): { envFile: string; names: string[] } {
+): { ok: true; envFile: string; names: string[] } | { ok: false; problems: string[] } {
     const env = sessionEnv(process.env, {
         configHome: "/config-home",
         dataHome: "/tmp/agent-home/.local/share",
@@ -510,16 +514,18 @@ function writeJudgeEnvironment(
             : ["OPENCODE_CONFIG_CONTENT"]),
         ...(campaign.runtime.passthroughEnv ?? []),
     ];
-    const envFile = join(attemptDir, "judge.env");
-    writeFileSync(
-        envFile,
-        `${names
-            .filter((name) => env[name] !== undefined)
-            .map((name) => `${name}=${env[name] ?? ""}`)
-            .join("\n")}\n`,
-        { encoding: "utf8", mode: 0o600 },
+    const problems = environmentFileProblems(
+        env,
+        names,
+        campaign.runtime.passthroughEnv ?? [],
     );
-    return { envFile, names };
+    if (problems.length > 0) return { ok: false, problems };
+    const envFile = join(attemptDir, "judge.env");
+    writeFileSync(envFile, environmentFileText(env, names), {
+        encoding: "utf8",
+        mode: 0o600,
+    });
+    return { ok: true, envFile, names };
 }
 
 /** The outcome of one judge dispatch, before storage. */
@@ -664,6 +670,7 @@ function classifyAttempt(
 
 /** The planned dispatch for one attempt. */
 interface AttemptPlan {
+    ok: true;
     plan: ContainerPlan;
     attemptDir: string;
     packetSha256: string;
@@ -679,7 +686,7 @@ function planAttempt(options: {
     packetSha256: string;
     packetFile: string;
     judgeModel: string;
-}): AttemptPlan {
+}): AttemptPlan | { ok: false; problems: string[] } {
     const attemptDir = attemptDirectory(
         options.root,
         options.slot.slotId,
@@ -693,10 +700,9 @@ function planAttempt(options: {
     );
     const work = join(attemptDir, "work");
     mkdirSync(work, { recursive: true });
-    const { envFile, names } = writeJudgeEnvironment(
-        attemptDir,
-        options.campaign,
-    );
+    const environment = writeJudgeEnvironment(attemptDir, options.campaign);
+    if (!environment.ok) return environment;
+    const { envFile, names } = environment;
     const plan: ContainerPlan = {
         imageId: "",
         mounts: judgeMounts({
@@ -720,8 +726,24 @@ function planAttempt(options: {
         timeoutMs:
             options.campaign.assessment.judge?.timeoutMs ??
             options.campaign.runtime.timeoutMs,
+        name: ownedContainerName(
+            options.campaign.campaignId,
+            `judge-${options.slot.slotId}-${options.attemptId}`,
+            randomBytes(6).toString("hex"),
+        ),
+        labels: {
+            "otc.owner": "otc",
+            "otc.campaign": options.campaign.campaignId,
+            "otc.slot": options.slot.slotId,
+            "otc.attempt": options.attemptId,
+        },
     };
-    return { plan, attemptDir, packetSha256: options.packetSha256 };
+    return {
+        ok: true,
+        plan,
+        attemptDir,
+        packetSha256: options.packetSha256,
+    };
 }
 
 /** Write one finished attempt's evidence. */
@@ -988,6 +1010,13 @@ async function dispatchAttempt(options: {
         packetFile: packetPath(options.root, options.slot.slotId),
         judgeModel: options.judgeModel,
     });
+    if (!planned.ok) {
+        releaseClaims(options.claims);
+        return {
+            ok: false,
+            problem: `judge environment is not valid: ${planned.problems.join("; ")}`,
+        };
+    }
     planned.plan.imageId = options.frozen.imageId;
     const startedAt = options.now();
     const startedMeta: JudgeAttemptMeta = {
@@ -1595,6 +1624,54 @@ function settleExisting(options: {
         : { status: "refused", problems: recorded.problems };
 }
 
+/** Escape one identifier for a literal regular expression. */
+function literal(text: string): string {
+    return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Experiment identifiers that must not appear in a judge packet, derived from
+ * the declared campaign rather than historical arm letters or fixture words.
+ * @param packet The rendered packet.
+ * @param manifest The prepared manifest.
+ * @param root The campaign root.
+ * @returns Problems; empty means the packet is ar-blind.
+ */
+function campaignLeaks(
+    packet: string,
+    manifest: PreparedManifest,
+    root: string,
+): string[] {
+    const campaign = manifest.campaign;
+    const identifiers = [
+        campaign.campaignId,
+        ...campaign.subjects.map((arm) => arm.armId),
+        ...campaign.schedule.slots.map((slot) => slot.slotId),
+        ...manifest.suite.cases.map((testCase) => testCase.caseId),
+    ];
+    const problems = identifiers.flatMap((identifier) => {
+        if (identifier === "") return [];
+        const escaped = literal(identifier);
+        // A distinctive identifier (with a digit or hyphen) is a leak wherever
+        // it appears as a token. A plain-word identifier is only a leak in a
+        // structural position (path segment, quoted value, assignment), so
+        // legitimate task prose such as "the candidate must" is preserved.
+        const pattern = /[0-9-]/.test(identifier)
+            ? new RegExp(
+                  `(^|[^A-Za-z0-9_-])${escaped}([^A-Za-z0-9_-]|$)`,
+                  "i",
+              )
+            : new RegExp(
+                  `(?:[/\\\\]${escaped}(?:[/\\\\]|$)|"${escaped}"|${escaped}=)`,
+              );
+        return pattern.test(packet)
+            ? [`the packet names campaign identifier ${identifier}`]
+            : [];
+    });
+    if (packet.includes(root)) problems.push("the packet names the evidence root");
+    return [...new Set(problems)];
+}
+
 /** Build and leak-check the judge packet for a ready slot. */
 function buildReady(options: {
     root: string;
@@ -1620,15 +1697,10 @@ function buildReady(options: {
             problem: `judge packet for ${options.slot.slotId} is unavailable: ${built.problems.join("; ")}`,
         };
     }
-    const leaks = labelLeaks(built.packet);
-    return leaks.length > 0 || built.packet.includes(options.root)
+    const leaks = campaignLeaks(built.packet, options.manifest, options.root);
+    return leaks.length > 0
         ? {
-              problem: `judge packet for ${options.slot.slotId} is not arm-blind: ${[
-                  ...leaks,
-                  ...(built.packet.includes(options.root)
-                      ? ["absolute evidence root"]
-                      : []),
-              ].join(", ")}`,
+              problem: `judge packet for ${options.slot.slotId} is not arm-blind: ${leaks.join(", ")}`,
           }
         : built;
 }

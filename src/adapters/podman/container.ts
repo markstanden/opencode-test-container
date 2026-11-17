@@ -30,6 +30,10 @@ export interface ContainerPlan {
     envFile: string | null;
     /** The timeout ms value. */
     timeoutMs: number;
+    /** A unique owned container name, used for bounded cleanup. */
+    name?: string;
+    /** Ownership labels recorded on the container. */
+    labels?: Record<string, string>;
 }
 
 /** Check one proposed mount's path syntax and existence. */
@@ -43,8 +47,16 @@ function mountEntryProblems(mount: Mount): string[] {
     if (!existsSync(mount.source)) {
         problems.push(`mount source ${mount.source} does not exist`);
     }
-    if (mount.target.includes(",")) {
-        problems.push(`mount target ${mount.target} may not contain a comma`);
+    for (const [field, value] of [
+        ["source", mount.source],
+        ["target", mount.target],
+    ] as const) {
+        if (value.includes(",")) {
+            problems.push(`mount ${field} ${value} may not contain a comma`);
+        }
+        if (value.includes("\0")) {
+            problems.push(`mount ${field} ${value} may not contain a NUL`);
+        }
     }
     return problems;
 }
@@ -97,6 +109,11 @@ export function containerArgv(plan: ContainerPlan): string[] {
     const args = [
         "run",
         "--rm",
+        ...(plan.name === undefined ? [] : ["--name", plan.name]),
+        ...Object.entries(plan.labels ?? {}).flatMap(([key, value]) => [
+            "--label",
+            `${key}=${value}`,
+        ]),
         "--network",
         plan.network,
         "--userns=keep-id",
@@ -140,10 +157,62 @@ export async function runContainer(
             error: "invalid mount plan",
         };
     }
-    return run("podman", containerArgv(plan), {
+    const result = await run("podman", containerArgv(plan), {
         timeoutMs: plan.timeoutMs,
         maxBuffer: 64 * 1024 * 1024,
     });
+    // Killing the Podman client is not proof the container stopped. A timeout,
+    // error or signal triggers a bounded stop/remove of this owned name only;
+    // an unrelated container is never enumerated or touched.
+    if (
+        plan.name !== undefined &&
+        (result.timedOut || result.error !== null || result.signal !== null)
+    ) {
+        await cleanupContainer(plan.name, run);
+    }
+    return result;
+}
+
+/**
+ * Stop and remove one owned container by its exact name, never throwing.
+ * @param name The owned container name.
+ * @param run The process adapter.
+ * @returns Nothing; cleanup failure is deliberately not allowed to mask the
+ * primary diagnostic.
+ */
+export async function cleanupContainer(
+    name: string,
+    run: typeof runCommand = runCommand,
+): Promise<void> {
+    try {
+        await run("podman", ["stop", "-t", "2", name], { timeoutMs: 10_000 });
+    } catch {
+        // The container may already be gone.
+    }
+    try {
+        await run("podman", ["rm", "-f", name], { timeoutMs: 10_000 });
+    } catch {
+        // The container may already be gone.
+    }
+}
+
+/**
+ * A unique, filesystem-safe container name for one attempt.
+ * @param campaignId The campaign id.
+ * @param attempt The slot or judge attempt id.
+ * @param nonce A random suffix supplied by the caller.
+ * @returns The owned name.
+ */
+export function ownedContainerName(
+    campaignId: string,
+    attempt: string,
+    nonce: string,
+): string {
+    const clean = `${campaignId}-${attempt}`
+        .replace(/[^a-zA-Z0-9_.-]/g, "-")
+        .replace(/^-+/, "")
+        .slice(0, 180);
+    return `otc-${clean}-${nonce}`;
 }
 
 /** The container-side workspace path. */

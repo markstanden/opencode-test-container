@@ -527,7 +527,7 @@ async function runDocsRehearsal(
         "refused write earned recording credit",
     );
     expect(
-        blockedCounts.attemptedWrites >= 1,
+        (blockedCounts.attemptedWrites ?? 0) >= 1,
         "refused write was not counted as attempted",
     );
     const closedDocs = await otc(["close", "--root", join(docsRoot, "root")]);

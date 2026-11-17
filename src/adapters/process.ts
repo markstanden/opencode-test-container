@@ -14,6 +14,11 @@ export interface CommandResult {
     timedOut: boolean;
     /** The error value. */
     error: string | null;
+    /**
+     * Whether either captured stream exceeded its byte limit. An overflow is
+     * deliberate truncation and never usable evidence.
+     */
+    overflowed?: boolean;
 }
 
 /** Limits for one process call. */
@@ -24,19 +29,41 @@ export interface CommandOptions {
     env?: NodeJS.ProcessEnv;
     /** The timeout ms value. */
     timeoutMs?: number;
-    /** The max buffer value. */
+    /**
+     * The byte limit applied to stdout and to stderr independently; defaults
+     * to 64 MiB per stream. Exceeding it is reported, never silently absorbed.
+     */
     maxBuffer?: number;
     /** The stdin value. */
     stdin?: "ignore" | "pipe";
 }
 
+/** One captured stream, with an exact byte bound. */
+interface Capture {
+    /** Complete chunks accepted so far. */
+    chunks: Buffer[];
+    /** Bytes accepted so far. */
+    bytes: number;
+    /** Whether the cap was exceeded. */
+    overflowed: boolean;
+}
+
+/** Decode complete bytes as UTF-8, never splitting a code point. */
+function decode(capture: Capture): string {
+    return new TextDecoder("utf-8").decode(Buffer.concat(capture.chunks));
+}
+
 /**
- * Run one child process without a shell, bounded in time and output. This is
+ * Run one child process without a shell, bounded in time and bytes. This is
  * the only place OTC spawns a process; adapters inject it so ordinary tests
  * never need Podman or OpenCode.
+ *
+ * The byte limit is per stream. A chunk that would cross it marks the capture
+ * as overflowed and kills the child, so memory stays bounded and an
+ * over-limit stream can never be mistaken for complete output.
  * @param command The executable.
  * @param args Its argv, verbatim.
- * @param options Working directory, environment, timeout and capture cap.
+ * @param options Working directory, environment, timeout and capture caps.
  * @returns The bounded result; a spawn failure is data, not an exception.
  */
 export function runCommand(
@@ -49,20 +76,24 @@ export function runCommand(
     return new Promise((resolvePromise) => {
         let settled = false;
         let timedOut = false;
-        let stdout = "";
-        let stderr = "";
+        let overflowed = false;
+        const out: Capture = { chunks: [], bytes: 0, overflowed: false };
+        const err: Capture = { chunks: [], bytes: 0, overflowed: false };
         let timer: NodeJS.Timeout | null = null;
+        let killTimer: NodeJS.Timeout | null = null;
         const finish = (result: Partial<CommandResult>): void => {
             if (settled) return;
             settled = true;
             if (timer !== null) clearTimeout(timer);
+            if (killTimer !== null) clearTimeout(killTimer);
             resolvePromise({
                 status: result.status ?? null,
                 signal: result.signal ?? null,
-                stdout: result.stdout ?? stdout,
-                stderr: result.stderr ?? stderr,
+                stdout: result.stdout ?? decode(out),
+                stderr: result.stderr ?? decode(err),
                 timedOut,
                 error: result.error ?? null,
+                overflowed: overflowed || out.overflowed || err.overflowed,
             });
         };
         let child: ReturnType<typeof spawn>;
@@ -78,32 +109,30 @@ export function runCommand(
             });
             return;
         }
-        const append = (
-            stream: "out" | "err",
-            chunk: Buffer | string,
-        ): void => {
-            if (stream === "out") {
-                if (stdout.length < maxBuffer) stdout += String(chunk);
-            } else if (stderr.length < maxBuffer) {
-                stderr += String(chunk);
+        const append = (capture: Capture, chunk: Buffer | string): void => {
+            if (capture.overflowed) return;
+            const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+            if (capture.bytes + bytes.byteLength > maxBuffer) {
+                capture.overflowed = true;
+                overflowed = true;
+                child.kill("SIGKILL");
+                return;
             }
+            capture.chunks.push(bytes);
+            capture.bytes += bytes.byteLength;
         };
-        child.stdout?.on("data", (chunk: Buffer | string) =>
-            append("out", chunk),
-        );
-        child.stderr?.on("data", (chunk: Buffer | string) =>
-            append("err", chunk),
-        );
+        child.stdout?.on("data", (chunk: Buffer | string) => append(out, chunk));
+        child.stderr?.on("data", (chunk: Buffer | string) => append(err, chunk));
         child.on("error", (error) => finish({ error: error.message }));
         timer = setTimeout(() => {
             timedOut = true;
             child.kill("SIGTERM");
-            setTimeout(() => {
+            killTimer = setTimeout(() => {
                 if (!settled) child.kill("SIGKILL");
             }, 2_000);
         }, timeoutMs);
         child.on("close", (status, signal) =>
-            finish({ status, signal, stdout, stderr }),
+            finish({ status, signal }),
         );
     });
 }
