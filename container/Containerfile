@@ -3,6 +3,11 @@
 # Both inputs are explicit build arguments: the Node base and the OpenCode CLI
 # version. The recipe does not float. A campaign freezes the resolved image ID
 # and the CLI version it contains before any dispatch.
+#
+# NODE_BASE must be declared before the first FROM so the build argument is in
+# scope for the base-image reference; the remaining arguments are used by the
+# build stage below.
+ARG NODE_BASE
 FROM ${NODE_BASE}
 
 ARG HOST_UID=1000

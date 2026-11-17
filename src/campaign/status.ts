@@ -2,9 +2,10 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { LifecycleState } from "../contracts/types.ts";
 import { loadPreparedManifest } from "./prepare.ts";
-import { loadFrozen } from "./freeze.ts";
+import { deliveryCheck, loadFrozen } from "./freeze.ts";
 import { readLedger, trialStarts } from "./ledger.ts";
-import { readAssessments, assessmentPath } from "./assess.ts";
+import { checkedAssessments } from "../evidence/assessments.ts";
+import { admissionLockStatus } from "./admission.ts";
 import {
     checkedSelection,
     packetIntegrityProblems,
@@ -17,7 +18,7 @@ import {
     toolIdentityProblems,
     type ToolIdentity,
 } from "../contracts/version.ts";
-import { readClaims } from "../evaluators/docs/analysis/budget.ts";
+import { readClaims } from "./budget.ts";
 import { trialDirectory } from "./run.ts";
 import type { PreparedManifest } from "./prepare.ts";
 
@@ -89,19 +90,16 @@ export interface StatusReport {
 
 /** Derive the finite lifecycle state from checked evidence. */
 function lifecycleStateOf(options: {
-    root: string;
     manifest: StatusManifest;
     frozen: boolean;
     starts: number;
     closed: boolean;
+    allAssessed: boolean;
+    blocked: boolean;
 }): LifecycleState {
+    if (options.blocked) return "blocked";
     if (options.closed) return "closed";
-    const allAssessed =
-        options.manifest.campaign.schedule.slots.length > 0 &&
-        options.manifest.campaign.schedule.slots.every((slot) =>
-            existsSync(assessmentPath(options.root, slot.slotId)),
-        );
-    if (allAssessed) return "assessed";
+    if (options.allAssessed) return "assessed";
     if (options.starts > 0) return "running";
     return options.frozen ? "frozen" : "prepared";
 }
@@ -156,12 +154,12 @@ function judgementOf(
             else pending += 1;
         }
     }
-    const unsettled = ["judge", "recovery"].reduce(
+    const unsettled = ["trial", "judge", "recovery"].reduce(
         (sum, kind) =>
             sum +
             readClaims(
                 join(root, "evidence"),
-                kind as "judge" | "recovery",
+                kind as "trial" | "judge" | "recovery",
             ).filter((claim) => claim.state !== "closed").length,
         0,
     );
@@ -227,7 +225,8 @@ function nextActionsOf(options: {
         ];
     }
     const slots = options.manifest.campaign.schedule.slots;
-    const remaining = options.manifest.campaign.budgets.trials - options.starts;
+    const used = readClaims(join(options.root, "evidence"), "trial").length;
+    const remaining = options.manifest.campaign.budgets.trials - used;
     const unstarted = slots.length - options.starts;
     const actions: NextAction[] = [];
     if (unstarted > 0 && remaining > 0) {
@@ -251,6 +250,165 @@ function nextActionsOf(options: {
     return actions;
 }
 
+/** Governance diagnostics: admission, policy and judgement state. */
+function governanceProblems(
+    root: string,
+    manifest: StatusManifest,
+    judgement: StatusReport["judgement"],
+): string[] {
+    const lock = admissionLockStatus(root);
+    const policy = policyOf(manifest);
+    return [
+        ...(lock.held
+            ? [
+                  `admission lock ${lock.path} is held${lock.pid === null ? "" : ` by pid ${lock.pid}`}; verify that process is gone before removing it`,
+              ]
+            : []),
+        ...(policy.ok ? [] : policy.problems),
+        ...(judgement?.problems ?? []),
+    ];
+}
+
+/** Whether an integrity problem makes the campaign unavailable for action. */
+function integrityBlocked(options: {
+    ledger: ReturnType<typeof readLedger>;
+    recordProblems: readonly string[];
+    delivery: readonly string[];
+}): boolean {
+    return (
+        options.ledger.state === "malformed" ||
+        options.recordProblems.length > 0 ||
+        options.delivery.length > 0
+    );
+}
+
+/**
+ * Observe a campaign root without writing, building, probing or dispatching.
+ * Every next action is derived from the manifest and checked evidence.
+ * @param root The campaign root.
+ * @returns The status document.
+ */
+/** The empty blocked document for a root that cannot be read. */
+function blockedDocument(root: string, problems: string[]): StatusReport {
+    return {
+        schemaVersion: 1,
+        state: "blocked",
+        campaignId: null,
+        suiteId: null,
+        root,
+        imageId: null,
+        frozenAt: null,
+        closedAt: null,
+        counts: {
+            slots: 0,
+            started: 0,
+            completed: 0,
+            assessed: 0,
+            pass: 0,
+            fail: 0,
+            unknown: 0,
+        },
+        tool: null,
+        budgets: null,
+        judgement: null,
+        nextActions: [],
+        problems,
+    };
+}
+
+/** One campaign's checked assessment view. */
+interface AssessmentView {
+    records: ReturnType<typeof checkedAssessments>["records"];
+    valid: NonNullable<
+        ReturnType<typeof checkedAssessments>["records"][number]["record"]
+    >[];
+    problems: string[];
+    recordProblems: string[];
+}
+
+/** Check assessments and report completed slots without one. */
+function assessmentView(
+    root: string,
+    manifest: StatusManifest,
+    ledger: ReturnType<typeof readLedger>,
+): AssessmentView {
+    const checked = checkedAssessments({ root, manifest, ledger });
+    const valid = checked.records.flatMap((entry) =>
+        entry.state === "valid" && entry.record !== null ? [entry.record] : [],
+    );
+    const validSlots = new Set(
+        checked.records
+            .filter((entry) => entry.state === "valid")
+            .map((entry) => entry.slotId),
+    );
+    const missing = ledger.events
+        .filter((event) => event.event === "trial-end")
+        .flatMap((event) =>
+            typeof event.slotId === "string" &&
+            event.slotId !== "" &&
+            !validSlots.has(event.slotId)
+                ? [`completed slot ${event.slotId} has no checked assessment`]
+                : [],
+        );
+    return {
+        records: checked.records,
+        valid,
+        problems: [...checked.problems, ...missing],
+        recordProblems: checked.problems,
+    };
+}
+
+/** The frozen receipt, delivery drift and executing tool identity. */
+function frozenView(root: string): {
+    frozen: ReturnType<typeof loadFrozen>;
+    delivery: string[];
+    problems: string[];
+    tool: ReturnType<typeof toolIdentity>;
+} {
+    const frozen = loadFrozen(root);
+    if (!frozen.ok) {
+        return {
+            frozen,
+            delivery: [],
+            problems: [frozen.problem],
+            tool: toolIdentity(),
+        };
+    }
+    const tool = toolIdentity();
+    const delivery = deliveryCheck(root).filter(
+        (problem) =>
+            !problem.startsWith("frozen tool") &&
+            !problem.includes("executing"),
+    );
+    return {
+        frozen,
+        delivery,
+        problems: [
+            ...delivery,
+            ...toolIdentityProblems(frozen.record.tool, tool),
+        ],
+        tool,
+    };
+}
+
+/** The report's counts, derived only from checked valid assessments. */
+function countsOf(
+    manifest: StatusManifest,
+    starts: number,
+    completed: number,
+    valid: AssessmentView["valid"],
+): StatusReport["counts"] {
+    return {
+        slots: manifest.campaign.schedule.slots.length,
+        started: starts,
+        completed,
+        assessed: valid.length,
+        pass: valid.filter((entry) => entry.outcome === "pass").length,
+        fail: valid.filter((entry) => entry.outcome === "fail").length,
+        unknown: valid.filter((entry) => entry.outcome === "unknown").length,
+    };
+}
+
 /**
  * Observe a campaign root without writing, building, probing or dispatching.
  * Every next action is derived from the manifest and checked evidence.
@@ -259,100 +417,76 @@ function nextActionsOf(options: {
  */
 export function statusOf(root: string): StatusReport {
     const prepared = loadPreparedManifest(root);
-    if (!prepared.ok) {
-        return {
-            schemaVersion: 1,
-            state: "blocked",
-            campaignId: null,
-            suiteId: null,
-            root,
-            imageId: null,
-            frozenAt: null,
-            closedAt: null,
-            counts: {
-                slots: 0,
-                started: 0,
-                completed: 0,
-                assessed: 0,
-                pass: 0,
-                fail: 0,
-                unknown: 0,
-            },
-            tool: null,
-            budgets: null,
-            judgement: null,
-            nextActions: [],
-            problems: [prepared.problem],
-        };
-    }
+    if (!prepared.ok) return blockedDocument(root, [prepared.problem]);
     const manifest = prepared.manifest;
     const ledger = readLedger(root);
-    const problems = ledger.state === "malformed" ? [...ledger.problems] : [];
     const starts = trialStarts(ledger.events);
     const completed = new Set(
         ledger.events
             .filter((event) => event.event === "trial-end")
-            .map((event) =>
-                typeof event.slotId === "string" ? event.slotId : "",
+            .flatMap((event) =>
+                typeof event.slotId === "string" ? [event.slotId] : [],
             ),
     );
-    const assessments = readAssessments(root);
-    const frozen = loadFrozen(root);
-    if (!frozen.ok) problems.push(frozen.problem);
-    const currentTool = toolIdentity();
-    if (frozen.ok) {
-        problems.push(...toolIdentityProblems(frozen.record.tool, currentTool));
-    }
-    const policy = policyOf(manifest);
-    if (!policy.ok) problems.push(...policy.problems);
+    const assessments = assessmentView(root, manifest, ledger);
+    const frozen = frozenView(root);
     const judgement = judgementOf(root, manifest);
-    problems.push(...(judgement?.problems ?? []));
+    const problems = [
+        ...(ledger.state === "malformed" ? ledger.problems : []),
+        ...assessments.problems,
+        ...frozen.problems,
+        ...governanceProblems(root, manifest, judgement),
+    ];
+    const blocked = integrityBlocked({
+        ledger,
+        recordProblems: assessments.recordProblems,
+        delivery: frozen.delivery,
+    });
     const state = lifecycleStateOf({
-        root,
         manifest,
-        frozen: frozen.ok,
+        frozen: frozen.frozen.ok,
         starts: starts.length,
         closed: ledger.state === "closed",
+        allAssessed: assessments.records.every(
+            (entry) => entry.state === "valid",
+        ),
+        blocked,
     });
-    const nextActions = nextActionsOf({
-        root,
-        manifest,
-        frozen: frozen.ok,
-        closed: ledger.state === "closed",
-        starts: starts.length,
-        completed: completed.size,
-        assessments: assessments.length,
-        judgement: judgementOf(root, manifest),
-    });
+    const used = readClaims(join(root, "evidence"), "trial").length;
     return {
         schemaVersion: 1,
         state,
         campaignId: manifest.campaignId,
         suiteId: manifest.suiteId,
         root,
-        imageId: frozen.ok ? frozen.record.imageId : null,
-        frozenAt: frozen.ok ? frozen.record.frozenAt : null,
+        imageId: frozen.frozen.ok ? frozen.frozen.record.imageId : null,
+        frozenAt: frozen.frozen.ok ? frozen.frozen.record.frozenAt : null,
         closedAt: ledger.closedAt,
-        counts: {
-            slots: manifest.campaign.schedule.slots.length,
-            started: starts.length,
-            completed: completed.size,
-            assessed: assessments.length,
-            pass: assessments.filter((entry) => entry.outcome === "pass")
-                .length,
-            fail: assessments.filter((entry) => entry.outcome === "fail")
-                .length,
-            unknown: assessments.filter((entry) => entry.outcome === "unknown")
-                .length,
-        },
-        tool: currentTool,
+        counts: countsOf(
+            manifest,
+            starts.length,
+            completed.size,
+            assessments.valid,
+        ),
+        tool: frozen.tool,
         budgets: {
             trials: manifest.campaign.budgets.trials,
-            used: starts.length,
-            remaining: manifest.campaign.budgets.trials - starts.length,
+            used,
+            remaining: manifest.campaign.budgets.trials - used,
         },
         judgement,
-        nextActions,
+        nextActions: blocked
+            ? []
+            : nextActionsOf({
+                  root,
+                  manifest,
+                  frozen: frozen.frozen.ok,
+                  closed: ledger.state === "closed",
+                  starts: starts.length,
+                  completed: completed.size,
+                  assessments: assessments.valid.length,
+                  judgement,
+              }),
         problems,
     };
 }

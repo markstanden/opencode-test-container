@@ -66,6 +66,12 @@ selector; it refuses a branch ref.
   deliberately not used: it repairs files, and the tarball must be the tagged
   source.
 
+The tag itself is immutable: a repository ruleset on `refs/tags/v*` blocks
+deletion and force-pushes for everyone, with no bypass actors. It does not
+restrict creating a new tag, so `git push origin v0.1.2` still works — and a
+fresh tag with the wrong version still fails the version guard inside the
+workflow.
+
 `npm publish` builds `dist` through `prepack`, and npm generates the provenance
 attestation automatically under OIDC on a public repository.
 

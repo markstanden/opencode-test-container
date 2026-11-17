@@ -1,0 +1,37 @@
+{
+    "schemaVersion": 1,
+    "kind": "skill-activation",
+    "campaignId": "skill-basic-local",
+    "slotId": "s1",
+    "caseId": "positive-instrument",
+    "armId": "skill-only",
+    "repetitionId": "r0",
+    "attemptId": "deterministic-s1",
+    "targetSkillId": "otel-helper",
+    "expected": "activation",
+    "validity": "valid",
+    "observed": "no-invocation",
+    "outcome": "fail",
+    "counts": {
+        "requestedTarget": 0,
+        "successfulTarget": 0,
+        "failedTarget": 0,
+        "otherSkill": 0,
+        "totalSkillCalls": 0
+    },
+    "bodyRoutes": [],
+    "contaminated": false,
+    "reasons": [],
+    "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "reasoningTokens": 0,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "costUsd": 0,
+        "reported": false,
+        "steps": 0
+    },
+    "answered": true,
+    "assessedAt": "2026-11-15T00:05:00.000Z"
+}

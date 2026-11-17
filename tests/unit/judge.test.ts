@@ -17,6 +17,7 @@ import { fileURLToPath } from "node:url";
 import { prepareCampaign } from "../../src/campaign/prepare.ts";
 import { freezeCampaign } from "../../src/campaign/freeze.ts";
 import { runCampaign } from "../../src/campaign/run.ts";
+import { assessCampaign } from "../../src/campaign/assess.ts";
 import { closeCampaign } from "../../src/campaign/close.ts";
 import { statusOf } from "../../src/campaign/status.ts";
 import { analyseCampaign } from "../../src/reporting/report.ts";
@@ -120,12 +121,14 @@ function container(options: {
             };
         }
         const title = flagValue(plan, "--title");
-        if (title.startsWith("otc-judge-")) {
-            const slotId = title
-                .slice("otc-judge-".length)
-                .replace(/-attempt-\d{3}$/, "");
-            const attemptId =
-                /attempt-\d{3}$/.exec(title)?.[0] ?? "attempt-001";
+        if (plan.mounts.some((mount) => mount.target === "/judge/packet.md")) {
+            const slotId = plan.labels?.["otc.slot"] ?? "";
+            const attemptId = plan.labels?.["otc.attempt"] ?? "attempt-001";
+            assert.equal(
+                title.includes(slotId),
+                false,
+                "the judge session title exposes the slot id",
+            );
             options.record?.push(`${slotId}/${attemptId}`);
             const response =
                 options.judgeResponses?.(slotId, attemptId) ??
@@ -227,6 +230,11 @@ async function campaignRoot(
             },
         );
         assert.equal(summary.ok, true, summary.problems.join("; "));
+        // Closure requires a checked assessment for every completed trial.
+        const assessed = assessCampaign(root, {
+            now: () => "2026-11-15T00:05:00.000Z",
+        });
+        assert.equal(assessed.ok, true, assessed.problems.join("; "));
     }
     return { dir: fixture.dir, root };
 }
@@ -617,7 +625,7 @@ describe("blind docs judge", () => {
         );
     });
 
-    it("refuses a packet that exposes an arm label", async () => {
+    it("refuses a packet that exposes a declared arm identity structurally", async () => {
         // Arrange
         const { dir, root } = await campaignRoot(undefined, {
             suite: (suite) => {
@@ -630,7 +638,7 @@ describe("blind docs judge", () => {
                 );
                 assert.notEqual(useful, undefined);
                 (useful as { truth: string }).truth =
-                    "The candidate arm should win.";
+                    'The selected arm is "candidate".';
             },
         });
         dirs.push(dir);
@@ -653,6 +661,38 @@ describe("blind docs judge", () => {
             summary.problems.join("; "),
         );
         assert.equal(selected(root, "useful-write"), null);
+    });
+
+    it("preserves legitimate task prose that names a candidate", async () => {
+        // Arrange
+        const { dir, root } = await campaignRoot(undefined, {
+            suite: (suite) => {
+                const cases = suite.cases as Array<{
+                    caseId: string;
+                    truth: string;
+                }>;
+                const useful = cases.find(
+                    (entry) => entry.caseId === "useful-write",
+                );
+                assert.notEqual(useful, undefined);
+                (useful as { truth: string }).truth =
+                    "The candidate must name spans after the operation.";
+            },
+        });
+        dirs.push(dir);
+
+        // Act
+        const summary = await judgeCampaign(
+            root,
+            { slotIds: ["useful-write"] },
+            {
+                runContainer: container({}),
+                now: () => "2026-11-15T00:10:00.000Z",
+            },
+        );
+
+        // Assert
+        assert.equal(summary.ok, true, summary.problems.join("; "));
     });
 
     it("refuses a changed frozen packet instead of reusing it", async () => {

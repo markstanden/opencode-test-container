@@ -1,0 +1,29 @@
+{
+    "schemaVersion": 1,
+    "suiteId": "skill-basic",
+    "assessment": "skill-activation",
+    "cases": [
+        {
+            "caseId": "positive-instrument",
+            "prompt": "Instrument the checkout service with OpenTelemetry spans.",
+            "kind": "skill-trigger",
+            "targetSkillId": "otel-helper",
+            "expected": "activation"
+        },
+        {
+            "caseId": "negative-unrelated",
+            "prompt": "Rename the local variable total to subtotal.",
+            "kind": "skill-trigger",
+            "targetSkillId": "otel-helper",
+            "expected": "no-activation"
+        },
+        {
+            "caseId": "negative-near-miss",
+            "prompt": "Add a console log around the payment call; no telemetry is needed.",
+            "kind": "skill-trigger",
+            "targetSkillId": "otel-helper",
+            "expected": "no-activation"
+        }
+    ],
+    "description": "Synthetic activation suite for exercising the skill evaluator offline."
+}

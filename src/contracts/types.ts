@@ -255,6 +255,11 @@ export interface Campaign {
     permissions?: Record<string, unknown>;
     /** Stop after the first unusable or failed assessment. */
     stopOnFirstFailure?: boolean;
+    /**
+     * Stop-policy semantics; version 2 adds primary-check, assessment and
+     * adverse-verdict stopping. Absent means legacy version 1.
+     */
+    stopPolicy?: { version: 2 };
 }
 
 /** A validated campaign plus its resolved suite. */

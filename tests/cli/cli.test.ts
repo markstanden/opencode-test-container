@@ -4,6 +4,7 @@ import { spawnSync } from "node:child_process";
 import {
     cpSync,
     existsSync,
+    mkdirSync,
     mkdtempSync,
     readFileSync,
     rmSync,
@@ -12,6 +13,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { stagePackageInputs } from "../support/package-stage.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "..", "..");
@@ -119,29 +121,96 @@ describe("installed-shape CLI", () => {
         const parsed = JSON.parse(result.stdout) as { state: string };
         assert.equal(parsed.state, "blocked");
     });
+
+    it("exits non-zero and recommends nothing for a corrupt ledger", () => {
+        // Arrange
+        const root = join(work, "corrupt-ledger-root");
+        const prepared = otc(
+            ["prepare", "--campaign", campaignPath, "--root", root],
+            work,
+        );
+        assert.equal(prepared.status, 0, prepared.stderr);
+        mkdirSync(join(root, "evidence"), { recursive: true });
+        writeFileSync(
+            join(root, "evidence", "ATTEMPTS.jsonl"),
+            "{broken\n",
+            "utf8",
+        );
+
+        // Act
+        const result = otc(["status", "--root", root, "--json"], work);
+
+        // Assert
+        assert.equal(result.status, 1);
+        const parsed = JSON.parse(result.stdout) as {
+            state: string;
+            nextActions: unknown[];
+            problems: string[];
+        };
+        assert.equal(parsed.state, "blocked");
+        assert.deepEqual(parsed.nextActions, []);
+        assert.match(parsed.problems.join("; "), /not JSON|malformed/);
+    });
+
+    it("rejects an unknown slot selector before dispatch", () => {
+        // Arrange
+        const root = join(work, "unknown-slot-root");
+        const prepared = otc(
+            ["prepare", "--campaign", campaignPath, "--root", root],
+            work,
+        );
+        assert.equal(prepared.status, 0, prepared.stderr);
+        const manifest = readFileSync(
+            join(root, "prepare", "manifest.json"),
+            "utf8",
+        );
+
+        // Act
+        const result = otc(
+            ["run", "--root", root, "--slot", "no-such-slot"],
+            work,
+        );
+
+        // Assert
+        assert.equal(result.status, 2);
+        assert.match(result.stderr, /unknown slotId no-such-slot/);
+        assert.equal(
+            readFileSync(join(root, "prepare", "manifest.json"), "utf8"),
+            manifest,
+        );
+        assert.equal(
+            existsSync(join(root, "evidence", "ATTEMPTS.jsonl")),
+            false,
+        );
+    });
 });
 
 describe("packaged consumer", () => {
     it("installs the tarball and runs the binary with no repository paths", () => {
         const consumer = mkdtempSync(join(tmpdir(), "otc consumer-"));
+        const stage = stagePackageInputs(REPO);
         try {
             writeFileSync(
                 join(consumer, "package.json"),
                 `${JSON.stringify({ name: "otc-consumer", private: true, version: "1.0.0" }, null, 2)}\n`,
                 "utf8",
             );
+            // Pack the staged copy: prepack rebuilds *its* dist, never the
+            // checkout's shared build output.
             const packed = spawnSync(
                 "npm",
                 ["pack", "--json", "--pack-destination", consumer],
                 {
-                    cwd: REPO,
+                    cwd: stage,
                     encoding: "utf8",
                 },
             );
             assert.equal(packed.status, 0, packed.stderr);
             const parsed: unknown = JSON.parse(packed.stdout);
             const entries = (
-                Array.isArray(parsed) ? parsed : Object.values(parsed)
+                Array.isArray(parsed)
+                    ? parsed
+                    : Object.values(parsed as Record<string, unknown>)
             ) as Array<{ filename?: string }>;
             const filename = entries[0]?.filename;
             assert.equal(typeof filename, "string");
@@ -218,6 +287,7 @@ describe("packaged consumer", () => {
             );
         } finally {
             rmSync(consumer, { recursive: true, force: true });
+            rmSync(stage, { recursive: true, force: true });
         }
     });
 });

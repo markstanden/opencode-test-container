@@ -11,17 +11,21 @@
 import {
     existsSync,
     mkdirSync,
+    mkdtempSync,
     readFileSync,
     readdirSync,
     rmSync,
     writeFileSync,
 } from "node:fs";
-import { join, relative, sep } from "node:path";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { sha256Bytes, sha256Of } from "../contracts/canonical.ts";
 import type { ToolIdentity } from "../contracts/version.ts";
 import type { Campaign, DocsTaskCase, Slot } from "../contracts/types.ts";
 import { isRecord } from "../contracts/validate.ts";
 import {
+    environmentFileProblems,
+    environmentFileText,
     opencodeRunArgs,
     providerOverlay,
     sessionEnv,
@@ -29,6 +33,7 @@ import {
 } from "../adapters/opencode/runtime.ts";
 import {
     normaliseMounts,
+    ownedContainerName,
     runContainer,
     type ContainerPlan,
 } from "../adapters/podman/container.ts";
@@ -41,7 +46,7 @@ import {
     readClaims,
     releaseClaim,
     type BudgetClaim,
-} from "../evaluators/docs/analysis/budget.ts";
+} from "./budget.ts";
 import {
     claimRecoveryBudget,
     parseRecoveryPolicy,
@@ -63,16 +68,19 @@ import {
     type DocumentationOutcome,
     type JudgeFailureClass,
 } from "../evaluators/docs/scoring.ts";
-import {
-    docChanges,
-    labelLeaks,
-    type LakeDocument,
-} from "../evaluators/docs/campaign.ts";
+import { docChanges, type LakeDocument } from "../evaluators/docs/campaign.ts";
 import { creditedOperationLines } from "../evaluators/docs/assess.ts";
 import { claimAttemptDir } from "./evidence-guard.ts";
 import { deliveryCheck, loadFrozen, type FrozenRecord } from "./freeze.ts";
-import { inventory } from "./inventory.ts";
+import { changedInventoryPaths, inventory } from "./inventory.ts";
+import {
+    readContainedDocuments,
+    readContainedFile,
+} from "../evidence/containment.ts";
+import { randomBytes } from "node:crypto";
 import { appendLedgerEvent, readLedger } from "./ledger.ts";
+import { isAdverseOutcome, judgeShouldStop } from "./stop-policy.ts";
+import { withAdmission } from "./admission.ts";
 import {
     loadPreparedManifest,
     type PreparedCase,
@@ -278,49 +286,47 @@ function recordedAttempts(
     return { attempts, problems };
 }
 
-/** Read every Markdown document under a lake root. */
-function lakeDocuments(root: string): LakeDocument[] {
-    if (!existsSync(root)) return [];
-    const documents: LakeDocument[] = [];
-    const walk = (directory: string): void => {
-        for (const entry of readdirSync(directory, {
-            withFileTypes: true,
-        }).sort((left, right) => left.name.localeCompare(right.name))) {
-            const path = join(directory, entry.name);
-            if (entry.isDirectory()) walk(path);
-            else if (entry.isFile() && entry.name.endsWith(".md")) {
-                documents.push({
-                    path: relative(root, path).split(sep).join("/"),
-                    contents: readFileSync(path, "utf8"),
-                });
-            }
-        }
+/** Read every Markdown document under one contained workspace lake. */
+function lakeDocuments(
+    workspace: string,
+    lakeRoot: string,
+): { ok: true; documents: LakeDocument[] } | { ok: false; problem: string } {
+    const read = readContainedDocuments(workspace, lakeRoot, (name) =>
+        name.endsWith(".md"),
+    );
+    if (!read.ok) return read;
+    const prefix = lakeRoot === "" ? "" : `${lakeRoot}/`;
+    return {
+        ok: true,
+        documents: read.documents.map((document) => ({
+            path: document.path.slice(prefix.length),
+            contents: document.contents,
+        })),
     };
-    walk(root);
-    return documents;
 }
 
 /** The changed, created and removed files between the pristine and live trees. */
-function changedPaths(pristine: string, live: string): string[] {
+function changedPaths(
+    pristine: string,
+    live: string,
+): { ok: true; paths: string[] } | { ok: false; problems: string[] } {
     const before = inventory(pristine);
     const after = inventory(live);
-    if (!before.ok || !after.ok) return [];
-    const beforeMap = new Map(
-        before.entries.map((entry) => [entry.path, entry.sha256]),
-    );
-    const afterMap = new Map(
-        after.entries.map((entry) => [entry.path, entry.sha256]),
-    );
-    const changed = new Set<string>();
-    for (const [path, hash] of afterMap) {
-        if (path === "answer.md") continue;
-        if (beforeMap.get(path) !== hash) changed.add(path);
+    if (!before.ok || !after.ok) {
+        return {
+            ok: false,
+            problems: [
+                ...(before.ok ? [] : [`pristine workspace: ${before.problem}`]),
+                ...(after.ok ? [] : [`live workspace: ${after.problem}`]),
+            ],
+        };
     }
-    for (const path of beforeMap.keys()) {
-        if (path === "answer.md") continue;
-        if (!afterMap.has(path)) changed.add(path);
-    }
-    return [...changed].sort();
+    return {
+        ok: true,
+        paths: changedInventoryPaths(before.entries, after.entries, [
+            "answer.md",
+        ]),
+    };
 }
 
 /** The text of one file, or an empty string. */
@@ -349,19 +355,36 @@ function docStateFor(
     root: string,
     slot: Slot,
     testCase: DocsTaskCase,
-): DocState {
+): { ok: true; state: DocState } | { ok: false; problems: string[] } {
     const lakeRoot = testCase.lakeRoot ?? "docs";
     const beforeDocs = lakeDocuments(
-        join(root, "prepare", "workspaces", testCase.caseId, lakeRoot),
+        join(root, "prepare", "workspaces", testCase.caseId),
+        lakeRoot,
     );
     const afterDocs = lakeDocuments(
-        join(trialDirectory(root, slot.slotId), "workspace", lakeRoot),
+        join(trialDirectory(root, slot.slotId), "workspace"),
+        lakeRoot,
     );
-    const change = docChanges(beforeDocs, afterDocs);
+    if (!beforeDocs.ok) {
+        return {
+            ok: false,
+            problems: [`pristine lake ${lakeRoot}: ${beforeDocs.problem}`],
+        };
+    }
+    if (!afterDocs.ok) {
+        return {
+            ok: false,
+            problems: [`live lake ${lakeRoot}: ${afterDocs.problem}`],
+        };
+    }
+    const change = docChanges(beforeDocs.documents, afterDocs.documents);
     return {
-        documentsChanged: change.documentsChanged,
-        createdPaths: change.createdPaths,
-        modifiedPaths: change.modifiedPaths,
+        ok: true,
+        state: {
+            documentsChanged: change.documentsChanged,
+            createdPaths: change.createdPaths,
+            modifiedPaths: change.modifiedPaths,
+        },
     };
 }
 
@@ -370,15 +393,40 @@ function buildPacket(options: {
     root: string;
     slot: Slot;
     testCase: DocsTaskCase;
-}): { packet: string; state: DocState } {
+}):
+    | { ok: true; packet: string; state: DocState }
+    | { ok: false; problems: string[] } {
     const { root, slot, testCase } = options;
     const trialDir = trialDirectory(root, slot.slotId);
     const lakeRoot = testCase.lakeRoot ?? "docs";
     const beforeDocs = lakeDocuments(
-        join(root, "prepare", "workspaces", testCase.caseId, lakeRoot),
+        join(root, "prepare", "workspaces", testCase.caseId),
+        lakeRoot,
     );
-    const afterDocs = lakeDocuments(join(trialDir, "workspace", lakeRoot));
+    const afterDocs = lakeDocuments(join(trialDir, "workspace"), lakeRoot);
+    if (!beforeDocs.ok) {
+        return {
+            ok: false,
+            problems: [`pristine lake ${lakeRoot}: ${beforeDocs.problem}`],
+        };
+    }
+    if (!afterDocs.ok) {
+        return {
+            ok: false,
+            problems: [`live lake ${lakeRoot}: ${afterDocs.problem}`],
+        };
+    }
+    const changed = changedPaths(
+        join(root, "prepare", "workspaces", testCase.caseId),
+        join(trialDir, "workspace"),
+    );
+    if (!changed.ok) return changed;
     const state = docStateFor(root, slot, testCase);
+    if (!state.ok) return state;
+    const answer = readContainedFile(trialDir, "answer.md");
+    if (!answer.ok) {
+        return { ok: false, problems: [`trial answer: ${answer.problem}`] };
+    }
     const operations = creditedOperationLines(trialDir);
     const packet = buildAcPrompt({
         taskPrompt: textOf(
@@ -388,17 +436,14 @@ function buildPacket(options: {
             join(root, "prepare", "workspaces", testCase.caseId, "AGENTS.md"),
         ),
         scenarioTruth: testCase.truth ?? "",
-        beforeDocs,
-        afterDocs,
-        changedPaths: changedPaths(
-            join(root, "prepare", "workspaces", testCase.caseId),
-            join(trialDir, "workspace"),
-        ),
+        beforeDocs: beforeDocs.documents,
+        afterDocs: afterDocs.documents,
+        changedPaths: changed.paths,
         primary: primaryEvidence(trialDir),
         docsOperations: operations.lines,
-        answer: textOf(join(trialDir, "answer.md")),
+        answer: answer.text,
     });
-    return { packet, state };
+    return { ok: true, packet, state: state.state };
 }
 
 /** The judge's immutable packet, writing it once or refusing a change. */
@@ -444,7 +489,9 @@ function judgeMounts(options: {
 function writeJudgeEnvironment(
     attemptDir: string,
     campaign: Campaign,
-): { envFile: string; names: string[] } {
+):
+    | { ok: true; envFile: string; names: string[] }
+    | { ok: false; problems: string[] } {
     const env = sessionEnv(process.env, {
         configHome: "/config-home",
         dataHome: "/tmp/agent-home/.local/share",
@@ -462,16 +509,18 @@ function writeJudgeEnvironment(
             : ["OPENCODE_CONFIG_CONTENT"]),
         ...(campaign.runtime.passthroughEnv ?? []),
     ];
-    const envFile = join(attemptDir, "judge.env");
-    writeFileSync(
-        envFile,
-        `${names
-            .filter((name) => env[name] !== undefined)
-            .map((name) => `${name}=${env[name] ?? ""}`)
-            .join("\n")}\n`,
-        { encoding: "utf8", mode: 0o600 },
+    const problems = environmentFileProblems(
+        env,
+        names,
+        campaign.runtime.passthroughEnv ?? [],
     );
-    return { envFile, names };
+    if (problems.length > 0) return { ok: false, problems };
+    const envFile = join(attemptDir, "judge.env");
+    writeFileSync(envFile, environmentFileText(env, names), {
+        encoding: "utf8",
+        mode: 0o600,
+    });
+    return { ok: true, envFile, names };
 }
 
 /** The outcome of one judge dispatch, before storage. */
@@ -616,6 +665,7 @@ function classifyAttempt(
 
 /** The planned dispatch for one attempt. */
 interface AttemptPlan {
+    ok: true;
     plan: ContainerPlan;
     attemptDir: string;
     packetSha256: string;
@@ -631,12 +681,11 @@ function planAttempt(options: {
     packetSha256: string;
     packetFile: string;
     judgeModel: string;
-}): AttemptPlan {
-    const attemptDir = attemptDirectory(
-        options.root,
-        options.slot.slotId,
-        options.attemptId,
-    );
+    attemptDirOverride?: string;
+}): AttemptPlan | { ok: false; problems: string[] } {
+    const attemptDir =
+        options.attemptDirOverride ??
+        attemptDirectory(options.root, options.slot.slotId, options.attemptId);
     mkdirSync(attemptDir, { recursive: true });
     const configHome = writeJudgeConfigHome(
         attemptDir,
@@ -645,10 +694,9 @@ function planAttempt(options: {
     );
     const work = join(attemptDir, "work");
     mkdirSync(work, { recursive: true });
-    const { envFile, names } = writeJudgeEnvironment(
-        attemptDir,
-        options.campaign,
-    );
+    const environment = writeJudgeEnvironment(attemptDir, options.campaign);
+    if (!environment.ok) return environment;
+    const { envFile, names } = environment;
     const plan: ContainerPlan = {
         imageId: "",
         mounts: judgeMounts({
@@ -662,7 +710,9 @@ function planAttempt(options: {
             "opencode",
             ...opencodeRunArgs({
                 model: options.judgeModel,
-                title: `otc-judge-${options.slot.slotId}-${options.attemptId}`,
+                // The session title is model-visible metadata: never encode a
+                // slot, arm or attempt identity in it.
+                title: `otc-judge-${sha256Bytes(options.attemptId).slice(0, 12)}`,
                 prompt: options.packet,
                 printLogs: process.env.OTC_PRINT_LOGS === "1",
             }),
@@ -672,8 +722,25 @@ function planAttempt(options: {
         timeoutMs:
             options.campaign.assessment.judge?.timeoutMs ??
             options.campaign.runtime.timeoutMs,
+        name: ownedContainerName(
+            options.campaign.campaignId,
+            `judge-${options.slot.slotId}-${options.attemptId}`,
+            randomBytes(6).toString("hex"),
+        ),
+        labels: {
+            "otc.owner": "otc",
+            "otc.judge": "1",
+            "otc.campaign": options.campaign.campaignId,
+            "otc.slot": options.slot.slotId,
+            "otc.attempt": options.attemptId,
+        },
     };
-    return { plan, attemptDir, packetSha256: options.packetSha256 };
+    return {
+        ok: true,
+        plan,
+        attemptDir,
+        packetSha256: options.packetSha256,
+    };
 }
 
 /** Write one finished attempt's evidence. */
@@ -885,15 +952,44 @@ function claimInitial(
             problem: `judge budget is zero for ${slot.slotId}`,
         };
     }
-    const claimed = claimBudget(claimsRoot(root), "judge", ceiling, {
-        stamp: slot.slotId,
-        attemptId,
-        key: `${slot.slotId}/${attemptId}`,
-        at: now(),
+    const admitted = withAdmission(root, () => {
+        const ledger = readLedger(root);
+        if (ledger.state === "closed") {
+            return { kind: "closed" as const };
+        }
+        if (ledger.state === "malformed") {
+            return { kind: "malformed" as const, problems: ledger.problems };
+        }
+        return {
+            kind: "claim" as const,
+            claimed: claimBudget(claimsRoot(root), "judge", ceiling, {
+                stamp: slot.slotId,
+                attemptId,
+                key: `${slot.slotId}/${attemptId}`,
+                at: now(),
+            }),
+        };
     });
-    return claimed.ok
-        ? { ok: true, claim: claimed.claim }
-        : { ok: false, problem: `judge budget refused: ${claimed.reason}` };
+    if (!admitted.ok) return { ok: false, problem: admitted.problem };
+    if (admitted.value.kind === "closed") {
+        return {
+            ok: false,
+            problem:
+                "campaign is closed; no further judge dispatch is permitted",
+        };
+    }
+    if (admitted.value.kind === "malformed") {
+        return {
+            ok: false,
+            problem: `attempt ledger is malformed: ${admitted.value.problems.join("; ")}`,
+        };
+    }
+    return admitted.value.claimed.ok
+        ? { ok: true, claim: admitted.value.claimed.claim }
+        : {
+              ok: false,
+              problem: `judge budget refused: ${admitted.value.claimed.reason}`,
+          };
 }
 
 /** Dispatch one attempt and record its evidence. */
@@ -940,6 +1036,13 @@ async function dispatchAttempt(options: {
         packetFile: packetPath(options.root, options.slot.slotId),
         judgeModel: options.judgeModel,
     });
+    if (!planned.ok) {
+        releaseClaims(options.claims);
+        return {
+            ok: false,
+            problem: `judge environment is not valid: ${planned.problems.join("; ")}`,
+        };
+    }
     planned.plan.imageId = options.frozen.imageId;
     const startedAt = options.now();
     const startedMeta: JudgeAttemptMeta = {
@@ -1193,11 +1296,13 @@ export function packetIntegrityProblems(
     const testCase = manifest.suite.cases.find(
         (entry) => entry.caseId === slot.caseId,
     );
-    const expected =
-        testCase?.kind === "docs-task"
-            ? buildPacket({ root, slot, testCase }).packet
-            : null;
     const problems = [...recorded.problems];
+    let expected: string | null = null;
+    if (testCase?.kind === "docs-task") {
+        const built = buildPacket({ root, slot, testCase });
+        if (built.ok) expected = built.packet;
+        else problems.push(...built.problems);
+    }
     for (const attempt of recorded.attempts) {
         problems.push(...packetBindingProblems(root, slot.slotId, attempt));
         const attemptBytes = packetBytes(
@@ -1379,9 +1484,12 @@ function judgementRecordProblems(
             `selection ${selected.attemptId} has an inconsistent outcome`,
         );
     }
-    problems.push(
-        ...validateAcJudgement(value, docStateFor(root, slot, testCase)),
-    );
+    const state = docStateFor(root, slot, testCase);
+    if (state.ok) {
+        problems.push(...validateAcJudgement(value, state.state));
+    } else {
+        problems.push(...state.problems);
+    }
     return {
         problems,
         meta: selected.meta,
@@ -1503,8 +1611,7 @@ export function buildJudgePacketForSlot(
     ) {
         return { ok: false, problems: [`slot ${slotId} has no docs case`] };
     }
-    const built = buildPacket({ root, slot, testCase });
-    return { ok: true, ...built };
+    return buildPacket({ root, slot, testCase });
 }
 
 /** Settle a slot that already has a selection or a usable judgement. */
@@ -1543,6 +1650,52 @@ function settleExisting(options: {
         : { status: "refused", problems: recorded.problems };
 }
 
+/** Escape one identifier for a literal regular expression. */
+function literal(text: string): string {
+    return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Experiment identifiers that must not appear in a judge packet, derived from
+ * the declared campaign rather than historical arm letters or fixture words.
+ * @param packet The rendered packet.
+ * @param manifest The prepared manifest.
+ * @param root The campaign root.
+ * @returns Problems; empty means the packet is ar-blind.
+ */
+function campaignLeaks(
+    packet: string,
+    manifest: PreparedManifest,
+    root: string,
+): string[] {
+    const campaign = manifest.campaign;
+    const identifiers = [
+        campaign.campaignId,
+        ...campaign.subjects.map((arm) => arm.armId),
+        ...campaign.schedule.slots.map((slot) => slot.slotId),
+        ...manifest.suite.cases.map((testCase) => testCase.caseId),
+    ];
+    const problems = identifiers.flatMap((identifier) => {
+        if (identifier === "") return [];
+        const escaped = literal(identifier);
+        // A distinctive identifier (with a digit or hyphen) is a leak wherever
+        // it appears as a token. A plain-word identifier is only a leak in a
+        // structural position (path segment, quoted value, assignment), so
+        // legitimate task prose such as "the candidate must" is preserved.
+        const pattern = /[0-9-]/.test(identifier)
+            ? new RegExp(`(^|[^A-Za-z0-9_-])${escaped}([^A-Za-z0-9_-]|$)`, "i")
+            : new RegExp(
+                  `(?:[/\\\\]${escaped}(?:[/\\\\]|$)|"${escaped}"|${escaped}=)`,
+              );
+        return pattern.test(packet)
+            ? [`the packet names campaign identifier ${identifier}`]
+            : [];
+    });
+    if (packet.includes(root))
+        problems.push("the packet names the evidence root");
+    return [...new Set(problems)];
+}
+
 /** Build and leak-check the judge packet for a ready slot. */
 function buildReady(options: {
     root: string;
@@ -1563,15 +1716,15 @@ function buildReady(options: {
         };
     }
     const built = buildPacket(options);
-    const leaks = labelLeaks(built.packet);
-    return leaks.length > 0 || built.packet.includes(options.root)
+    if (!built.ok) {
+        return {
+            problem: `judge packet for ${options.slot.slotId} is unavailable: ${built.problems.join("; ")}`,
+        };
+    }
+    const leaks = campaignLeaks(built.packet, options.manifest, options.root);
+    return leaks.length > 0
         ? {
-              problem: `judge packet for ${options.slot.slotId} is not arm-blind: ${[
-                  ...leaks,
-                  ...(built.packet.includes(options.root)
-                      ? ["absolute evidence root"]
-                      : []),
-              ].join(", ")}`,
+              problem: `judge packet for ${options.slot.slotId} is not arm-blind: ${leaks.join(", ")}`,
           }
         : built;
 }
@@ -1640,19 +1793,47 @@ function claimAttempt(options: {
     if (!decision.eligible) {
         return { problem: `slot ${options.slot.slotId}: ${decision.reason}` };
     }
-    const claimed = claimRecoveryBudget(
-        claimsRoot(options.root),
-        {
-            ...options.policy,
-            totalJudgeAttempts: judgeCeiling(options.manifest, options.policy),
-        },
-        {
-            stamp: options.slot.slotId,
-            attemptId: decision.attemptId,
-            key: `${options.slot.slotId}/${decision.attemptId}`,
-            at: options.now(),
-        },
-    );
+    const policy = options.policy;
+    const admitted = withAdmission(options.root, () => {
+        const ledger = readLedger(options.root);
+        if (ledger.state === "closed") {
+            return { kind: "closed" as const };
+        }
+        if (ledger.state === "malformed") {
+            return { kind: "malformed" as const, problems: ledger.problems };
+        }
+        return {
+            kind: "claim" as const,
+            claimed: claimRecoveryBudget(
+                claimsRoot(options.root),
+                {
+                    ...policy,
+                    totalJudgeAttempts: judgeCeiling(options.manifest, policy),
+                },
+                {
+                    stamp: options.slot.slotId,
+                    attemptId: decision.attemptId,
+                    key: `${options.slot.slotId}/${decision.attemptId}`,
+                    at: options.now(),
+                },
+            ),
+        };
+    });
+    if (!admitted.ok) {
+        return { problem: `slot ${options.slot.slotId}: ${admitted.problem}` };
+    }
+    if (admitted.value.kind === "closed") {
+        return {
+            problem:
+                "campaign is closed; no further recovery dispatch is permitted",
+        };
+    }
+    if (admitted.value.kind === "malformed") {
+        return {
+            problem: `slot ${options.slot.slotId}: attempt ledger is malformed: ${admitted.value.problems.join("; ")}`,
+        };
+    }
+    const claimed = admitted.value.claimed;
     return claimed.ok
         ? {
               attemptId: decision.attemptId,
@@ -1836,12 +2017,20 @@ function tallyResult(
     tally.problems.push(...result.problems);
 }
 
-/** Whether the campaign stops after this slot's result. */
-function stopAfter(manifest: PreparedManifest, tally: JudgeTally): boolean {
-    return (
-        tally.problems.length > 0 &&
-        manifest.campaign.stopOnFirstFailure === true
+/** Throw for a judge selector that the prepared schedule does not contain. */
+function refuseUnknownJudgedSlots(
+    root: string,
+    slotIds: readonly string[] | undefined,
+): void {
+    if (slotIds === undefined) return;
+    const prepared = loadPreparedManifest(root);
+    if (!prepared.ok) return;
+    const known = new Set(
+        prepared.manifest.campaign.schedule.slots.map((slot) => slot.slotId),
     );
+    for (const slotId of slotIds) {
+        if (!known.has(slotId)) throw new Error(`unknown slotId ${slotId}`);
+    }
 }
 
 /** Resolve the selected slots, refusing an unknown selector. */
@@ -1875,6 +2064,7 @@ export async function judgeCampaign(
     options: { slotIds?: readonly string[]; dryRun?: boolean } = {},
     deps: JudgeDeps = {},
 ): Promise<JudgeSummary> {
+    refuseUnknownJudgedSlots(root, options.slotIds);
     const state = judgeState(root, deps.tool);
     if (!state.ok) {
         return {
@@ -1886,33 +2076,79 @@ export async function judgeCampaign(
         };
     }
     const manifest = state.manifest;
-    const slots = judgeSlots(manifest, options.slotIds);
     const execute = deps.runContainer ?? runContainer;
     const now = deps.now ?? (() => new Date().toISOString());
+    const tally = await judgeInOrder({
+        root,
+        manifest,
+        frozen: state.frozen,
+        policy: state.policy,
+        slots: judgeSlots(manifest, options.slotIds),
+        dryRun: options.dryRun === true,
+        execute,
+        now,
+    });
+    return {
+        ok: tally.refused.length === 0 && tally.problems.length === 0,
+        ...tally,
+    };
+}
+
+/** Judge one slot and report whether its checked verdict was adverse. */
+async function judgeOne(options: {
+    root: string;
+    manifest: PreparedManifest;
+    frozen: FrozenRecord;
+    policy: RecoveryPolicy | null;
+    slot: Slot;
+    dryRun: boolean;
+    execute: (plan: ContainerPlan) => Promise<CommandResult>;
+    now: () => string;
+}): Promise<{
+    result: { status: "judged" | "skipped" | "refused"; problems: string[] };
+    adverse: boolean;
+}> {
+    const result = await judgeSlot(options);
+    const selected =
+        result.status === "judged" && !options.dryRun
+            ? readSelectedJudgement(options.root, options.slot.slotId)
+            : null;
+    return {
+        result,
+        adverse: isAdverseOutcome(selected?.judgement.documentationOutcome),
+    };
+}
+
+/** Judge selected slots in order, honouring the declared stop policy. */
+async function judgeInOrder(options: {
+    root: string;
+    manifest: PreparedManifest;
+    frozen: FrozenRecord;
+    policy: RecoveryPolicy | null;
+    slots: readonly Slot[];
+    dryRun: boolean;
+    execute: (plan: ContainerPlan) => Promise<CommandResult>;
+    now: () => string;
+}): Promise<JudgeTally> {
     const tally: JudgeTally = {
         judged: [],
         skipped: [],
         refused: [],
         problems: [],
     };
-    for (const slot of slots) {
-        const result = await judgeSlot({
-            root,
-            manifest,
-            frozen: state.frozen,
-            slot,
-            policy: state.policy,
-            dryRun: options.dryRun === true,
-            execute,
-            now,
-        });
+    for (const slot of options.slots) {
+        const { result, adverse } = await judgeOne({ ...options, slot });
         tallyResult(tally, slot.slotId, result);
-        if (stopAfter(manifest, tally)) break;
+        if (
+            judgeShouldStop(options.manifest.campaign, {
+                problems: result.problems,
+                adverse,
+            })
+        ) {
+            break;
+        }
     }
-    return {
-        ok: tally.refused.length === 0 && tally.problems.length === 0,
-        ...tally,
-    };
+    return tally;
 }
 
 /** Read a slot's attempt metadata, sorted by attempt id. */
@@ -1957,4 +2193,59 @@ export function readSelectedJudgement(
               judgement: checked.value.judgement,
           }
         : null;
+}
+
+/**
+ * Build a judge sandbox plan for one docs slot without claiming a budget or
+ * dispatching. Internal smoke/ops hook: it uses the production mount plan and
+ * packet builder, and writes only into a fresh temporary attempt directory.
+ * @param root The campaign root.
+ * @param slotId The scheduled docs slot.
+ * @param attemptId The attempt identity to render.
+ * @returns The plan, or every refusal.
+ */
+export function judgeSandboxPlanForSlot(
+    root: string,
+    slotId: string,
+    attemptId: string,
+): { ok: true; plan: ContainerPlan } | { ok: false; problems: string[] } {
+    const prepared = loadPreparedManifest(root);
+    if (!prepared.ok) return { ok: false, problems: [prepared.problem] };
+    const frozen = loadFrozen(root);
+    if (!frozen.ok) return { ok: false, problems: [frozen.problem] };
+    const slot = prepared.manifest.campaign.schedule.slots.find(
+        (entry) => entry.slotId === slotId,
+    );
+    const testCase = prepared.manifest.suite.cases.find(
+        (entry) => entry.caseId === slot?.caseId,
+    );
+    const judgeModel = prepared.manifest.campaign.assessment.judge?.model;
+    if (slot === undefined || testCase?.kind !== "docs-task") {
+        return { ok: false, problems: [`slot ${slotId} has no docs case`] };
+    }
+    if (judgeModel === undefined) {
+        return {
+            ok: false,
+            problems: ["the campaign declares no judge model"],
+        };
+    }
+    const built = buildPacket({ root, slot, testCase });
+    if (!built.ok) return built;
+    const directory = mkdtempSync(join(tmpdir(), "otc-judge-plan-"));
+    const packetFile = join(directory, "packet.md");
+    writeFileSync(packetFile, built.packet, "utf8");
+    const planned = planAttempt({
+        root,
+        campaign: prepared.manifest.campaign,
+        slot,
+        attemptId,
+        packet: built.packet,
+        packetSha256: sha256Bytes(built.packet),
+        packetFile,
+        judgeModel,
+        attemptDirOverride: directory,
+    });
+    if (!planned.ok) return planned;
+    planned.plan.imageId = frozen.record.imageId;
+    return { ok: true, plan: planned.plan };
 }

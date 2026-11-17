@@ -24,13 +24,21 @@ npm ci
 | One unit file           | `node --test tests/unit/<file>.test.ts` | none                      |
 | Inner loop              | `npm test && npm run typecheck`         | none                      |
 | Final verdict           | `defined comply`                        | none; may repair the tree |
+| Typecheck               | `npm run typecheck`                     | none                      |
+| Coverage                | `npm run test:coverage`                 | none                      |
+| Real containers         | `npm run test:smoke`                    | scripted loopback only    |
 | Installed CLI proof     | included in `npm test` (`tests/cli`)    | none                      |
 | Offline real rehearsal  | `npm run rehearse:offline`              | scripted loopback only    |
 | Fresh docs rehearsal    | `npm run rehearse:fresh-docs`           | scripted loopback only    |
 | Installed-tarball proof | `npm run rehearse:installed`            | scripted loopback only    |
 
 `npm test` builds `dist/` first because the CLI/package tests execute the
-installed JavaScript shape, not only TypeScript source.
+installed JavaScript shape, not only TypeScript source. `npm run typecheck`
+covers source, tests and `.mts` rehearsals in one no-emit check.
+
+Packaging tests stage a copy of the packable inputs before running `npm pack`,
+so `prepack` rebuilds a test-owned `dist/` instead of racing other tests over
+the checkout's build output.
 
 ## Coverage populations
 
@@ -49,14 +57,27 @@ declared populations:
 
 Measured at the reconciliation head: migrated analysis 95.6/90.2/95.9; all
 OTC runtime 91.6/80.2/93.0; new OTC lifecycle/adapters/evaluators 87.8/71.3/90.0.
-The script fails loudly if any population drops below its floor, and writes the
-`coverage/lcov.info` Sonar consumes.
+The script fails loudly if any population drops below its floor, if a source
+file was never imported by the suite (type-only modules and re-export facades
+are documented exclusions), and writes the `coverage/lcov.info` Sonar consumes.
 
 The docs-analysis tests are the established analysis suite ported into
 `tests/docs-analysis`, plus the committed mini replay parity test in
 `tests/contract/docs-parity.test.ts`. The larger recorded confirmation and
 screening corpora were replayed manually; see
 [`docs/capability-matrix.md`](docs/capability-matrix.md).
+
+## Real-container smoke suite
+
+```sh
+npm run test:smoke
+```
+
+Separate and mandatory: packs the package, installs the tarball into a spaced
+temporary consumer, builds one fresh image from the packaged recipe and runs
+S01–S12 against real Podman. It needs rootless Podman and registry access for
+the build, no sibling docs checkout and no real credentials. See
+[`docs/smoke.md`](docs/smoke.md).
 
 ## Offline rehearsal
 

@@ -7,7 +7,13 @@
  * source is never mounted into the trial, so expectations cannot leak to the
  * subject.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+    existsSync,
+    mkdirSync,
+    readFileSync,
+    rmSync,
+    writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { sha256Bytes } from "../contracts/canonical.ts";
 import type { DocsTaskCase } from "../contracts/types.ts";
@@ -93,6 +99,9 @@ function writeCheckerEnvironment(directory: string): string {
  * @param options.pristine The prepared pristine workspace.
  * @param options.envFile The 0600 environment file.
  * @param options.timeoutMs The wall-clock bound.
+ * @param options.name The owned container name for cleanup.
+ * @param options.labels Ownership labels recorded on the container.
+ * @param options.signal Cancels the checker with bounded cleanup.
  * @returns The validated container plan.
  */
 export function primaryCheckPlan(options: {
@@ -103,6 +112,9 @@ export function primaryCheckPlan(options: {
     pristine: string;
     envFile: string;
     timeoutMs: number;
+    name?: string;
+    labels?: Record<string, string>;
+    signal?: AbortSignal;
 }): ContainerPlan {
     return {
         imageId: options.imageId,
@@ -134,6 +146,9 @@ export function primaryCheckPlan(options: {
         envNames: ["HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME"],
         envFile: options.envFile,
         timeoutMs: options.timeoutMs,
+        ...(options.name === undefined ? {} : { name: options.name }),
+        ...(options.labels === undefined ? {} : { labels: options.labels }),
+        ...(options.signal === undefined ? {} : { signal: options.signal }),
     };
 }
 
@@ -146,6 +161,9 @@ export function primaryCheckPlan(options: {
  * @param options.trialDir The trial evidence directory.
  * @param options.workspace The completed trial workspace.
  * @param options.imageId The frozen image identity.
+ * @param options.name The owned container name for cleanup.
+ * @param options.labels Ownership labels recorded on the container.
+ * @param options.signal Cancels the checker with bounded cleanup.
  * @param options.run Process adapter, injected for tests.
  * @param options.now Injected clock.
  * @returns The recorded outcome and the readable record.
@@ -157,6 +175,9 @@ export async function executePrimaryCheck(options: {
     trialDir: string;
     workspace: string;
     imageId: string;
+    name?: string;
+    labels?: Record<string, string>;
+    signal?: AbortSignal;
     run?: typeof runContainer;
     now?: () => string;
 }): Promise<{
@@ -241,8 +262,16 @@ export async function executePrimaryCheck(options: {
         ),
         envFile,
         timeoutMs: prepared.timeoutMs,
+        ...(options.name === undefined ? {} : { name: options.name }),
+        ...(options.labels === undefined ? {} : { labels: options.labels }),
+        ...(options.signal === undefined ? {} : { signal: options.signal }),
     });
-    const result = await (options.run ?? runContainer)(plan);
+    let result: CommandResult;
+    try {
+        result = await (options.run ?? runContainer)(plan);
+    } finally {
+        rmSync(envFile, { force: true });
+    }
     return finish({
         status: statusOf(result),
         exit: result.status,

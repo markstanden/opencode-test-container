@@ -28,7 +28,22 @@ live only under `src/evaluators/docs`.
   failed target load is an operational unknown, never a passing negative.
 - **Trusted evaluators.** The CLI wires evaluator implementations. Campaign
   data names an assessment kind; it never names executable JavaScript loaded
-  from evidence.
+  from evidence. A parsed JSON object is never trusted as results: status,
+  closure, reporting and judge selection read through `src/evidence`, which
+  checks shape, slot identity, evaluator version, source-evidence hashes and
+  the authoritative ledger binding.
+- **Contained snapshots.** Workspace and lake content is read only through one
+  containment policy (`src/evidence/containment.ts`): real roots, no symlinked
+  directory traversal, resolved containment, `O_NOFOLLOW` opens and controlled
+  refusal of special files. An unsafe object blocks packet and assessment
+  construction rather than becoming “no changes”.
+- **Durable trial ownership.** Trial spend uses the same exclusive-claim
+  abstraction as judge and recovery. A claim is the arbitration point before
+  staging or dispatch, and closure refuses unresolved claims. Trial budget is
+  therefore atomic across processes, and an ambiguous attempt is never
+  refunded.
+- **One stop policy.** `src/campaign/stop-policy.ts` owns a versioned truth
+  table for run, assess and judge; legacy roots keep version-1 semantics.
 - **Historical identity.** Old stamps, scenario ids and frozen `.mjs` bytes are
   records. `legacy/prod014.ts` translates them without renaming. Old roots are
   not resumed by this engine.
@@ -90,8 +105,51 @@ remain external data; OTC stages, hashes and executes them.
 - Suite, campaign, manifest, truth, criteria and other slots are outside the
   model-visible filesystem.
 - Credentials travel through a 0600 env file; argv and receipts carry names and
-  hashes only.
+  hashes only. Trial, judge and recovery reservations live under
+  `<root>/evidence/{trial,judge,recovery}` and are never released if dispatch
+  might have happened.
 - `network: "host"` is honest host networking, not provider-only egress.
+
+## Evidence, lifecycle and execution seams
+
+```
+campaign/{run,assess,judge,close,status,report}
+        |
+        +-> evidence/{containment,capture,source-identity,assessments}
+        +-> campaign/{admission,budget,stop-policy}
+        +-> adapters/{process,podman,opencode}
+```
+
+- `src/evidence` distinguishes missing, valid, corrupt, unsupported and
+  conflicting records. Capture validity is derived from the raw stream and
+  reconciled with saved metadata, not read from a flag.
+- `src/campaign/admission.ts` is the one admission/closure decision: dispatch,
+  assessment publication and closure take the same short lock and re-read the
+  ledger inside it. `src/campaign/budget.ts` owns durable claims for trial,
+  judge and recovery; the analysis path is a compatibility re-export.
+- The journal verifier has one implementation; `analysis/journal.ts` is a
+  compatibility re-export, not a second copy.
+- Assessment source identity binds the primary-check record, docs journal and
+  key, and the evaluated workspace identity in addition to capture metadata.
+  Genuine v0.1.1 records are read through an explicit historical path with
+  stated limitations.
+- Assessment identity excludes `assessedAt`: repeating identical work reuses
+  the first record and timestamp, changed evidence is refused, and unrun state
+  is derived rather than persisted.
+- Process capture bounds each stream in bytes, marks overflow explicitly and
+  decodes complete UTF-8. Trial and judge environment files are removed on
+  every path; owned containers are stopped and removed by their own name.
+- `npm test` stays hermetic; `npm run test:smoke` is the real-container proof
+  (`docs/smoke.md`). It needs no sibling docs checkout.
+
+## Deferred extraction
+
+`src/campaign/judge.ts` still combines judge execution with docs packet/verdict
+policy. Splitting it safely needs the docs strategy interface to be extracted
+alongside the execution boundary; that work is deliberately deferred rather
+than half-done. The shared admission, budget, stop-policy, evidence and
+containment boundaries above are the prerequisites, and the judge split is the
+next extraction once those boundaries have soaked.
 
 ## Removal condition for the docs bridge
 

@@ -36,7 +36,8 @@
         "typecheck": "tsc --noEmit",
         "rehearse:offline": "npm run build && node rehearsals/offline.mts",
         "rehearse:fresh-docs": "npm run build && node rehearsals/fresh-docs.mts",
-        "rehearse:installed": "npm run build && node rehearsals/installed.mts"
+        "rehearse:installed": "npm run build && node rehearsals/installed.mts",
+        "test:smoke": "npm run build && node rehearsals/smoke/main.mts"
     },
     "devDependencies": {
         "@types/node": "^26.6.4",

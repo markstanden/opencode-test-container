@@ -1,10 +1,21 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import {
+    containedEntry,
+    readContainedDocuments,
+    readContainedFile,
+} from "../../evidence/containment.ts";
 import { sha256Bytes } from "../../contracts/canonical.ts";
 import type { SuiteCase } from "../../contracts/types.ts";
 import { isRecord } from "../../contracts/validate.ts";
-import type { TrialMeta } from "../../campaign/run.ts";
-import { decodeTrail, type Usage } from "../../adapters/opencode/events.ts";
+import type { Usage } from "../../adapters/opencode/events.ts";
+import { checkCapture } from "../../evidence/capture.ts";
+import {
+    sourceIdentity,
+    unsafeIdentityFields,
+    type SourceIdentity,
+} from "../../evidence/source-identity.ts";
+import { EVALUATOR_VERSION } from "../../contracts/version.ts";
 import {
     hostDispatchesFromTrail,
     journalIdentityFromTrail,
@@ -47,6 +58,10 @@ export interface DocsCounts {
 export interface DocsAssessment {
     /** The schema version value. */
     schemaVersion: 1;
+    /** The evaluator semantics that produced this assessment. */
+    evaluatorVersion: number;
+    /** The exact trial artifacts this assessment consumed. */
+    evidence: SourceIdentity;
     /** The kind value. */
     kind: "docs-recording";
     /** The campaign id value. */
@@ -94,6 +109,86 @@ export interface DocsAssessment {
     assessedAt: string;
 }
 
+/** The identity fields shared by every docs assessment outcome. */
+type DocsBase = Omit<
+    DocsAssessment,
+    | "validity"
+    | "outcome"
+    | "counts"
+    | "journal"
+    | "target"
+    | "primary"
+    | "reasons"
+    | "usage"
+    | "answered"
+    | "assessedAt"
+>;
+
+/** Build an unrun response without inventing evidence. */
+function unrunDocs(
+    base: DocsBase,
+    problems: string[],
+    assessedAt: string,
+): DocsAssessment {
+    return {
+        ...base,
+        validity: "unrun",
+        outcome: "unknown",
+        counts: {
+            creditedCalls: 0,
+            creditedWrites: 0,
+            attemptedWrites: 0,
+            rejectedLines: 0,
+            searchCalls: 0,
+        },
+        journal: {
+            state: "absent",
+            credited: 0,
+            rejected: 0,
+            problems,
+        },
+        target: null,
+        primary: null,
+        reasons: problems,
+        usage: null,
+        answered: false,
+        assessedAt,
+    };
+}
+
+/** Build an invalid response from integrity problems. */
+function invalidDocs(options: {
+    base: DocsBase;
+    counts: DocsCounts;
+    journal: DocsAssessment["journal"];
+    primary: DocsAssessment["primary"];
+    reasons: string[];
+    usage: Usage | null;
+    answered: boolean;
+    assessedAt: string;
+}): DocsAssessment {
+    return {
+        ...options.base,
+        validity: "invalid",
+        outcome: "unknown",
+        counts: options.counts,
+        journal: options.journal,
+        target: null,
+        primary: options.primary,
+        reasons: options.reasons,
+        usage: options.usage,
+        answered: options.answered,
+        assessedAt: options.assessedAt,
+    };
+}
+
+/** Build an unknown-validity response (separation could not establish more). */
+function unknownDocs(
+    options: Parameters<typeof invalidDocs>[0],
+): DocsAssessment {
+    return { ...invalidDocs(options), validity: "unknown" };
+}
+
 /** Determine which docs verb one host input names. */
 export function docsVerbOf(input: unknown): DocsVerb {
     if (!isRecord(input)) return "other";
@@ -131,17 +226,6 @@ export function creditedWriteOf(
         path: typeof metadata.path === "string" ? metadata.path : null,
         mode,
     };
-}
-
-/** Read meta without trusting it. */
-function readMeta(path: string): TrialMeta | null {
-    if (!existsSync(path)) return null;
-    try {
-        const value: unknown = JSON.parse(readFileSync(path, "utf8"));
-        return isRecord(value) ? (value as unknown as TrialMeta) : null;
-    } catch {
-        return null;
-    }
 }
 
 /** Read usage without trusting it. */
@@ -194,23 +278,57 @@ function textReasons(
     ];
 }
 
+/** One criterion check's failures and unsafe-evidence problems. */
+interface WorkspaceCheck {
+    reasons: string[];
+    problems: string[];
+}
+
 /** Check one written file's required and forbidden text. */
-function contentReasons(workspace: string, testCase: DocsCase): string[] {
+function contentReasons(workspace: string, testCase: DocsCase): WorkspaceCheck {
     const target = testCase.expectedDocs.target;
-    if (target === undefined) return [];
-    const path = join(workspace, testCase.lakeRoot ?? "docs", target);
-    if (!existsSync(path))
-        return [`expected written file ${target} is missing`];
-    return textReasons(target, readFileSync(path, "utf8"), testCase);
+    if (target === undefined) return { reasons: [], problems: [] };
+    const path = `${testCase.lakeRoot ?? "docs"}/${target}`;
+    const entry = containedEntry(workspace, path);
+    if (!entry.ok) return { reasons: [], problems: [entry.problem] };
+    if (entry.kind === "missing") {
+        return {
+            reasons: [`expected written file ${target} is missing`],
+            problems: [],
+        };
+    }
+    if (entry.kind === "special") {
+        return {
+            reasons: [],
+            problems: [`expected written file ${target} is a special file`],
+        };
+    }
+    if (entry.kind !== "file" && entry.kind !== "symlink") {
+        return {
+            reasons: [],
+            problems: [`expected written file ${target} is not a file`],
+        };
+    }
+    const read = readContainedFile(workspace, path);
+    return read.ok
+        ? { reasons: textReasons(target, read.text, testCase), problems: [] }
+        : { reasons: [], problems: [read.problem] };
 }
 
 /** Check paths that must not exist. */
-function absentReasons(workspace: string, testCase: DocsCase): string[] {
-    return (testCase.guardrails?.absent ?? []).flatMap((path) =>
-        existsSync(join(workspace, path))
-            ? [`guardrail path ${path} exists`]
-            : [],
-    );
+function absentReasons(workspace: string, testCase: DocsCase): WorkspaceCheck {
+    const reasons: string[] = [];
+    const problems: string[] = [];
+    for (const path of testCase.guardrails?.absent ?? []) {
+        const entry = containedEntry(workspace, path);
+        if (!entry.ok) problems.push(entry.problem);
+        else if (entry.kind === "special") {
+            problems.push(`guardrail path ${path} is a special file`);
+        } else if (entry.kind !== "missing") {
+            reasons.push(`guardrail path ${path} exists`);
+        }
+    }
+    return { reasons, problems };
 }
 
 /** Check paths whose prepared identity must survive unchanged. */
@@ -218,18 +336,34 @@ function unchangedReasons(
     workspace: string,
     testCase: DocsCase,
     prepared: ReadonlyMap<string, string>,
-): string[] {
-    return (testCase.guardrails?.unchanged ?? []).flatMap((path) => {
+): WorkspaceCheck {
+    const reasons: string[] = [];
+    const problems: string[] = [];
+    for (const path of testCase.guardrails?.unchanged ?? []) {
         const expected = prepared.get(path);
         if (expected === undefined) {
-            return [`guardrail path ${path} has no prepared identity`];
+            reasons.push(`guardrail path ${path} has no prepared identity`);
+            continue;
         }
-        const current = join(workspace, path);
-        if (!existsSync(current)) return [`guardrail path ${path} was removed`];
-        return sha256Bytes(readFileSync(current)) === expected
-            ? []
-            : [`guardrail path ${path} changed`];
-    });
+        const entry = containedEntry(workspace, path);
+        if (!entry.ok) {
+            problems.push(entry.problem);
+            continue;
+        }
+        if (entry.kind === "missing") {
+            reasons.push(`guardrail path ${path} was removed`);
+            continue;
+        }
+        const read = readContainedFile(workspace, path);
+        if (!read.ok) {
+            problems.push(read.problem);
+            continue;
+        }
+        if (sha256Bytes(read.text) !== expected) {
+            reasons.push(`guardrail path ${path} changed`);
+        }
+    }
+    return { reasons, problems };
 }
 
 /** Check guardrails against the final workspace and prepared inventory. */
@@ -237,11 +371,13 @@ function guardrailReasons(
     workspace: string,
     testCase: DocsCase,
     prepared: ReadonlyMap<string, string>,
-): string[] {
-    return [
-        ...absentReasons(workspace, testCase),
-        ...unchangedReasons(workspace, testCase, prepared),
-    ];
+): WorkspaceCheck {
+    const absent = absentReasons(workspace, testCase);
+    const unchanged = unchangedReasons(workspace, testCase, prepared);
+    return {
+        reasons: [...absent.reasons, ...unchanged.reasons],
+        problems: [...absent.problems, ...unchanged.problems],
+    };
 }
 
 /** The readable parts of one docs operation input. */
@@ -309,18 +445,13 @@ function journalAbsenceProblem(
         : null;
 }
 
-/** Capture integrity problems for a docs trial. */
+/** Journal integrity problems for a docs trial; capture is checked separately. */
 function docsIntegrity(
     testCase: DocsCase,
-    meta: TrialMeta,
     verification: JournalVerification,
     host: ReturnType<typeof hostDispatchesFromTrail>,
 ): string[] {
     const integrity: string[] = [];
-    if (meta.captureValid !== true)
-        integrity.push(...(meta.captureProblems ?? []));
-    if (meta.exit !== 0)
-        integrity.push(`container exited ${String(meta.exit)}`);
     const absence = journalAbsenceProblem(testCase, verification, host);
     if (absence !== null) integrity.push(absence);
     if (verification.rejected.length > 0) {
@@ -372,13 +503,14 @@ function docsReasons(
     writes: ReadonlyArray<{ path: string | null; mode: string | null }>,
     workspace: string,
     prepared: ReadonlyMap<string, string>,
-): string[] {
+): WorkspaceCheck {
     const criterion = testCase.criterion ?? { minVerifiedCalls: 0 };
     const verbs = new Set(criterion.verbs ?? []);
     const creditedForCriterion = credited.filter(
         (record) => verbs.size === 0 || verbs.has(docsVerbOf(record.input)),
     ).length;
     const reasons: string[] = [];
+    const problems: string[] = [];
     if (creditedForCriterion < criterion.minVerifiedCalls) {
         reasons.push(
             `verified calls ${creditedForCriterion} below required ${criterion.minVerifiedCalls}`,
@@ -404,10 +536,106 @@ function docsReasons(
                 `no credited ${testCase.expectedDocs.kind} write to ${String(target)}`,
             );
         }
-        reasons.push(...contentReasons(workspace, testCase));
+        const content = contentReasons(workspace, testCase);
+        reasons.push(...content.reasons);
+        problems.push(...content.problems);
     }
-    reasons.push(...guardrailReasons(workspace, testCase, prepared));
-    return reasons;
+    const guardrails = guardrailReasons(workspace, testCase, prepared);
+    reasons.push(...guardrails.reasons);
+    problems.push(...guardrails.problems);
+    return { reasons, problems };
+}
+
+/** The compact primary-check summary a docs assessment carries. */
+function primarySummary(
+    record: PrimaryCheckRecord | null,
+): DocsAssessment["primary"] {
+    return record === null
+        ? null
+        : { id: record.id, status: record.status, exit: record.exit };
+}
+
+/** The journal, host trail, counts and integrity of one non-unrun trial. */
+function trialContext(options: {
+    capture: Exclude<ReturnType<typeof checkCapture>, { state: "unrun" }>;
+    trialDir: string;
+    testCase: DocsCase;
+    workspace: string;
+}): {
+    trail: Exclude<
+        ReturnType<typeof checkCapture>,
+        { state: "unrun" }
+    >["trail"];
+    verification: JournalVerification;
+    credited: Record<string, unknown>[];
+    writes: Array<{ path: string | null; mode: string | null }>;
+    counts: DocsCounts;
+    integrity: string[];
+} {
+    const { capture, trialDir, testCase, workspace } = options;
+    const rawTools = join(trialDir, "tools.jsonl");
+    const tools = existsSync(rawTools) ? readFileSync(rawTools, "utf8") : "";
+    const host = hostDispatchesFromTrail(tools);
+    const verification = verificationOf(trialDir, capture.raw, tools);
+    const credited = verification.credited.map((entry) => entry.record);
+    const writes = credited
+        .map(creditedWriteOf)
+        .filter(
+            (entry): entry is { path: string | null; mode: string | null } =>
+                entry !== null,
+        );
+    const counts: DocsCounts = {
+        creditedCalls: credited.length,
+        creditedWrites: writes.length,
+        attemptedWrites: countAttemptedWrites(host, verification),
+        rejectedLines: verification.rejected.length,
+        searchCalls: credited.filter(
+            (record) => docsVerbOf(record.input) === "search",
+        ).length,
+    };
+    const contained = readContainedDocuments(
+        workspace,
+        testCase.lakeRoot ?? "docs",
+        () => false,
+    );
+    const integrity = [
+        ...(capture.state === "invalid" ? capture.problems : []),
+        ...docsIntegrity(testCase, verification, host),
+        ...(contained.ok
+            ? []
+            : [`workspace is not containable: ${contained.problem}`]),
+    ];
+    return {
+        trail: capture.trail,
+        verification,
+        credited,
+        writes,
+        counts,
+        integrity,
+    };
+}
+
+/** The shared arguments for one invalid or unknown docs response. */
+function responseArgs(options: {
+    base: DocsBase;
+    counts: DocsCounts;
+    verification: JournalVerification;
+    primary: DocsAssessment["primary"];
+    reasons: string[];
+    trail: { text: string };
+    trialDir: string;
+    assessedAt: string;
+}): Parameters<typeof invalidDocs>[0] {
+    return {
+        base: options.base,
+        counts: options.counts,
+        journal: journalSummary(options.verification),
+        primary: options.primary,
+        reasons: options.reasons,
+        usage: readUsage(join(options.trialDir, "usage.json")),
+        answered: options.trail.text.trim() !== "",
+        assessedAt: options.assessedAt,
+    };
 }
 
 /**
@@ -442,18 +670,16 @@ export function assessDocsTrial(options: {
     assessedAt: string;
 }): DocsAssessment {
     const { testCase, trialDir } = options;
-    const meta = readMeta(join(trialDir, "meta.json"));
+    const capture = checkCapture(trialDir, {
+        campaignId: options.campaignId,
+        slotId: options.slotId,
+    });
     const primaryRecord = readPrimaryCheck(trialDir);
-    const primary =
-        primaryRecord === null
-            ? null
-            : {
-                  id: primaryRecord.id,
-                  status: primaryRecord.status,
-                  exit: primaryRecord.exit,
-              };
+    const primary = primarySummary(primaryRecord);
     const base = {
         schemaVersion: 1 as const,
+        evaluatorVersion: EVALUATOR_VERSION,
+        evidence: sourceIdentity(trialDir),
         kind: "docs-recording" as const,
         campaignId: options.campaignId,
         slotId: options.slotId,
@@ -463,108 +689,91 @@ export function assessDocsTrial(options: {
         attemptId: options.attemptId,
         expected: testCase.expectedDocs.kind,
     };
-    const empty: DocsCounts = {
-        creditedCalls: 0,
-        creditedWrites: 0,
-        attemptedWrites: 0,
-        rejectedLines: 0,
-        searchCalls: 0,
-    };
-    if (meta === null || !existsSync(join(trialDir, "events.jsonl"))) {
-        return {
-            ...base,
-            validity: "unrun",
-            outcome: "unknown",
-            counts: empty,
-            journal: {
-                state: "absent",
-                credited: 0,
-                rejected: 0,
-                problems: ["trial evidence is missing"],
-            },
-            target: null,
-            primary,
-            reasons: ["trial evidence is missing"],
-            usage: null,
-            answered: false,
-            assessedAt: options.assessedAt,
-        };
+    if (capture.state === "unrun") {
+        return unrunDocs(base, capture.problems, options.assessedAt);
     }
-    const events = readFileSync(join(trialDir, "events.jsonl"), "utf8");
-    const trail = decodeTrail(events);
-    const tools = existsSync(join(trialDir, "tools.jsonl"))
-        ? readFileSync(join(trialDir, "tools.jsonl"), "utf8")
-        : "";
-    const host = hostDispatchesFromTrail(tools);
-    const verification = verificationOf(trialDir, events, tools);
-    const credited = verification.credited.map((entry) => entry.record);
-    const writes = credited
-        .map(creditedWriteOf)
-        .filter(
-            (entry): entry is { path: string | null; mode: string | null } =>
-                entry !== null,
-        );
-    const counts: DocsCounts = {
-        creditedCalls: credited.length,
-        creditedWrites: writes.length,
-        attemptedWrites: countAttemptedWrites(host, verification),
-        rejectedLines: verification.rejected.length,
-        searchCalls: credited.filter(
-            (record) => docsVerbOf(record.input) === "search",
-        ).length,
-    };
-    const integrity = docsIntegrity(testCase, meta, verification, host);
+    const context = trialContext({
+        capture,
+        trialDir,
+        testCase,
+        workspace: options.workspace,
+    });
+    const evidenceProblems = [
+        ...(base.evidence.workspacePresent && !base.evidence.workspaceSafe
+            ? [
+                  "the evaluated workspace contains an unsafe object; integrity is unknown",
+              ]
+            : []),
+        ...unsafeIdentityFields(base.evidence).map(
+            (field) => `trial evidence contains an unsafe object: ${field}`,
+        ),
+    ];
+    const integrity = [...context.integrity, ...evidenceProblems];
     if (integrity.length > 0) {
-        return {
-            ...base,
-            validity: "invalid",
-            outcome: "unknown",
-            counts,
-            journal: journalSummary(verification),
-            target: null,
-            primary,
-            reasons: integrity,
-            usage: readUsage(join(trialDir, "usage.json")),
-            answered: trail.text.trim() !== "",
-            assessedAt: options.assessedAt,
-        };
+        return invalidDocs(
+            responseArgs({
+                base,
+                counts: context.counts,
+                verification: context.verification,
+                primary,
+                reasons: integrity,
+                trail: context.trail,
+                trialDir,
+                assessedAt: options.assessedAt,
+            }),
+        );
     }
     const separation = primarySeparation(testCase, primaryRecord);
     if (separation !== null) {
-        return {
-            ...base,
-            validity: separation.validity,
-            outcome: "unknown",
-            counts,
-            journal: journalSummary(verification),
-            target: null,
+        const args = responseArgs({
+            base,
+            counts: context.counts,
+            verification: context.verification,
             primary,
             reasons: separation.reasons,
-            usage: readUsage(join(trialDir, "usage.json")),
-            answered: trail.text.trim() !== "",
+            trail: context.trail,
+            trialDir,
             assessedAt: options.assessedAt,
-        };
+        });
+        return separation.validity === "invalid"
+            ? invalidDocs(args)
+            : unknownDocs(args);
     }
-    const reasons = docsReasons(
+    const checked = docsReasons(
         testCase,
-        credited,
-        writes,
+        context.credited,
+        context.writes,
         options.workspace,
         options.prepared,
     );
+    if (checked.problems.length > 0) {
+        return invalidDocs(
+            responseArgs({
+                base,
+                counts: context.counts,
+                verification: context.verification,
+                primary,
+                reasons: checked.problems,
+                trail: context.trail,
+                trialDir,
+                assessedAt: options.assessedAt,
+            }),
+        );
+    }
+    const reasons = checked.reasons;
     reasons.push(...primaryFailure(primaryRecord));
     const outcome: DocsOutcome = reasons.length === 0 ? "pass" : "fail";
     return {
         ...base,
         validity: "valid",
         outcome,
-        counts,
-        journal: journalSummary(verification),
+        counts: context.counts,
+        journal: journalSummary(context.verification),
         target: testCase.expectedDocs.target ?? null,
         primary,
         reasons,
         usage: readUsage(join(trialDir, "usage.json")),
-        answered: trail.text.trim() !== "",
+        answered: context.trail.text.trim() !== "",
         assessedAt: options.assessedAt,
     };
 }

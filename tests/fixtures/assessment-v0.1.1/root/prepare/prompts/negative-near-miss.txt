@@ -1,0 +1,1 @@
+Add a console log around the payment call; no telemetry is needed.

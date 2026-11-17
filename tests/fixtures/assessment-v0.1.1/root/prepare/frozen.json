@@ -1,0 +1,29 @@
+{
+    "schemaVersion": 1,
+    "kind": "otc-freeze",
+    "campaignId": "skill-basic-local",
+    "suiteId": "skill-basic",
+    "manifestSha256": "3632bcdc99d7964368cc010251241fc9ffd5aaa728b5b2164142da466c0083e7",
+    "campaignSha256": "e253ee470eeedb350df6ae079ae1818c3f62dcb22637f9f9b040cb31c4c7e7e3",
+    "suiteSha256": "b1c787ad00c0b0dc9d25221916167fcd7ba64c2b4680508d1069bdc0b5e56226",
+    "scheduleSha256": "1da673d493a6f6b0fa69a76784a2159134a7ea8674da9214ae407c159d6866a3",
+    "subjectsSha256": "09072e3104b266ecdb6391cfe3a1271d269908f077eed6217b2a35adf0db4f46",
+    "workspacesSha256": "5f56cffdbed8664ee61ac06109a3c38f704f94f05eced7dc64788d033a271ae7",
+    "promptsSha256": "7f2a40c75cb6c04bc87ea91e9590a0c57fca54b674c941d94943fb55bef81a36",
+    "primaryChecksSha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    "tool": {
+        "name": "@markstanden/opencode-test-container",
+        "version": "0.1.1",
+        "evaluatorVersion": 1,
+        "artifactSha256": "8640e916468a9e160c4b2ef82626034fb06cefad4d87d73f64a7017f35d9cdb1"
+    },
+    "image": "localhost/opencode-placement-trials:latest",
+    "imageId": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "opencodeVersion": "2.2.6",
+    "provider": {
+        "route": "scripted",
+        "model": "zai-coding-plan/glm-5.3-flash"
+    },
+    "freezeSha256": "b8e19897ad225de5531bb0a190248d4e271d0a00461ce244cbb6a0c0a99b7e57",
+    "frozenAt": "2026-11-17T16:11:27.760Z"
+}

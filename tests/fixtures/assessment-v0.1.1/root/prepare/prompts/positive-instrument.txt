@@ -1,0 +1,1 @@
+Instrument the checkout service with OpenTelemetry spans.

@@ -248,8 +248,17 @@ original for provenance.
 
 ## Development
 
-See [AGENTS.md](AGENTS.md) and [TESTING.md](TESTING.md). The offline real
-rehearsal is separate from `npm test`:
+See [AGENTS.md](AGENTS.md) and [TESTING.md](TESTING.md). The real-container
+smoke suite is the standalone gate and needs no sibling docs checkout:
+
+```sh
+npm ci
+npm run typecheck
+npm test
+npm run test:smoke
+```
+
+The product-specific offline rehearsals remain optional integration evidence:
 
 ```sh
 npm run rehearse:offline

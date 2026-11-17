@@ -1,0 +1,10 @@
+{
+    "inputTokens": 0,
+    "outputTokens": 0,
+    "reasoningTokens": 0,
+    "cacheReadTokens": 0,
+    "cacheWriteTokens": 0,
+    "costUsd": 0,
+    "reported": false,
+    "steps": 0
+}

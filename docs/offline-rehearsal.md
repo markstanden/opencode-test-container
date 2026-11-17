@@ -1,5 +1,9 @@
 # Offline real-adapter rehearsals
 
+The standalone, no-sibling-checkout gate is `npm run test:smoke`
+([`smoke.md`](smoke.md)). The product rehearsals below remain optional
+integration evidence.
+
 ## Baseline (`npm run rehearse:offline`)
 
 Recorded 2026-11-15 from `npm run rehearse:offline` on the dev box.

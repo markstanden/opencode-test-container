@@ -12,6 +12,9 @@ function operation(overrides: Partial<DocsOperation> = {}): DocsOperation {
     return {
         verb: "read",
         status: "completed",
+        success: null,
+        surface: "native",
+        line: "",
         path: null,
         target: null,
         lake: "docs",
@@ -19,7 +22,7 @@ function operation(overrides: Partial<DocsOperation> = {}): DocsOperation {
     };
 }
 
-const declaration = { note: "ops/deploy.md", lake: "docs" };
+const declaration = { note: "ops/deploy.md", lake: "docs", facts: [] };
 
 describe("retrieval identity matching", () => {
     it("accepts the reported path, the qualified path and the bare target", () => {
@@ -51,6 +54,7 @@ describe("retrieval identity matching", () => {
             operationMatchesNotePath(operation({ path: "shared/db/pool.md" }), {
                 note: "db/pool.md",
                 lake: "docs",
+                facts: [],
             }),
             false,
         );
@@ -84,7 +88,7 @@ describe("changed-document matching", () => {
         assert.equal(
             operationMatchesChangedDocument(
                 operation({ path: "lakes/docs/ops/deploy.md" }),
-                { path: "ops/deploy.md", lake: "docs" },
+                { path: "ops/deploy.md", lake: "docs", kind: "modified" },
             ),
             true,
         );
@@ -92,20 +96,21 @@ describe("changed-document matching", () => {
             operationMatchesChangedDocument(operation(), {
                 path: "ops/deploy.md",
                 lake: "docs",
+                kind: "modified",
             }),
             false,
         );
         assert.equal(
             operationMatchesChangedDocument(
                 operation({ path: "lakes/docs/ops/deploy.md", lake: null }),
-                { path: "ops/deploy.md", lake: "docs" },
+                { path: "ops/deploy.md", lake: "docs", kind: "modified" },
             ),
             false,
         );
         assert.equal(
             operationMatchesChangedDocument(
                 operation({ path: "lakes/other/ops/deploy.md" }),
-                { path: "ops/deploy.md", lake: "docs" },
+                { path: "ops/deploy.md", lake: "docs", kind: "modified" },
             ),
             false,
         );

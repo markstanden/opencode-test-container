@@ -1,0 +1,18 @@
+{
+    "schemaVersion": 1,
+    "suiteId": "otc-smoke",
+    "description": "Core smoke: a real plugin tool call and a real skill catalogue.",
+    "assessment": "skill-activation",
+    "cases": [
+        {
+            "caseId": "smoke-case",
+            "kind": "skill-trigger",
+            "targetSkillId": "otel-smoke",
+            "expected": "no-activation",
+            "prompt": "Call the otc_probe tool once with label smoke, then answer with the exact marker it returns.",
+            "files": {
+                "README.md": "smoke fixture\n"
+            }
+        }
+    ]
+}

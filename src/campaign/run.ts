@@ -19,6 +19,8 @@ import {
     type DecodedTrail,
 } from "../adapters/opencode/events.ts";
 import {
+    environmentFileProblems,
+    environmentFileText,
     opencodeRunArgs,
     providerOverlay,
     sessionEnv,
@@ -30,6 +32,7 @@ import {
     CONTAINER_SUBJECTS,
     CONTAINER_WORKSPACE,
     normaliseMounts,
+    ownedContainerName,
     runContainer,
     type ContainerPlan,
     type Mount,
@@ -37,13 +40,16 @@ import {
 import type { CommandResult } from "../adapters/process.ts";
 import { deliveryCheck, loadFrozen, type FrozenRecord } from "./freeze.ts";
 import { stageTree } from "./inventory.ts";
-import { executePrimaryCheck } from "./primary.ts";
+import { executePrimaryCheck, type PrimaryCheckRecord } from "./primary.ts";
+import { runShouldStop } from "./stop-policy.ts";
+import { withAdmission } from "./admission.ts";
+import { appendLedgerEvent, readLedger, startedSlots } from "./ledger.ts";
 import {
-    appendLedgerEvent,
-    readLedger,
-    startedSlots,
-    trialStarts,
-} from "./ledger.ts";
+    advanceClaim,
+    claimBudget,
+    releaseClaim,
+    type BudgetClaim,
+} from "./budget.ts";
 import {
     loadPreparedManifest,
     type PreparedManifest,
@@ -100,6 +106,8 @@ export interface TrialMeta {
     timedOut: boolean;
     /** The error value. */
     error: string | null;
+    /** Whether captured output exceeded its byte limit. */
+    overflowed?: boolean;
     /** The duration ms value. */
     durationMs: number;
     /** The capture valid value. */
@@ -249,7 +257,9 @@ function writeTrialEnvironment(
     campaign: Campaign,
     journal: string | null,
     passthrough: readonly string[],
-): { envFile: string; names: string[] } {
+):
+    | { ok: true; envFile: string; names: string[] }
+    | { ok: false; problems: string[] } {
     const env = sessionEnv(process.env, {
         configHome: CONTAINER_CONFIG_HOME,
         dataHome: "/tmp/agent-home/.local/share",
@@ -277,16 +287,14 @@ function writeTrialEnvironment(
             : ["DOCS_OPERATION_JOURNAL", "DOCS_OPERATION_JOURNAL_KEY"]),
         ...passthrough,
     ];
+    const problems = environmentFileProblems(env, names, passthrough);
+    if (problems.length > 0) return { ok: false, problems };
     const envFile = join(trialDir, "trial.env");
-    writeFileSync(
-        envFile,
-        `${names
-            .filter((name) => env[name] !== undefined)
-            .map((name) => `${name}=${env[name] ?? ""}`)
-            .join("\n")}\n`,
-        { encoding: "utf8", mode: 0o600 },
-    );
-    return { envFile, names };
+    writeFileSync(envFile, environmentFileText(env, names), {
+        encoding: "utf8",
+        mode: 0o600,
+    });
+    return { ok: true, envFile, names };
 }
 
 /** Stage the workspace, config home and journal for one trial. */
@@ -396,12 +404,14 @@ export function planTrial(options: {
         ...(campaign.runtime.passthroughEnv ?? []),
         ...(options.passthrough ?? []),
     ];
-    const { envFile, names } = writeTrialEnvironment(
+    const environment = writeTrialEnvironment(
         trialDir,
         campaign,
         journal,
         passthrough,
     );
+    if (!environment.ok) return environment;
+    const { envFile, names } = environment;
     const plan: ContainerPlan = {
         imageId: frozen.imageId,
         mounts: trialMounts({
@@ -416,6 +426,16 @@ export function planTrial(options: {
         envNames: [...new Set(names)],
         envFile,
         timeoutMs: campaign.runtime.timeoutMs,
+        name: ownedContainerName(
+            campaign.campaignId,
+            slot.slotId,
+            randomBytes(6).toString("hex"),
+        ),
+        labels: {
+            "otc.owner": "otc",
+            "otc.campaign": campaign.campaignId,
+            "otc.slot": slot.slotId,
+        },
     };
     return { ok: true, plan, argv, configSha256 };
 }
@@ -497,7 +517,12 @@ async function executeSlot(options: {
     trialDir: string;
     execute: (plan: ContainerPlan) => Promise<CommandResult>;
     now: () => string;
-}): Promise<{ meta: TrialMeta; primaryProblems: string[] }> {
+    signal?: AbortSignal;
+}): Promise<{
+    meta: TrialMeta;
+    primaryProblems: string[];
+    primaryStatus: PrimaryCheckRecord["status"] | null;
+}> {
     const { root, manifest, frozen, slot, planned, trialDir, execute, now } =
         options;
     const startedAt = now();
@@ -538,9 +563,15 @@ async function executeSlot(options: {
         startedAt,
     );
     const started = Date.now();
-    const result = await execute(planned.plan);
-    if (planned.plan.envFile !== null) {
-        rmSync(planned.plan.envFile, { force: true });
+    let result: CommandResult;
+    try {
+        result = await execute(planned.plan);
+    } finally {
+        // The env file holds provider credentials; it must disappear on every
+        // path, including a throwing runner.
+        if (planned.plan.envFile !== null) {
+            rmSync(planned.plan.envFile, { force: true });
+        }
     }
     const completedAt = now();
     const trail = decodeTrail(result.stdout);
@@ -556,6 +587,7 @@ async function executeSlot(options: {
         signal: result.signal,
         timedOut: result.timedOut,
         error: result.error,
+        overflowed: result.overflowed === true,
         durationMs: Date.now() - started,
         captureValid: integrity.length === 0,
         captureProblems: integrity,
@@ -587,25 +619,69 @@ async function executeSlot(options: {
         },
         completedAt,
     );
+    const primary = await primaryStage({
+        root,
+        manifest,
+        frozen,
+        slot,
+        testCase: options.testCase,
+        trialDir,
+        execute,
+        now,
+        ...(options.signal === undefined ? {} : { signal: options.signal }),
+    });
+    return { meta, ...primary };
+}
+
+/** Run the declared primary checker, if this case has one. */
+async function primaryStage(options: {
+    root: string;
+    manifest: PreparedManifest;
+    frozen: FrozenRecord;
+    slot: Slot;
+    testCase: SuiteCase;
+    trialDir: string;
+    execute: (plan: ContainerPlan) => Promise<CommandResult>;
+    now: () => string;
+    signal?: AbortSignal;
+}): Promise<{
+    primaryProblems: string[];
+    primaryStatus: PrimaryCheckRecord["status"] | null;
+}> {
+    const { root, manifest, frozen, slot, testCase, trialDir, execute, now } =
+        options;
     const preparedCase = manifest.cases.find(
         (entry) => entry.caseId === slot.caseId,
     );
-    if (
-        options.testCase.kind !== "docs-task" ||
-        options.testCase.primaryCheck === undefined ||
-        preparedCase === undefined
-    ) {
-        return { meta, primaryProblems: [] };
+    if (testCase.kind !== "docs-task" || testCase.primaryCheck === undefined) {
+        return { primaryProblems: [], primaryStatus: null };
+    }
+    if (preparedCase === undefined) {
+        return {
+            primaryProblems: ["the case has no prepared primary checker"],
+            primaryStatus: null,
+        };
     }
     const checked = await executePrimaryCheck({
         root,
-        testCase: options.testCase,
+        testCase,
         prepared: preparedCase,
         trialDir,
         workspace: join(trialDir, "workspace"),
         imageId: frozen.imageId,
         run: (plan) => execute(plan),
         now,
+        name: ownedContainerName(
+            manifest.campaignId,
+            `checker-${slot.slotId}`,
+            randomBytes(6).toString("hex"),
+        ),
+        labels: {
+            "otc.owner": "otc",
+            "otc.campaign": manifest.campaignId,
+            "otc.checker": slot.slotId,
+        },
+        ...(options.signal === undefined ? {} : { signal: options.signal }),
     });
     if (checked.record !== null) {
         appendLedgerEvent(
@@ -623,9 +699,25 @@ async function executeSlot(options: {
         );
     }
     return {
-        meta,
         primaryProblems: checked.problem === null ? [] : [checked.problem],
+        primaryStatus: checked.record?.status ?? null,
     };
+}
+
+/** Throw for a slot selector that the prepared schedule does not contain. */
+function refuseUnknownSelectors(
+    root: string,
+    slotIds: readonly string[] | undefined,
+): void {
+    if (slotIds === undefined) return;
+    const prepared = loadPreparedManifest(root);
+    if (!prepared.ok) return;
+    const known = new Set(
+        prepared.manifest.campaign.schedule.slots.map((slot) => slot.slotId),
+    );
+    for (const slotId of slotIds) {
+        if (!known.has(slotId)) throw new Error(`unknown slotId ${slotId}`);
+    }
 }
 
 /** Resolve the selected slots, refusing an unknown selector. */
@@ -647,14 +739,6 @@ function metaProblems(slotId: string, meta: TrialMeta): string[] {
     return [
         `slot ${slotId} capture is invalid: ${meta.captureProblems.join("; ")}`,
     ];
-}
-
-/** Whether the campaign stops after this trial. */
-function shouldStop(manifest: PreparedManifest, meta: TrialMeta): boolean {
-    return (
-        manifest.campaign.stopOnFirstFailure === true &&
-        (!meta.captureValid || meta.exit !== 0)
-    );
 }
 
 /** The outcome of attempting one scheduled slot. */
@@ -680,19 +764,6 @@ function slotPrecondition(
             stop: false,
         };
     }
-    if (
-        trialStarts(readLedger(root).events).length >=
-        manifest.campaign.budgets.trials
-    ) {
-        return {
-            ran: false,
-            refused: false,
-            problems: [
-                `trial budget exhausted (${manifest.campaign.budgets.trials}) before slot ${slot.slotId}`,
-            ],
-            stop: true,
-        };
-    }
     if (existsSync(trialDirectory(root, slot.slotId))) {
         return {
             ran: false,
@@ -715,6 +786,7 @@ async function dispatchSlot(options: {
     already: ReadonlySet<string>;
     dryRun: boolean;
     passthrough: readonly string[] | undefined;
+    signal: AbortSignal | undefined;
     execute: (plan: ContainerPlan) => Promise<CommandResult>;
     now: () => string;
 }): Promise<SlotOutcome> {
@@ -735,44 +807,39 @@ async function dispatchSlot(options: {
         };
     }
     const trialDir = trialDirectory(root, slot.slotId);
-    const planDirectory = dryRun
-        ? mkdtempSync(join(tmpdir(), "otc-plan-"))
-        : trialDir;
-    const planned = planTrial({
-        root,
-        manifest,
-        frozen,
-        slot,
+    if (dryRun) {
+        return dryRunPlan({ ...options, testCase, arm });
+    }
+    const claimed = claimTrial(root, manifest, slot);
+    if (!claimed.ok) return claimed.outcome;
+    const planned = planClaimed({
+        ...options,
         testCase,
         arm,
-        trialDir: planDirectory,
-        ...(options.passthrough === undefined
-            ? {}
-            : { passthrough: options.passthrough }),
+        trialDir,
+        claim: claimed.claim,
     });
-    if (!planned.ok) {
-        if (dryRun) rmSync(planDirectory, { recursive: true, force: true });
-        return {
-            ran: false,
-            refused: false,
-            problems: planned.problems,
-            stop: false,
-        };
-    }
-    if (dryRun) {
-        rmSync(planDirectory, { recursive: true, force: true });
-        return { ran: true, refused: false, problems: [], stop: false };
-    }
+    if (!planned.ok) return planned.outcome;
+    if (options.signal !== undefined)
+        planned.planned.plan.signal = options.signal;
+    advanceClaim(claimed.claim, "spawned", {
+        stamp: slot.slotId,
+        note: "trial dispatch started",
+    });
     const meta = await executeSlot({
         root,
         manifest,
         frozen,
         slot,
         testCase,
-        planned,
+        planned: planned.planned,
         trialDir,
         execute,
         now,
+        ...(options.signal === undefined ? {} : { signal: options.signal }),
+    });
+    advanceClaim(claimed.claim, "closed", {
+        note: "trial terminal evidence recorded",
     });
     return {
         ran: true,
@@ -781,7 +848,169 @@ async function dispatchSlot(options: {
             ...metaProblems(slot.slotId, meta.meta),
             ...meta.primaryProblems,
         ],
-        stop: shouldStop(manifest, meta.meta),
+        stop: runShouldStop(manifest.campaign, {
+            captureValid: meta.meta.captureValid,
+            exit: meta.meta.exit,
+            primaryStatus: meta.primaryStatus,
+        }),
+    };
+}
+
+/** The slot inputs shared by planning helpers. */
+interface SlotPlanning {
+    root: string;
+    manifest: PreparedManifest;
+    frozen: FrozenRecord;
+    slot: Slot;
+    testCase: SuiteCase;
+    arm: StagedArm;
+    passthrough: readonly string[] | undefined;
+}
+
+/** Plan a dry run in a disposable directory, then remove it. */
+function dryRunPlan(options: SlotPlanning): SlotOutcome {
+    const planDirectory = mkdtempSync(join(tmpdir(), "otc-plan-"));
+    const planned = planTrial({
+        root: options.root,
+        manifest: options.manifest,
+        frozen: options.frozen,
+        slot: options.slot,
+        testCase: options.testCase,
+        arm: options.arm,
+        trialDir: planDirectory,
+        ...(options.passthrough === undefined
+            ? {}
+            : { passthrough: options.passthrough }),
+    });
+    rmSync(planDirectory, { recursive: true, force: true });
+    return planned.ok
+        ? { ran: true, refused: false, problems: [], stop: false }
+        : {
+              ran: false,
+              refused: false,
+              problems: planned.problems,
+              stop: false,
+          };
+}
+
+/** Claim one trial's slot key and budget index, or report the refusal. */
+function claimTrial(
+    root: string,
+    manifest: PreparedManifest,
+    slot: Slot,
+): { ok: true; claim: BudgetClaim } | { ok: false; outcome: SlotOutcome } {
+    const admitted = withAdmission(root, () => {
+        const ledger = readLedger(root);
+        if (ledger.state === "closed") return { state: "closed" } as const;
+        if (ledger.state === "malformed") {
+            return { state: "malformed", problems: ledger.problems } as const;
+        }
+        return {
+            state: "open",
+            claimed: claimBudget(
+                join(root, "evidence"),
+                "trial",
+                manifest.campaign.budgets.trials,
+                {
+                    stamp: slot.slotId,
+                    key: `slot:${slot.slotId}`,
+                    note: "trial reservation",
+                },
+            ),
+        } as const;
+    });
+    if (!admitted.ok) {
+        return {
+            ok: false,
+            outcome: {
+                ran: false,
+                refused: false,
+                problems: [admitted.problem],
+                stop: true,
+            },
+        };
+    }
+    const value = admitted.value;
+    if (value.state === "closed") {
+        return {
+            ok: false,
+            outcome: {
+                ran: false,
+                refused: true,
+                problems: [
+                    "campaign is closed; no further dispatch is permitted",
+                ],
+                stop: true,
+            },
+        };
+    }
+    if (value.state === "malformed") {
+        return {
+            ok: false,
+            outcome: {
+                ran: false,
+                refused: true,
+                problems: [
+                    `attempt ledger is malformed: ${value.problems.join("; ")}`,
+                ],
+                stop: true,
+            },
+        };
+    }
+    if (value.claimed.ok) return { ok: true, claim: value.claimed.claim };
+    const logical = value.claimed.reason.includes("logical attempt");
+    return {
+        ok: false,
+        outcome: {
+            ran: false,
+            refused: logical,
+            problems: [value.claimed.reason],
+            stop: !logical,
+        },
+    };
+}
+
+/** Stage a claimed trial; release only when nothing was dispatched. */
+function planClaimed(
+    options: SlotPlanning & { trialDir: string; claim: BudgetClaim },
+):
+    | {
+          ok: true;
+          planned: {
+              plan: ContainerPlan;
+              argv: string[];
+              configSha256: string;
+          };
+      }
+    | { ok: false; outcome: SlotOutcome } {
+    let planned;
+    try {
+        planned = planTrial({
+            root: options.root,
+            manifest: options.manifest,
+            frozen: options.frozen,
+            slot: options.slot,
+            testCase: options.testCase,
+            arm: options.arm,
+            trialDir: options.trialDir,
+            ...(options.passthrough === undefined
+                ? {}
+                : { passthrough: options.passthrough }),
+        });
+    } catch (error) {
+        releaseClaim(options.claim);
+        throw error;
+    }
+    if (planned.ok) return { ok: true, planned };
+    releaseClaim(options.claim);
+    return {
+        ok: false,
+        outcome: {
+            ran: false,
+            refused: false,
+            problems: planned.problems,
+            stop: false,
+        },
     };
 }
 
@@ -843,6 +1072,7 @@ function runState(
  * @param options.slotIds The selected slots.
  * @param options.dryRun Plan without dispatch.
  * @param options.passthrough Named environment values to pass through.
+ * @param options.signal Cancels an in-flight dispatch with bounded cleanup.
  * @param deps Injected process runner and clock.
  * @returns What ran and what was refused.
  */
@@ -852,9 +1082,14 @@ export async function runCampaign(
         slotIds?: readonly string[];
         dryRun?: boolean;
         passthrough?: readonly string[];
+        signal?: AbortSignal;
     } = {},
     deps: RunDeps = {},
 ): Promise<RunSummary> {
+    // Reject an unknown selector before any state-dependent refusal, so the
+    // caller always gets an input error rather than a misleading operational
+    // one, and nothing has been written.
+    refuseUnknownSelectors(root, options.slotIds);
     const state = runState(root, deps.tool);
     if (!state.ok) {
         return { ok: false, ran: [], refused: [], problems: state.problems };
@@ -876,6 +1111,7 @@ export async function runCampaign(
             already,
             dryRun: options.dryRun === true,
             passthrough: options.passthrough,
+            signal: options.signal,
             execute,
             now,
         });

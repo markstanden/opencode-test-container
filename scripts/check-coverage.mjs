@@ -12,8 +12,14 @@
  * either population drops below its declared floor.
  */
 import { spawnSync } from "node:child_process";
-import { mkdirSync, readFileSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import {
+    mkdirSync,
+    readFileSync,
+    readdirSync,
+    rmSync,
+    statSync,
+} from "node:fs";
+import { join, relative, sep } from "node:path";
 
 const ROOT = process.cwd();
 const LCOV = join(ROOT, "coverage", "lcov.info");
@@ -36,7 +42,8 @@ const POPULATIONS = [
     {
         name: "migrated docs analysis (previously gated)",
         include: (file) =>
-            file.includes("src/evaluators/docs/analysis/") &&
+            (file.includes("src/evaluators/docs/analysis/") ||
+                file.endsWith("src/evaluators/docs/journal.ts")) &&
             !file.endsWith("replay.ts"),
         floors: { line: 95, branch: 90, function: 95 },
     },
@@ -55,11 +62,23 @@ function runCoverage() {
             "--test-coverage-exclude=**/*.test.ts",
             "--test-reporter=lcov",
             `--test-reporter-destination=${LCOV}`,
+            ...(process.env.OTC_COVERAGE_VERBOSE === "1"
+                ? ["--test-reporter=spec", "--test-reporter-destination=stdout"]
+                : []),
             "tests/**/*.test.ts",
         ],
         { cwd: ROOT, encoding: "utf8", stdio: "inherit" },
     );
     if (result.status !== 0) {
+        try {
+            const log = readFileSync(
+                join(ROOT, "coverage", "tests.log"),
+                "utf8",
+            );
+            console.error(log.split("\n").slice(-120).join("\n"));
+        } catch {
+            console.error("coverage: no test log was written");
+        }
         throw new Error(`coverage tests failed with ${String(result.status)}`);
     }
 }
@@ -105,9 +124,56 @@ function percent([hit, found]) {
     return found === 0 ? 100 : (hit / found) * 100;
 }
 
+/** Every TypeScript source file, including files no test ever imports. */
+function sourceFiles() {
+    const root = join(ROOT, "src");
+    const found = [];
+    const walk = (directory) => {
+        for (const entry of readdirSync(directory).sort()) {
+            const path = join(directory, entry);
+            if (statSync(path).isDirectory()) walk(path);
+            else if (entry.endsWith(".ts")) {
+                found.push(relative(root, path).split(sep).join("/"));
+            }
+        }
+    };
+    walk(root);
+    return found.sort();
+}
+
+/**
+ * Source files deliberately outside the measured population, with the reason.
+ * Type-only modules and re-export facades are erased or measured through the
+ * modules they name; every other source file must be imported by the suite.
+ */
+const SOURCE_EXCLUSIONS = new Map([
+    ["index.ts", "public re-export facade; each module is measured directly"],
+    ["contracts/types.ts", "type-only module, erased at runtime"],
+    [
+        "evaluators/docs/index.ts",
+        "re-export facade measured through its named modules",
+    ],
+]);
+
 runCoverage();
 const files = parseLcov(readFileSync(LCOV, "utf8"));
-let failed = false;
+const measuredFiles = new Set(
+    files.map((entry) =>
+        relative(join(ROOT, "src"), entry.file).split(sep).join("/"),
+    ),
+);
+const unmeasured = sourceFiles()
+    .filter((file) => !SOURCE_EXCLUSIONS.has(file))
+    .filter((file) => !measuredFiles.has(file));
+let failed = unmeasured.length > 0;
+if (failed) {
+    console.error(
+        `coverage: source files were never imported by the suite: ${unmeasured.join(", ")}`,
+    );
+    console.error(
+        "coverage: add a test that imports them, or document a legitimate exclusion",
+    );
+}
 for (const population of POPULATIONS) {
     const sum = totals(files, population.include);
     const measured = {

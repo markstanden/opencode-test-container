@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { sha256Bytes } from "./canonical.ts";
+import { environmentNameProblem } from "./env.ts";
 import type {
     Arm,
     AssessmentKind,
@@ -776,6 +777,28 @@ function parseProvider(
     return { route, model, ...(overlay === undefined ? {} : { overlay }) };
 }
 
+/** Validate the optional passthrough environment names. */
+function passthroughEnvOf(
+    value: unknown,
+    problems: string[],
+): string[] | undefined {
+    if (value === undefined) return undefined;
+    if (!Array.isArray(value) || !value.every(isText)) {
+        problems.push(
+            "campaign.runtime.passthroughEnv must be environment names",
+        );
+        return undefined;
+    }
+    for (const name of value as string[]) {
+        const problem = environmentNameProblem(name);
+        if (problem !== null) {
+            problems.push(`campaign.runtime.passthroughEnv: ${problem}`);
+            return undefined;
+        }
+    }
+    return value as string[];
+}
+
 /** Validate the optional, non-secret runtime flags. */
 function runtimeExtras(
     value: Record<string, unknown>,
@@ -784,24 +807,13 @@ function runtimeExtras(
     if (value.containerCli !== undefined && value.containerCli !== "podman") {
         problems.push('campaign.runtime.containerCli must be "podman"');
     }
-    if (
-        value.passthroughEnv !== undefined &&
-        (!Array.isArray(value.passthroughEnv) ||
-            !value.passthroughEnv.every(isText))
-    ) {
-        problems.push(
-            "campaign.runtime.passthroughEnv must be environment names",
-        );
-        return {};
-    }
+    const passthroughEnv = passthroughEnvOf(value.passthroughEnv, problems);
     return {
         ...(typeof value.imageId === "string" && value.imageId !== ""
             ? { imageId: value.imageId }
             : {}),
         ...(value.containerCli === "podman" ? { containerCli: "podman" } : {}),
-        ...(Array.isArray(value.passthroughEnv)
-            ? { passthroughEnv: value.passthroughEnv }
-            : {}),
+        ...(passthroughEnv === undefined ? {} : { passthroughEnv }),
     };
 }
 
@@ -1261,8 +1273,33 @@ export function validateCampaign(
             ...(value.stopOnFirstFailure === true
                 ? { stopOnFirstFailure: true }
                 : {}),
+            ...(stopPolicyOf(value.stopPolicy, problems) === undefined
+                ? {}
+                : { stopPolicy: { version: 2 as const } }),
         },
     };
+}
+
+/** Validate the optional stop-policy declaration. */
+function stopPolicyOf(
+    value: unknown,
+    problems: string[],
+): { version: 2 } | undefined {
+    if (value === undefined) return undefined;
+    if (!isRecord(value)) {
+        problems.push("campaign.stopPolicy must be an object");
+        return undefined;
+    }
+    if (value.version !== 2) {
+        problems.push("campaign.stopPolicy.version must be 2");
+        return undefined;
+    }
+    for (const key of Object.keys(value)) {
+        if (key !== "version") {
+            problems.push(`campaign.stopPolicy has unexpected field ${key}`);
+        }
+    }
+    return { version: 2 };
 }
 
 /** Check one slot's case/arm references and target-skill supply. */

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createHash, createHmac } from "node:crypto";
 import {
     answerIdentityProblem,
+    hostDispatchesFromTrail,
     journalMacValid,
     verifyOperationsJournal,
 } from "../../src/evaluators/docs/analysis/journal.ts";
@@ -854,6 +855,34 @@ describe("operations-journal verification", () => {
             lake: "docs",
             add: ADD_STRUCT,
         });
+    });
+});
+
+describe("journal identity and host-trail edges", () => {
+    it("rejects a record whose message identity is not in the run", () => {
+        // Act
+        const verification = verifyOperationsJournal({
+            lines: [signed({ messageID: "msg_other" })],
+            key: KEY,
+            identity,
+            callIds: new Set(["call_abc"]),
+            nativeCalls: [],
+            dispatches,
+        });
+
+        // Assert
+        assert.equal(verification.credited.length, 0);
+        assert.equal(verification.rejected.length, 1);
+    });
+
+    it("skips an unreadable host tool-trail line", () => {
+        // Act
+        const host = hostDispatchesFromTrail("{not json\n");
+
+        // Assert
+        assert.equal(host.callIds.size, 0);
+        assert.deepEqual(host.nativeCalls, []);
+        assert.deepEqual(host.dispatches, []);
     });
 });
 

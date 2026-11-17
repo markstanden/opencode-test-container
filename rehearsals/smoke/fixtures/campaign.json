@@ -1,0 +1,75 @@
+{
+    "schemaVersion": 1,
+    "campaignId": "otc-smoke",
+    "suite": {
+        "path": "suite.json"
+    },
+    "subjects": [
+        {
+            "armId": "smoke-arm",
+            "skills": [
+                {
+                    "id": "otel-smoke",
+                    "path": "skills/otel-smoke"
+                }
+            ],
+            "plugins": [
+                {
+                    "id": "otc-probe",
+                    "path": "plugin/otc-probe",
+                    "options": {
+                        "marker": "OTC_PLUGIN_OPTIONS_OK"
+                    }
+                }
+            ],
+            "instructions": [
+                {
+                    "id": "smoke",
+                    "path": "workspace/AGENTS.md"
+                }
+            ]
+        }
+    ],
+    "schedule": {
+        "kind": "explicit",
+        "slots": [
+            {
+                "slotId": "smoke-slot",
+                "caseId": "smoke-case",
+                "armId": "smoke-arm",
+                "repetitionId": "r0"
+            }
+        ]
+    },
+    "runtime": {
+        "image": "localhost/otc-smoke:runtime",
+        "opencodeVersion": "2.2.6",
+        "provider": {
+            "route": "scripted",
+            "model": "zai-coding-plan/glm-5.3-flash",
+            "overlay": {
+                "providers": {
+                    "zai-coding-plan": {
+                        "settings": {
+                            "baseURL": "http://127.0.0.1:1/v1"
+                        }
+                    }
+                }
+            }
+        },
+        "timeoutMs": 60000,
+        "network": "host",
+        "passthroughEnv": ["ZAI_API_KEY"]
+    },
+    "budgets": {
+        "trials": 1,
+        "judgeAttempts": 0
+    },
+    "assessment": {
+        "kind": "skill-activation"
+    },
+    "stopOnFirstFailure": true,
+    "stopPolicy": {
+        "version": 2
+    }
+}

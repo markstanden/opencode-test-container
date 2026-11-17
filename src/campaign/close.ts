@@ -1,20 +1,25 @@
 import { appendLedgerEvent, readLedger, trialStarts } from "./ledger.ts";
 import { loadPreparedManifest, type PreparedManifest } from "./prepare.ts";
-import { loadFrozen } from "./freeze.ts";
-import { readAssessments } from "./assess.ts";
+import { deliveryCheck, loadFrozen } from "./freeze.ts";
+import { checkedAssessments } from "../evidence/assessments.ts";
 import {
     checkedSelection,
     packetIntegrityProblems,
     policyOf,
     readJudgeAttempts,
 } from "./judge.ts";
-import { readClaims } from "../evaluators/docs/analysis/budget.ts";
+import { readClaims } from "./budget.ts";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { withAdmission } from "./admission.ts";
 
 /** Unsettled spend claims that must stop closure, or an empty list. */
 function unsettledClaims(root: string): string[] {
-    return ["judge", "recovery"].flatMap((kind) =>
-        readClaims(join(root, "evidence"), kind as "judge" | "recovery")
+    return ["trial", "judge", "recovery"].flatMap((kind) =>
+        readClaims(
+            join(root, "evidence"),
+            kind as "trial" | "judge" | "recovery",
+        )
             .filter((claim) => claim.state !== "closed")
             .map(
                 (claim) =>
@@ -60,6 +65,7 @@ export type CloseResult =
 function closureRefusals(
     root: string,
     manifest: PreparedManifest,
+    ledger: ReturnType<typeof readLedger>,
     starts: ReturnType<typeof trialStarts>,
     ended: ReadonlySet<string>,
 ): string[] {
@@ -74,7 +80,36 @@ function closureRefusals(
     const claims = unsettledClaims(root);
     if (claims.length > 0) {
         return [
-            `unsettled judge spend: ${claims.join("; ")}; closure would hide an unknown outcome`,
+            `unsettled spend: ${claims.join("; ")}; closure would hide an unknown outcome`,
+        ];
+    }
+    const assessments = checkedAssessments({ root, manifest, ledger });
+    if (assessments.problems.length > 0) {
+        return [
+            "assessment evidence is not trustworthy",
+            ...assessments.problems,
+        ];
+    }
+    const assessed = new Set(
+        assessments.records
+            .filter((entry) => entry.state === "valid")
+            .map((entry) => entry.slotId),
+    );
+    const missing = [...ended].filter((slotId) => !assessed.has(slotId));
+    if (missing.length > 0) {
+        return [
+            `completed slot(s) have no checked assessment: ${missing.join(", ")}; assess before closure`,
+        ];
+    }
+    const orphanDirectories = manifest.campaign.schedule.slots
+        .filter((slot) =>
+            existsSync(join(root, "evidence", "trials", slot.slotId)),
+        )
+        .filter((slot) => !ended.has(slot.slotId))
+        .map((slot) => slot.slotId);
+    if (orphanDirectories.length > 0) {
+        return [
+            `trial director(ies) without a terminal record: ${orphanDirectories.join(", ")}; closure would hide unknown spend`,
         ];
     }
     const packetProblems = manifest.campaign.schedule.slots.flatMap((slot) =>
@@ -110,43 +145,77 @@ export function closeCampaign(
     if (!prepared.ok) return { ok: false, problems: [prepared.problem] };
     const frozen = loadFrozen(root);
     if (!frozen.ok) return { ok: false, problems: [frozen.problem] };
-    const ledger = readLedger(root);
-    if (ledger.state === "malformed") {
-        return { ok: false, problems: ledger.problems };
-    }
-    if (ledger.state === "closed") {
-        return {
-            ok: true,
-            alreadyClosed: true,
-            closedAt: ledger.closedAt ?? "unknown",
-        };
-    }
-    const starts = trialStarts(ledger.events);
-    const ended = new Set(
-        ledger.events
-            .filter((event) => event.event === "trial-end")
-            .map((event) =>
-                typeof event.slotId === "string" ? event.slotId : "",
-            ),
-    );
-    const refusals = closureRefusals(root, prepared.manifest, starts, ended);
-    if (refusals.length > 0) {
-        return { ok: false, problems: refusals };
-    }
-    const assessments = readAssessments(root);
-    const closedAt = now();
-    appendLedgerEvent(
-        root,
-        {
-            event: "close",
-            campaignId: prepared.manifest.campaignId,
+    const admitted = withAdmission(root, () => {
+        const ledger = readLedger(root);
+        if (ledger.state === "malformed") {
+            return { kind: "malformed" as const, problems: ledger.problems };
+        }
+        if (ledger.state === "closed") {
+            return {
+                kind: "already" as const,
+                closedAt: ledger.closedAt ?? "unknown",
+            };
+        }
+        const drift = deliveryCheck(root);
+        if (drift.length > 0) {
+            return {
+                kind: "refuse" as const,
+                problems: ["delivery check failed", ...drift],
+            };
+        }
+        const starts = trialStarts(ledger.events);
+        const ended = new Set(
+            ledger.events
+                .filter((event) => event.event === "trial-end")
+                .flatMap((event) =>
+                    typeof event.slotId === "string" ? [event.slotId] : [],
+                ),
+        );
+        const refusals = closureRefusals(
+            root,
+            prepared.manifest,
+            ledger,
+            starts,
+            ended,
+        );
+        if (refusals.length > 0) {
+            return { kind: "refuse" as const, problems: refusals };
+        }
+        const assessments = checkedAssessments({
+            root,
+            manifest: prepared.manifest,
+            ledger,
+        });
+        const closedAt = now();
+        appendLedgerEvent(
+            root,
+            {
+                event: "close",
+                campaignId: prepared.manifest.campaignId,
+                closedAt,
+                trialStarts: starts.length,
+                trialEnds: ended.size,
+                assessments: assessments.records.filter(
+                    (entry) => entry.state === "valid",
+                ).length,
+                slots: prepared.manifest.campaign.schedule.slots.length,
+            },
             closedAt,
-            trialStarts: starts.length,
-            trialEnds: ended.size,
-            assessments: assessments.length,
-            slots: prepared.manifest.campaign.schedule.slots.length,
-        },
-        closedAt,
-    );
-    return { ok: true, alreadyClosed: false, closedAt };
+        );
+        return { kind: "closed" as const, closedAt };
+    });
+    if (!admitted.ok) return { ok: false, problems: [admitted.problem] };
+    if (admitted.value.kind === "malformed") {
+        return { ok: false, problems: admitted.value.problems };
+    }
+    if (admitted.value.kind === "refuse") {
+        return { ok: false, problems: admitted.value.problems };
+    }
+    return admitted.value.kind === "already"
+        ? {
+              ok: true,
+              alreadyClosed: true,
+              closedAt: admitted.value.closedAt,
+          }
+        : { ok: true, alreadyClosed: false, closedAt: admitted.value.closedAt };
 }

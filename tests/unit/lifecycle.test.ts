@@ -357,7 +357,7 @@ describe("budget refusal", () => {
         assert.deepEqual(summary.ran, ["s1"]);
         assert.ok(
             summary.problems.some((problem) =>
-                problem.includes("budget exhausted"),
+                problem.includes("ceiling reached"),
             ),
         );
         rmSync(fixture.dir, { recursive: true, force: true });
@@ -377,8 +377,16 @@ describe("missing evidence", () => {
         assert.equal(frozen.ok, true);
         const assessed = assessCampaign(root);
         assert.equal(assessed.ok, true, assessed.problems.join("; "));
-        assert.equal(assessed.summary.unrun, 3);
+        // Unrun is derived state, never a persisted terminal record: early
+        // inspection must not poison a later assessment.
+        assert.equal(assessed.summary.unrun, 0);
         assert.equal(assessed.summary.pass, 0);
+        assert.equal(assessed.skipped.length, 3);
+        assert.equal(
+            existsSync(join(root, "evidence", "assessments")),
+            false,
+            "an unrun slot writes no assessment",
+        );
         rmSync(fixture.dir, { recursive: true, force: true });
     });
 });

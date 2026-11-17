@@ -3,13 +3,17 @@ import { join } from "node:path";
 import type { SuiteCase } from "../../contracts/types.ts";
 import {
     bodyRoutes,
-    captureProblems,
-    decodeTrail,
     skillCalls,
     type SkillCall,
     type Usage,
 } from "../../adapters/opencode/events.ts";
-import type { TrialMeta } from "../../campaign/run.ts";
+import { checkCapture } from "../../evidence/capture.ts";
+import {
+    sourceIdentity,
+    unsafeIdentityFields,
+    type SourceIdentity,
+} from "../../evidence/source-identity.ts";
+import { EVALUATOR_VERSION } from "../../contracts/version.ts";
 import { isRecord } from "../../contracts/validate.ts";
 
 /** The evidence states the evaluator can establish. */
@@ -44,6 +48,10 @@ export interface SkillCounts {
 export interface SkillAssessment {
     /** The schema version value. */
     schemaVersion: 1;
+    /** The evaluator semantics that produced this assessment. */
+    evaluatorVersion: number;
+    /** The exact trial artifacts this assessment consumed. */
+    evidence: SourceIdentity;
     /** The kind value. */
     kind: "skill-activation";
     /** The campaign id value. */
@@ -114,17 +122,6 @@ function countsOf(
     return counts;
 }
 
-/** Read a trial meta record without trusting it. */
-function readMeta(path: string): TrialMeta | null {
-    if (!existsSync(path)) return null;
-    try {
-        const value: unknown = JSON.parse(readFileSync(path, "utf8"));
-        return isRecord(value) ? (value as unknown as TrialMeta) : null;
-    } catch {
-        return null;
-    }
-}
-
 /** Read the usage record, or null when absent/malformed. */
 function readUsage(path: string): Usage | null {
     if (!existsSync(path)) return null;
@@ -169,18 +166,16 @@ function unrunAssessment(
     };
 }
 
-/** Capture integrity problems from meta and the decoded trail. */
-function skillIntegrity(
-    meta: TrialMeta,
-    trail: ReturnType<typeof decodeTrail>,
-): string[] {
-    const integrity = [...captureProblems(trail)];
-    if (meta.captureValid !== true)
-        integrity.push(...(meta.captureProblems ?? []));
-    if (meta.exit !== 0)
-        integrity.push(`container exited ${String(meta.exit)}`);
-    if (meta.timedOut) integrity.push("container timed out");
-    return integrity;
+/** Reasons an unsafe evaluated workspace makes integrity unknown. */
+function unsafeWorkspaceReasons(evidence: {
+    workspacePresent: boolean;
+    workspaceSafe: boolean;
+}): string[] {
+    return evidence.workspacePresent && !evidence.workspaceSafe
+        ? [
+              "the evaluated workspace contains an unsafe object; integrity is unknown",
+          ]
+        : [];
 }
 
 /** The observed state independent of expectation. */
@@ -228,9 +223,10 @@ export function assessSkillTrial(options: {
     assessedAt: string;
 }): SkillAssessment {
     const { testCase, trialDir } = options;
-    const meta = readMeta(join(trialDir, "meta.json"));
     const base = {
         schemaVersion: 1 as const,
+        evaluatorVersion: EVALUATOR_VERSION,
+        evidence: sourceIdentity(trialDir),
         kind: "skill-activation" as const,
         campaignId: options.campaignId,
         slotId: options.slotId,
@@ -241,29 +237,30 @@ export function assessSkillTrial(options: {
         targetSkillId: testCase.targetSkillId,
         expected: testCase.expected,
     };
-    if (meta === null) {
+    const capture = checkCapture(trialDir, {
+        campaignId: options.campaignId,
+        slotId: options.slotId,
+    });
+    if (capture.state === "unrun") {
         return unrunAssessment(
             base,
-            "trial meta is missing or unreadable",
+            capture.problems[0] ?? "trial evidence is missing",
             options.assessedAt,
         );
     }
-    if (!existsSync(join(trialDir, "events.jsonl"))) {
-        return unrunAssessment(
-            base,
-            "trial event stream is missing",
-            options.assessedAt,
-        );
-    }
-    const trail = decodeTrail(
-        readFileSync(join(trialDir, "events.jsonl"), "utf8"),
-    );
+    const trail = capture.trail;
     const calls = skillCalls(trail);
     const counts = countsOf(calls, testCase.targetSkillId);
     const routes = bodyRoutes(trail, testCase.targetSkillId);
     const contamination = routes.length > 0;
-    const integrity = skillIntegrity(meta, trail);
-    if (integrity.length > 0) {
+    const unsafeFields = unsafeIdentityFields(base.evidence);
+    const unsafeReasons = [
+        ...unsafeWorkspaceReasons(base.evidence),
+        ...unsafeFields.map(
+            (field) => `trial evidence contains an unsafe object: ${field}`,
+        ),
+    ];
+    if (unsafeReasons.length > 0) {
         return {
             ...base,
             validity: "invalid",
@@ -272,7 +269,22 @@ export function assessSkillTrial(options: {
             counts,
             bodyRoutes: routes,
             contaminated: contamination,
-            reasons: integrity,
+            reasons: unsafeReasons,
+            usage: readUsage(join(trialDir, "usage.json")),
+            answered: trail.text.trim() !== "",
+            assessedAt: options.assessedAt,
+        };
+    }
+    if (capture.state === "invalid") {
+        return {
+            ...base,
+            validity: "invalid",
+            observed: "unrun",
+            outcome: "unknown",
+            counts,
+            bodyRoutes: routes,
+            contaminated: contamination,
+            reasons: capture.problems,
             usage: readUsage(join(trialDir, "usage.json")),
             answered: trail.text.trim() !== "",
             assessedAt: options.assessedAt,
