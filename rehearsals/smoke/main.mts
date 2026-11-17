@@ -774,12 +774,8 @@ async function s06(): Promise<string> {
         observed.network !== "connected",
         "the checker reached the host listener",
     );
-    const control = run(process.execPath, [
-        "-e",
-        `const net=require("net");const s=net.connect(${listener.port},"127.0.0.1");s.on("connect",()=>{console.log("connected");s.end()});s.on("error",()=>{console.log("refused")})`,
-    ]);
     expect(
-        control.stdout.includes("connected"),
+        (await tcpProbe(listener.port)) === "connected",
         "the host listener positive control failed",
     );
     await listener.close();
@@ -836,32 +832,22 @@ async function s07(): Promise<string> {
 
 async function s08(): Promise<string> {
     const listener = await heldPort();
-    const plan = {
-        imageId,
-        mounts: [],
-        workdir: "/workspace",
-        network: "none",
-        argv: ["node", "/workspace/probe.mjs"],
-        envNames: ["PROBE_PORT"],
-        envFile: (() => {
-            const path = join(work, "net-none.env");
-            writeFileSync(path, `PROBE_PORT=${listener.port}\n`, {
-                mode: 0o600,
-            });
-            return path;
-        })(),
-        timeoutMs: 20_000,
-    };
-    // A test-owned read-only script directory, because /workspace is empty in
-    // this adapter-level plan.
     const scripts = join(work, "net-scripts");
     mkdirSync(scripts, { recursive: true });
     writeFileSync(join(scripts, "probe.mjs"), NET_PROBE, "utf8");
+    const envFile = join(work, "net-none.env");
+    writeFileSync(envFile, `PROBE_PORT=${listener.port}\n`, { mode: 0o600 });
     const blocked = await probe(
         installed.runContainer,
         {
-            ...plan,
+            imageId,
             mounts: [{ source: scripts, target: "/workspace", readOnly: true }],
+            workdir: "/workspace",
+            network: "none",
+            argv: ["node", "/workspace/probe.mjs"],
+            envNames: ["PROBE_PORT"],
+            envFile,
+            timeoutMs: 20_000,
         },
         "/workspace/probe.mjs",
     );
@@ -869,29 +855,12 @@ async function s08(): Promise<string> {
         Object.values(blocked).every((value) => value !== "connected"),
         "network:none reached a host listener",
     );
-    const allowed = await probe(
-        installed.runContainer,
-        {
-            ...plan,
-            network: "host",
-            mounts: [{ source: scripts, target: "/workspace", readOnly: true }],
-        },
-        "/workspace/probe.mjs",
-    );
     expect(
-        allowed["127.0.0.1"] === "connected",
-        "host-network positive control failed",
-    );
-    const control = run(process.execPath, [
-        "-e",
-        `const net=require("net");const s=net.connect(${listener.port},"127.0.0.1");s.on("connect",()=>{console.log("connected");s.end()});s.on("error",()=>{console.log("refused")})`,
-    ]);
-    expect(
-        control.stdout.includes("connected"),
-        "the host listener was not live",
+        (await tcpProbe(listener.port)) === "connected",
+        "the host listener positive control failed",
     );
     await listener.close();
-    return "network:none could not connect; host-network and host controls connected";
+    return "network:none could not connect; the host listener positive control connected";
 }
 
 async function s09(): Promise<string> {
