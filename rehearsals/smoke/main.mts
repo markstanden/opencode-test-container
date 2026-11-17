@@ -10,6 +10,7 @@
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
+import { connect } from "node:net";
 import { join } from "node:path";
 import { startProvider, type ScriptedResponse } from "../provider.mts";
 import {
@@ -955,6 +956,30 @@ async function s09(): Promise<string> {
         );
     }
     return observations.join("; ");
+}
+
+/** One non-blocking TCP probe against a host listener. */
+function tcpProbe(
+    port: number,
+    timeoutMs = 1_200,
+    host = "127.0.0.1",
+): Promise<"connected" | "refused" | "timeout"> {
+    return new Promise((done) => {
+        const socket = connect({ host, port });
+        const timer = setTimeout(() => {
+            socket.destroy();
+            done("timeout");
+        }, timeoutMs);
+        socket.on("connect", () => {
+            clearTimeout(timer);
+            socket.destroy();
+            done("connected");
+        });
+        socket.on("error", () => {
+            clearTimeout(timer);
+            done("refused");
+        });
+    });
 }
 
 /** Wait until a predicate holds, bounded. */
