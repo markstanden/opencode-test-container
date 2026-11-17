@@ -116,13 +116,23 @@ remain external data; OTC stages, hashes and executes them.
 campaign/{run,assess,judge,close,status,report}
         |
         +-> evidence/{containment,capture,source-identity,assessments}
-        +-> campaign/{reservations (budget),publication,stop-policy}
+        +-> campaign/{admission,budget,stop-policy}
         +-> adapters/{process,podman,opencode}
 ```
 
 - `src/evidence` distinguishes missing, valid, corrupt, unsupported and
   conflicting records. Capture validity is derived from the raw stream and
   reconciled with saved metadata, not read from a flag.
+- `src/campaign/admission.ts` is the one admission/closure decision: dispatch,
+  assessment publication and closure take the same short lock and re-read the
+  ledger inside it. `src/campaign/budget.ts` owns durable claims for trial,
+  judge and recovery; the analysis path is a compatibility re-export.
+- The journal verifier has one implementation; `analysis/journal.ts` is a
+  compatibility re-export, not a second copy.
+- Assessment source identity binds the primary-check record, docs journal and
+  key, and the evaluated workspace identity in addition to capture metadata.
+  Genuine v0.1.1 records are read through an explicit historical path with
+  stated limitations.
 - Assessment identity excludes `assessedAt`: repeating identical work reuses
   the first record and timestamp, changed evidence is refused, and unrun state
   is derived rather than persisted.
@@ -131,6 +141,15 @@ campaign/{run,assess,judge,close,status,report}
   every path; owned containers are stopped and removed by their own name.
 - `npm test` stays hermetic; `npm run test:smoke` is the real-container proof
   (`docs/smoke.md`). It needs no sibling docs checkout.
+
+## Deferred extraction
+
+`src/campaign/judge.ts` still combines judge execution with docs packet/verdict
+policy. Splitting it safely needs the docs strategy interface to be extracted
+alongside the execution boundary; that work is deliberately deferred rather
+than half-done. The shared admission, budget, stop-policy, evidence and
+containment boundaries above are the prerequisites, and the judge split is the
+next extraction once those boundaries have soaked.
 
 ## Removal condition for the docs bridge
 

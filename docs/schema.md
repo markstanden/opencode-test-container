@@ -67,9 +67,11 @@ and `conflicting`.
   restraint or activation.
 - **Assessments** must match the scheduled slot, schema and evaluator version,
   the exact source-evidence hashes they recorded, and one authoritative
-  `assessment` ledger event with the same SHA-256, outcome and validity. An
-  unexpected record file, duplicate binding or changed evidence is a
-  conflicting assessment.
+  `assessment` ledger event with the same SHA-256, outcome and validity. The
+  binding covers the raw capture, metadata, tools, answer, primary-check
+  record, docs journal and key, and the evaluated workspace identity (path,
+  kind, link target and bytes). An unexpected record file, duplicate binding or
+  any changed or deleted input is a conflicting assessment.
 - **Local limit.** These hashes detect an edited record, missing binding or
   changed evidence. They cannot defeat an operator who coherently rewrites every
   trusted record on the machine.
@@ -77,6 +79,27 @@ and `conflicting`.
 Assessments carry `evaluatorVersion` (currently 2). Version 1 roots are
 read-only replay material; they are accepted only when their hashes bind and
 are never rewritten.
+
+Genuine v0.1.1 records predate both `evaluatorVersion` and `evidence`. They are
+read through an explicit legacy path: identity, payload and the old ledger hash
+are still checked, but no source binding is invented. The checked reader marks
+them `historical` with the limitation that later evidence changes are not
+detectable. The original bytes and ledger hashes are never rewritten; a genuine
+fixture from the reviewed implementation is kept under
+`tests/fixtures/assessment-v0.1.1/`.
+
+## Admission and closure
+
+Dispatch admission, assessment publication and campaign closure share one
+exclusive lock at `<root>/evidence/ADMISSION.lock`. Admission re-reads the
+ledger and publishes its durable claim inside the critical section; closure
+re-reads the ledger/claims and appends the close event inside the same section.
+Whichever wins, the other observes it: a post-close dispatch cannot start, and
+a close cannot slip between a dispatch's state check and its claim. The lock is
+held only for the short decision/publication window, never across a running
+container. A lock is recovered only when its recorded process is gone and the
+lock is old; a live holder is waited for and then refused. A second
+unprotected state check is never the authority.
 
 ## Lifecycle and reservations
 
@@ -109,6 +132,9 @@ Already-running work is accounted for; no stage cancels a completed trial.
 
 ## Containment and publication
 
+Contained file reads classify the object before opening and open with
+`O_NONBLOCK`, so a FIFO or a replacement FIFO is refused rather than blocking.
+
 Workspace and lake content is read only through `src/evidence/containment.ts`:
 a real directory root, no symlinked directory traversal, containment of every
 resolved target, `O_NOFOLLOW` on the final open, and controlled refusal of
@@ -119,6 +145,10 @@ Reports must resolve outside `evidence/` and `prepare/`; existing ancestors and
 symlinked parents are resolved before anything is created. Output is staged in
 a sibling temporary directory and renamed, so a failed publication leaves no
 misleading completed report.
+
+Primary-checker containers use the same ownership as trials and judges: an
+owned name, ownership labels, the attempt's cancellation signal, bounded
+timeout cleanup, and removal of the checker env file on every path.
 
 Environment files accept only portable names, reject newline/CR/NUL values, and
 never override OTC-owned `HOME`, `XDG_*`, `OPENCODE_CONFIG_CONTENT` or

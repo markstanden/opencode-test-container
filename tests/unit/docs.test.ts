@@ -8,6 +8,7 @@ import {
     rmSync,
     writeFileSync,
 } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { assessDocsTrial } from "../../src/evaluators/docs/assess.ts";
@@ -271,6 +272,37 @@ describe("docs recording assessment", () => {
         assert.equal(assessment.journal.state, "unverifiable-key");
         assert.equal(assessment.counts.creditedCalls, 0);
         rmSync(directory, { recursive: true, force: true });
+    });
+});
+
+describe("docs guardrails", () => {
+    it("refuses a FIFO guardrail without hanging", () => {
+        // Arrange
+        const directory = trial({ entries: [] });
+        try {
+            assert.equal(
+                spawnSync("mkfifo", [join(directory, "workspace", "pipe")])
+                    .status,
+                0,
+            );
+            const docsCase = testCase({
+                expectedDocs: { kind: "none" },
+                criterion: { minVerifiedCalls: 0 },
+                guardrails: { unchanged: ["pipe"] },
+            });
+
+            // Act
+            const assessment = assess(directory, docsCase);
+
+            // Assert
+            assert.equal(assessment.validity, "invalid");
+            assert.match(
+                assessment.reasons.join("; "),
+                /not a regular file|special file/,
+            );
+        } finally {
+            rmSync(directory, { recursive: true, force: true });
+        }
     });
 });
 

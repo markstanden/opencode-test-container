@@ -32,6 +32,7 @@ import {
     stagePackage,
     uniqueTag,
     writeCampaign,
+    writeDocsCampaign,
     type ChildResult,
 } from "./support.mts";
 
@@ -780,7 +781,70 @@ async function s06(): Promise<string> {
     );
     await listener.close();
     await live.close();
-    return `checker isolated, no credentials, no network; positive listener control connected`;
+    // A real checker timeout must leave no owned checker container or env file.
+    const timeoutLive = await provider(
+        [{ kind: "text", content: "Done." }],
+        false,
+    );
+    const timeoutDir = join(work, "s06-timeout");
+    const timeoutCampaign = writeDocsCampaign({
+        directory: timeoutDir,
+        image: imageTag,
+        opencodeVersion,
+        baseUrl: `http://127.0.0.1:${timeoutLive.port}/v1`,
+        timeoutMs: 60_000,
+        checkerScript: "sleep.mjs",
+        checkerTimeoutMs: 1_500,
+    });
+    writeFileSync(
+        join(timeoutDir, "checker", "sleep.mjs"),
+        "setTimeout(() => {}, 60000)\n",
+        "utf8",
+    );
+    const timeoutRoot = join(timeoutDir, "root");
+    await otcMust(
+        env,
+        binary,
+        ["prepare", "--campaign", timeoutCampaign, "--root", timeoutRoot],
+        timeoutDir,
+    );
+    await otcMust(env, binary, ["freeze", "--root", timeoutRoot], timeoutDir);
+    await otc(env, binary, ["run", "--root", timeoutRoot], timeoutDir);
+    providerUsed += timeoutLive.chatCount();
+    await timeoutLive.close();
+    const timeoutRecord = installed.readPrimaryCheck(
+        join(timeoutRoot, "evidence", "trials", "checker-slot"),
+    );
+    expect(
+        timeoutRecord?.status === "timeout",
+        `checker timeout recorded ${String(timeoutRecord?.status)}`,
+    );
+    expect(
+        existsSync(
+            join(
+                timeoutRoot,
+                "evidence",
+                "trials",
+                "checker-slot",
+                "checker.env",
+            ),
+        ) === false,
+        "the checker env file survived the timeout",
+    );
+    await until(
+        () =>
+            run("podman", [
+                "ps",
+                "-a",
+                "--filter",
+                "label=otc.checker=checker-slot",
+                "--format",
+                "{{.Names}}",
+            ]).stdout.trim() === "",
+        20_000,
+        "checker container cleanup",
+    );
+    return `checker isolated; host control connected; checker timeout cleaned its container and env file`;
 }
 
 async function s07(): Promise<string> {
@@ -1076,7 +1140,93 @@ async function s10(): Promise<string> {
         if (child.exitCode === null) child.kill("SIGKILL");
         await live.close();
     }
-    return "timeout removed its owned container; unrelated control survived; SIGINT cleaned up a live trial";
+
+    // Cancellation during the primary checker must remove the checker too.
+    const checkerLive = await provider(
+        [{ kind: "text", content: "Done." }],
+        false,
+    );
+    const checkerDir = join(work, "s10-checker");
+    const checkerCampaign = writeDocsCampaign({
+        directory: checkerDir,
+        image: imageTag,
+        opencodeVersion,
+        baseUrl: `http://127.0.0.1:${checkerLive.port}/v1`,
+        timeoutMs: 300_000,
+        checkerScript: "sleep.mjs",
+        checkerTimeoutMs: 120_000,
+    });
+    writeFileSync(
+        join(checkerDir, "checker", "sleep.mjs"),
+        "setTimeout(() => {}, 60000)\n",
+        "utf8",
+    );
+    const checkerRoot = join(checkerDir, "root");
+    await otcMust(
+        env,
+        binary,
+        ["prepare", "--campaign", checkerCampaign, "--root", checkerRoot],
+        checkerDir,
+    );
+    await otcMust(env, binary, ["freeze", "--root", checkerRoot], checkerDir);
+    const checkerChild = spawn(binary, ["run", "--root", checkerRoot], {
+        cwd: checkerDir,
+        env,
+        stdio: ["ignore", "pipe", "pipe"],
+    });
+    const checkerExited = new Promise<number | null>((done) => {
+        checkerChild.on("close", (code) => done(code));
+    });
+    try {
+        await until(
+            () =>
+                run("podman", [
+                    "ps",
+                    "-a",
+                    "--filter",
+                    "label=otc.checker=checker-slot",
+                    "--format",
+                    "{{.Names}}",
+                ]).stdout.trim() !== "",
+            60_000,
+            "the checker container",
+        );
+        checkerChild.kill("SIGINT");
+        const code = await Promise.race([
+            checkerExited,
+            new Promise<null>((done) => setTimeout(() => done(null), 60_000)),
+        ]);
+        expect(code !== null, "the checker-cancelled CLI did not exit");
+        await until(
+            () =>
+                run("podman", [
+                    "ps",
+                    "-a",
+                    "--filter",
+                    "label=otc.checker=checker-slot",
+                    "--format",
+                    "{{.Names}}",
+                ]).stdout.trim() === "",
+            30_000,
+            "checker cancellation cleanup",
+        );
+        expect(
+            existsSync(
+                join(
+                    checkerRoot,
+                    "evidence",
+                    "trials",
+                    "checker-slot",
+                    "checker.env",
+                ),
+            ) === false,
+            "the cancelled checker left its env file",
+        );
+    } finally {
+        if (checkerChild.exitCode === null) checkerChild.kill("SIGKILL");
+        await checkerLive.close();
+    }
+    return "timeout and checker timeout/cancellation removed owned containers; control survived";
 }
 
 async function s11(): Promise<string> {

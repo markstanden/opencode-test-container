@@ -1,0 +1,33 @@
+{
+    "schemaVersion": 1,
+    "campaignId": "skill-basic-local",
+    "slotId": "s1",
+    "caseId": "positive-instrument",
+    "armId": "skill-only",
+    "repetitionId": "r0",
+    "imageId": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "promptSha256": "307ddef4407e13e641ef627391a3491c26739e9c0d33cf5992cf895e3ac0a2c6",
+    "configSha256": "8499c37e24ffd67080954ed23eb1068999f170a58ab400e00c4b018e727f4d58",
+    "startedAt": "2026-11-15T00:00:00.000Z",
+    "argv": [
+        "opencode",
+        "run",
+        "--standalone",
+        "--auto",
+        "--archived",
+        "--title",
+        "otc-skill-basic-local-s1",
+        "--model",
+        "zai-coding-plan/glm-5.3-flash",
+        "--format",
+        "json",
+        "Instrument the checkout service with OpenTelemetry spans.\n"
+    ],
+    "envNames": [
+        "HOME",
+        "XDG_CONFIG_HOME",
+        "XDG_DATA_HOME",
+        "XDG_CACHE_HOME",
+        "OPENCODE_CONFIG_CONTENT"
+    ]
+}

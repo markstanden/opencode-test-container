@@ -1,0 +1,55 @@
+{
+    "schemaVersion": 1,
+    "campaignId": "skill-basic-local",
+    "suite": {
+        "path": "suite.json"
+    },
+    "subjects": [
+        {
+            "armId": "skill-only",
+            "skills": [
+                {
+                    "id": "otel-helper",
+                    "path": "skills/otel-helper"
+                }
+            ]
+        }
+    ],
+    "schedule": {
+        "kind": "explicit",
+        "slots": [
+            {
+                "slotId": "s1",
+                "caseId": "positive-instrument",
+                "armId": "skill-only",
+                "repetitionId": "r0"
+            }
+        ]
+    },
+    "runtime": {
+        "image": "localhost/opencode-placement-trials:latest",
+        "opencodeVersion": "2.2.6",
+        "provider": {
+            "route": "scripted",
+            "model": "zai-coding-plan/glm-5.3-flash",
+            "overlay": {
+                "providers": {
+                    "zai-coding-plan": {
+                        "settings": {
+                            "baseURL": "http://127.0.0.1:8799/v1"
+                        }
+                    }
+                }
+            }
+        },
+        "timeoutMs": 120000,
+        "network": "host"
+    },
+    "budgets": {
+        "trials": 1,
+        "judgeAttempts": 0
+    },
+    "assessment": {
+        "kind": "skill-activation"
+    }
+}

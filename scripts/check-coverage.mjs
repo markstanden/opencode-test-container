@@ -42,7 +42,8 @@ const POPULATIONS = [
     {
         name: "migrated docs analysis (previously gated)",
         include: (file) =>
-            file.includes("src/evaluators/docs/analysis/") &&
+            (file.includes("src/evaluators/docs/analysis/") ||
+                file.endsWith("src/evaluators/docs/journal.ts")) &&
             !file.endsWith("replay.ts"),
         floors: { line: 95, branch: 90, function: 95 },
     },
@@ -61,13 +62,23 @@ function runCoverage() {
             "--test-coverage-exclude=**/*.test.ts",
             "--test-reporter=lcov",
             `--test-reporter-destination=${LCOV}`,
-            "--test-reporter=spec",
-            "--test-reporter-destination=stdout",
+            ...(process.env.OTC_COVERAGE_VERBOSE === "1"
+                ? ["--test-reporter=spec", "--test-reporter-destination=stdout"]
+                : []),
             "tests/**/*.test.ts",
         ],
         { cwd: ROOT, encoding: "utf8", stdio: "inherit" },
     );
     if (result.status !== 0) {
+        try {
+            const log = readFileSync(
+                join(ROOT, "coverage", "tests.log"),
+                "utf8",
+            );
+            console.error(log.split("\n").slice(-120).join("\n"));
+        } catch {
+            console.error("coverage: no test log was written");
+        }
         throw new Error(`coverage tests failed with ${String(result.status)}`);
     }
 }

@@ -121,8 +121,19 @@ export function readContainedFile(
     if (!resolved.ok) return resolved;
     let fd: number | null = null;
     try {
+        // Classify before opening: opening a FIFO would block before fstat.
+        const pre = lstatSync(resolved.path);
+        if (!pre.isFile()) {
+            return { ok: false, problem: `${path} is not a regular file` };
+        }
         options.beforeOpen?.(resolved.path);
-        fd = openSync(resolved.path, constants.O_RDONLY | constants.O_NOFOLLOW);
+        // O_NONBLOCK closes the replacement race: if a FIFO appears between
+        // the classification and the open, the open returns immediately and
+        // the descriptor check rejects it.
+        fd = openSync(
+            resolved.path,
+            constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+        );
         const stat = fstatSync(fd);
         if (!stat.isFile()) {
             return {
@@ -298,7 +309,10 @@ export function readContainedDocuments(
 
 /** The kind of object at a root-relative path, without opening it. */
 export type ContainedEntry =
-    | { ok: true; kind: "missing" | "file" | "directory" | "symlink" }
+    | {
+          ok: true;
+          kind: "missing" | "file" | "directory" | "symlink" | "special";
+      }
     | { ok: false; problem: string };
 
 /**

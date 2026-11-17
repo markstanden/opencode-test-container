@@ -42,13 +42,14 @@ import { deliveryCheck, loadFrozen, type FrozenRecord } from "./freeze.ts";
 import { stageTree } from "./inventory.ts";
 import { executePrimaryCheck, type PrimaryCheckRecord } from "./primary.ts";
 import { runShouldStop } from "./stop-policy.ts";
+import { withAdmission } from "./admission.ts";
 import { appendLedgerEvent, readLedger, startedSlots } from "./ledger.ts";
 import {
     advanceClaim,
     claimBudget,
     releaseClaim,
     type BudgetClaim,
-} from "../evaluators/docs/analysis/budget.ts";
+} from "./budget.ts";
 import {
     loadPreparedManifest,
     type PreparedManifest,
@@ -516,6 +517,7 @@ async function executeSlot(options: {
     trialDir: string;
     execute: (plan: ContainerPlan) => Promise<CommandResult>;
     now: () => string;
+    signal?: AbortSignal;
 }): Promise<{
     meta: TrialMeta;
     primaryProblems: string[];
@@ -626,6 +628,7 @@ async function executeSlot(options: {
         trialDir,
         execute,
         now,
+        ...(options.signal === undefined ? {} : { signal: options.signal }),
     });
     return { meta, ...primary };
 }
@@ -640,6 +643,7 @@ async function primaryStage(options: {
     trialDir: string;
     execute: (plan: ContainerPlan) => Promise<CommandResult>;
     now: () => string;
+    signal?: AbortSignal;
 }): Promise<{
     primaryProblems: string[];
     primaryStatus: PrimaryCheckRecord["status"] | null;
@@ -667,6 +671,17 @@ async function primaryStage(options: {
         imageId: frozen.imageId,
         run: (plan) => execute(plan),
         now,
+        name: ownedContainerName(
+            manifest.campaignId,
+            `checker-${slot.slotId}`,
+            randomBytes(6).toString("hex"),
+        ),
+        labels: {
+            "otc.owner": "otc",
+            "otc.campaign": manifest.campaignId,
+            "otc.checker": slot.slotId,
+        },
+        ...(options.signal === undefined ? {} : { signal: options.signal }),
     });
     if (checked.record !== null) {
         appendLedgerEvent(
@@ -821,6 +836,7 @@ async function dispatchSlot(options: {
         trialDir,
         execute,
         now,
+        ...(options.signal === undefined ? {} : { signal: options.signal }),
     });
     advanceClaim(claimed.claim, "closed", {
         note: "trial terminal evidence recorded",
@@ -883,24 +899,72 @@ function claimTrial(
     manifest: PreparedManifest,
     slot: Slot,
 ): { ok: true; claim: BudgetClaim } | { ok: false; outcome: SlotOutcome } {
-    const claimed = claimBudget(
-        join(root, "evidence"),
-        "trial",
-        manifest.campaign.budgets.trials,
-        {
-            stamp: slot.slotId,
-            key: `slot:${slot.slotId}`,
-            note: "trial reservation",
-        },
-    );
-    if (claimed.ok) return { ok: true, claim: claimed.claim };
-    const logical = claimed.reason.includes("logical attempt");
+    const admitted = withAdmission(root, () => {
+        const ledger = readLedger(root);
+        if (ledger.state === "closed") return { state: "closed" } as const;
+        if (ledger.state === "malformed") {
+            return { state: "malformed", problems: ledger.problems } as const;
+        }
+        return {
+            state: "open",
+            claimed: claimBudget(
+                join(root, "evidence"),
+                "trial",
+                manifest.campaign.budgets.trials,
+                {
+                    stamp: slot.slotId,
+                    key: `slot:${slot.slotId}`,
+                    note: "trial reservation",
+                },
+            ),
+        } as const;
+    });
+    if (!admitted.ok) {
+        return {
+            ok: false,
+            outcome: {
+                ran: false,
+                refused: false,
+                problems: [admitted.problem],
+                stop: true,
+            },
+        };
+    }
+    const value = admitted.value;
+    if (value.state === "closed") {
+        return {
+            ok: false,
+            outcome: {
+                ran: false,
+                refused: true,
+                problems: [
+                    "campaign is closed; no further dispatch is permitted",
+                ],
+                stop: true,
+            },
+        };
+    }
+    if (value.state === "malformed") {
+        return {
+            ok: false,
+            outcome: {
+                ran: false,
+                refused: true,
+                problems: [
+                    `attempt ledger is malformed: ${value.problems.join("; ")}`,
+                ],
+                stop: true,
+            },
+        };
+    }
+    if (value.claimed.ok) return { ok: true, claim: value.claimed.claim };
+    const logical = value.claimed.reason.includes("logical attempt");
     return {
         ok: false,
         outcome: {
             ran: false,
             refused: logical,
-            problems: [claimed.reason],
+            problems: [value.claimed.reason],
             stop: !logical,
         },
     };

@@ -46,7 +46,7 @@ import {
     readClaims,
     releaseClaim,
     type BudgetClaim,
-} from "../evaluators/docs/analysis/budget.ts";
+} from "./budget.ts";
 import {
     claimRecoveryBudget,
     parseRecoveryPolicy,
@@ -80,6 +80,7 @@ import {
 import { randomBytes } from "node:crypto";
 import { appendLedgerEvent, readLedger } from "./ledger.ts";
 import { isAdverseOutcome, judgeShouldStop } from "./stop-policy.ts";
+import { withAdmission } from "./admission.ts";
 import {
     loadPreparedManifest,
     type PreparedCase,
@@ -951,15 +952,44 @@ function claimInitial(
             problem: `judge budget is zero for ${slot.slotId}`,
         };
     }
-    const claimed = claimBudget(claimsRoot(root), "judge", ceiling, {
-        stamp: slot.slotId,
-        attemptId,
-        key: `${slot.slotId}/${attemptId}`,
-        at: now(),
+    const admitted = withAdmission(root, () => {
+        const ledger = readLedger(root);
+        if (ledger.state === "closed") {
+            return { kind: "closed" as const };
+        }
+        if (ledger.state === "malformed") {
+            return { kind: "malformed" as const, problems: ledger.problems };
+        }
+        return {
+            kind: "claim" as const,
+            claimed: claimBudget(claimsRoot(root), "judge", ceiling, {
+                stamp: slot.slotId,
+                attemptId,
+                key: `${slot.slotId}/${attemptId}`,
+                at: now(),
+            }),
+        };
     });
-    return claimed.ok
-        ? { ok: true, claim: claimed.claim }
-        : { ok: false, problem: `judge budget refused: ${claimed.reason}` };
+    if (!admitted.ok) return { ok: false, problem: admitted.problem };
+    if (admitted.value.kind === "closed") {
+        return {
+            ok: false,
+            problem:
+                "campaign is closed; no further judge dispatch is permitted",
+        };
+    }
+    if (admitted.value.kind === "malformed") {
+        return {
+            ok: false,
+            problem: `attempt ledger is malformed: ${admitted.value.problems.join("; ")}`,
+        };
+    }
+    return admitted.value.claimed.ok
+        ? { ok: true, claim: admitted.value.claimed.claim }
+        : {
+              ok: false,
+              problem: `judge budget refused: ${admitted.value.claimed.reason}`,
+          };
 }
 
 /** Dispatch one attempt and record its evidence. */
@@ -1763,19 +1793,47 @@ function claimAttempt(options: {
     if (!decision.eligible) {
         return { problem: `slot ${options.slot.slotId}: ${decision.reason}` };
     }
-    const claimed = claimRecoveryBudget(
-        claimsRoot(options.root),
-        {
-            ...options.policy,
-            totalJudgeAttempts: judgeCeiling(options.manifest, options.policy),
-        },
-        {
-            stamp: options.slot.slotId,
-            attemptId: decision.attemptId,
-            key: `${options.slot.slotId}/${decision.attemptId}`,
-            at: options.now(),
-        },
-    );
+    const policy = options.policy;
+    const admitted = withAdmission(options.root, () => {
+        const ledger = readLedger(options.root);
+        if (ledger.state === "closed") {
+            return { kind: "closed" as const };
+        }
+        if (ledger.state === "malformed") {
+            return { kind: "malformed" as const, problems: ledger.problems };
+        }
+        return {
+            kind: "claim" as const,
+            claimed: claimRecoveryBudget(
+                claimsRoot(options.root),
+                {
+                    ...policy,
+                    totalJudgeAttempts: judgeCeiling(options.manifest, policy),
+                },
+                {
+                    stamp: options.slot.slotId,
+                    attemptId: decision.attemptId,
+                    key: `${options.slot.slotId}/${decision.attemptId}`,
+                    at: options.now(),
+                },
+            ),
+        };
+    });
+    if (!admitted.ok) {
+        return { problem: `slot ${options.slot.slotId}: ${admitted.problem}` };
+    }
+    if (admitted.value.kind === "closed") {
+        return {
+            problem:
+                "campaign is closed; no further recovery dispatch is permitted",
+        };
+    }
+    if (admitted.value.kind === "malformed") {
+        return {
+            problem: `slot ${options.slot.slotId}: attempt ledger is malformed: ${admitted.value.problems.join("; ")}`,
+        };
+    }
+    const claimed = admitted.value.claimed;
     return claimed.ok
         ? {
               attemptId: decision.attemptId,

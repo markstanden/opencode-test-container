@@ -296,6 +296,12 @@ function contentReasons(workspace: string, testCase: DocsCase): WorkspaceCheck {
             problems: [],
         };
     }
+    if (entry.kind === "special") {
+        return {
+            reasons: [],
+            problems: [`expected written file ${target} is a special file`],
+        };
+    }
     if (entry.kind !== "file" && entry.kind !== "symlink") {
         return {
             reasons: [],
@@ -315,7 +321,9 @@ function absentReasons(workspace: string, testCase: DocsCase): WorkspaceCheck {
     for (const path of testCase.guardrails?.absent ?? []) {
         const entry = containedEntry(workspace, path);
         if (!entry.ok) problems.push(entry.problem);
-        else if (entry.kind !== "missing") {
+        else if (entry.kind === "special") {
+            problems.push(`guardrail path ${path} is a special file`);
+        } else if (entry.kind !== "missing") {
             reasons.push(`guardrail path ${path} exists`);
         }
     }

@@ -28,6 +28,8 @@ import {
     checkedAssessments,
 } from "../evidence/assessments.ts";
 import { assessShouldStop } from "./stop-policy.ts";
+import { withAdmission } from "./admission.ts";
+import { readClaims } from "./budget.ts";
 
 /** One stored assessment. */
 export type StoredAssessment =
@@ -395,8 +397,18 @@ function assessSlot(options: {
             skipped: null,
         };
     }
+    const trialDir = trialDirectory(root, slot.slotId);
+    const claim = readClaims(join(root, "evidence"), "trial").find(
+        (entry) => entry.stamp === slot.slotId,
+    );
+    if (claim !== undefined && claim.state !== "closed") {
+        return {
+            assessment: null,
+            problems: [],
+            skipped: `slot ${slot.slotId} trial attempt is not terminal (${claim.state}); no assessment written`,
+        };
+    }
     if (assessment.validity === "unrun") {
-        const trialDir = trialDirectory(root, slot.slotId);
         return {
             assessment: null,
             problems: [],
@@ -405,18 +417,62 @@ function assessSlot(options: {
                 : `slot ${slot.slotId} has not run; no assessment written`,
         };
     }
-    const stored = storeAssessment(
-        assessmentPath(root, slot.slotId),
-        assessment,
-    );
-    if (!stored.ok) {
-        return { assessment: null, problems: [stored.problem], skipped: null };
+    return { assessment, problems: [], skipped: null };
+}
+
+/** Publish one terminal assessment under the shared admission lock. */
+function publishAssessment(options: {
+    root: string;
+    manifest: PreparedManifest;
+    slot: Slot;
+    assessment: StoredAssessment;
+}): { assessment: StoredAssessment | null; problems: string[] } {
+    const { root, manifest, slot, assessment } = options;
+    const admitted = withAdmission(root, () => {
+        const ledger = readLedger(root);
+        if (ledger.state === "closed") {
+            return {
+                kind: "closed" as const,
+                problems: [
+                    `campaign is closed; slot ${slot.slotId} was not assessed`,
+                ],
+            };
+        }
+        if (ledger.state === "malformed") {
+            return {
+                kind: "malformed" as const,
+                problems: [
+                    `attempt ledger is malformed: ${ledger.problems.join("; ")}`,
+                ],
+            };
+        }
+        const stored = storeAssessment(
+            assessmentPath(root, slot.slotId),
+            assessment,
+        );
+        if (!stored.ok) {
+            return { kind: "refused" as const, problems: [stored.problem] };
+        }
+        return {
+            kind: "stored" as const,
+            assessment: stored.assessment,
+            problems: bindAssessment({
+                root,
+                manifest,
+                slot,
+                assessment: stored.assessment,
+            }),
+        };
+    });
+    if (!admitted.ok) {
+        return { assessment: null, problems: [admitted.problem] };
     }
-    return {
-        assessment: stored.assessment,
-        problems: [],
-        skipped: null,
-    };
+    return admitted.value.kind === "stored"
+        ? {
+              assessment: admitted.value.assessment,
+              problems: admitted.value.problems,
+          }
+        : { assessment: null, problems: admitted.value.problems };
 }
 
 /**
@@ -505,16 +561,16 @@ function assessSelected(options: {
         problems.push(...outcome.problems);
         if (outcome.skipped !== null) skipped.push(outcome.skipped);
         if (outcome.assessment === null) continue;
-        problems.push(
-            ...bindAssessment({
-                root: options.root,
-                manifest: options.manifest,
-                slot,
-                assessment: outcome.assessment,
-            }),
-        );
-        tally(summary, outcome.assessment);
-        if (assessShouldStop(options.manifest.campaign, outcome.assessment)) {
+        const published = publishAssessment({
+            root: options.root,
+            manifest: options.manifest,
+            slot,
+            assessment: outcome.assessment,
+        });
+        problems.push(...published.problems);
+        if (published.assessment === null) continue;
+        tally(summary, published.assessment);
+        if (assessShouldStop(options.manifest.campaign, published.assessment)) {
             stoppedAt = slot.slotId;
             break;
         }

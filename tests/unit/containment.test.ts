@@ -177,7 +177,54 @@ describe("contained evidence reads", () => {
         }
     });
 
-    it("does not read or hang on a FIFO", () => {
+    it("refuses a direct FIFO read without blocking", () => {
+        // Arrange
+        const root = workspace();
+        try {
+            mkdirSync(join(root, "docs"));
+            const fifo = join(root, "docs", "pipe.md");
+            assert.equal(spawnSync("mkfifo", [fifo]).status, 0);
+
+            // Act
+            const read = readContainedFile(root, "docs/pipe.md");
+
+            // Assert
+            assert.equal(read.ok, false);
+            assert.match(read.ok ? "" : read.problem, /not a regular file/);
+        } finally {
+            rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    it("refuses a FIFO swapped in after classification", () => {
+        // Arrange
+        const root = workspace();
+        try {
+            mkdirSync(join(root, "docs"));
+            const path = join(root, "docs", "target.md");
+            writeFileSync(path, "inside\n");
+
+            // Act
+            const read = readContainedFile(root, "docs/target.md", {
+                beforeOpen: (realPath) => {
+                    rmSync(realPath);
+                    spawnSync("mkfifo", [realPath]);
+                },
+            });
+
+            // Assert
+            assert.equal(
+                read.ok,
+                false,
+                "the replacement FIFO must not block or read",
+            );
+            assert.match(read.ok ? "" : read.problem, /not a regular file/);
+        } finally {
+            rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    it("does not read or hang on a FIFO during a tree walk", () => {
         // Arrange
         const root = workspace();
         try {

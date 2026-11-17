@@ -17,7 +17,7 @@ import {
     toolIdentityProblems,
     type ToolIdentity,
 } from "../contracts/version.ts";
-import { readClaims } from "../evaluators/docs/analysis/budget.ts";
+import { readClaims } from "./budget.ts";
 import { trialDirectory } from "./run.ts";
 import type { PreparedManifest } from "./prepare.ts";
 

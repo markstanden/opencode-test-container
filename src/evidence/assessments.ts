@@ -14,7 +14,6 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { sha256Of } from "../contracts/canonical.ts";
-import { EVALUATOR_VERSION } from "../contracts/version.ts";
 import { isRecord } from "../contracts/validate.ts";
 import type { Slot } from "../contracts/types.ts";
 import type { LedgerEvent, LedgerRead } from "../campaign/ledger.ts";
@@ -40,6 +39,8 @@ export interface CheckedAssessment {
     record: StoredAssessment | null;
     /** Whether the record was produced by an older supported evaluator. */
     historical: boolean;
+    /** What a historical record cannot prove, when applicable. */
+    limitations: string[];
     /** Every consistency problem found. */
     problems: string[];
 }
@@ -117,11 +118,20 @@ function evidenceProblems(value: unknown): string[] {
         "metaSha256",
         "toolsSha256",
         "answerSha256",
+        "primarySha256",
+        "journalSha256",
+        "journalKeySha256",
+        "workspaceSha256",
+        "workspaceSafe",
     ];
     const problems: string[] = [];
     for (const field of fields) {
         const entry = value[field];
-        if (entry !== null && typeof entry !== "string") {
+        if (field === "workspaceSafe") {
+            if (typeof entry !== "boolean") {
+                problems.push("evidence.workspaceSafe must be a boolean");
+            }
+        } else if (entry !== null && typeof entry !== "string") {
             problems.push(`evidence.${field} must be a string or null`);
         }
     }
@@ -134,23 +144,52 @@ function evidenceProblems(value: unknown): string[] {
 }
 
 /** Schema, kind, field and evidence-binding checks. */
-function schemaProblems(value: Record<string, unknown>): string[] {
-    const problems: string[] = [];
+/** Fields allowed for this record kind and format. */
+function allowedFields(
+    value: Record<string, unknown>,
+    legacy: boolean,
+): ReadonlySet<string> {
+    const allowed = new Set(COMMON_FIELDS);
+    if (legacy) {
+        allowed.delete("evaluatorVersion");
+        allowed.delete("evidence");
+    }
+    for (const field of value.kind === "skill-activation"
+        ? SKILL_FIELDS
+        : DOCS_FIELDS) {
+        allowed.add(field);
+    }
+    return allowed;
+}
+
+/** Schema, kind and field checks. */
+function schemaProblems(
+    value: Record<string, unknown>,
+    legacy: boolean,
+): string[] {
     if (value.schemaVersion !== 1) {
         return [
             `unsupported assessment schemaVersion ${String(value.schemaVersion)}`,
         ];
     }
+    const problems: string[] = [];
     if (value.kind !== "skill-activation" && value.kind !== "docs-recording") {
         problems.push("assessment kind is not recognised");
     }
-    const allowed = new Set(COMMON_FIELDS);
-    const kindFields =
-        value.kind === "skill-activation" ? SKILL_FIELDS : DOCS_FIELDS;
-    for (const field of kindFields) allowed.add(field);
-    problems.push(...unknownFields(value, allowed));
+    problems.push(...unknownFields(value, allowedFields(value, legacy)));
+    if (legacy) return problems;
+    return [...problems, ...versionAndEvidenceProblems(value)];
+}
+
+/** Evaluator-version and evidence-binding checks for a bound record. */
+function versionAndEvidenceProblems(value: Record<string, unknown>): string[] {
+    const problems: string[] = [];
     if (typeof value.evaluatorVersion !== "number") {
         problems.push("assessment has no evaluator version");
+    } else if (value.evaluatorVersion !== 1 && value.evaluatorVersion !== 2) {
+        problems.push(
+            `unsupported evaluator version ${String(value.evaluatorVersion)}`,
+        );
     }
     problems.push(...evidenceProblems(value.evidence));
     return problems;
@@ -227,8 +266,53 @@ function scheduledProblems(
  * @param manifest The prepared manifest.
  * @returns Problems; empty means the shape and identity are acceptable.
  */
+/** The shape verdict, including whether the record uses the legacy format. */
+export interface AssessmentShape {
+    /** Every shape/identity problem found. */
+    problems: string[];
+    /** Whether this is an older record without a source-evidence binding. */
+    historical: boolean;
+}
+
 /**
  * Structural and identity checks for one parsed assessment.
+ * @param value The parsed JSON value.
+ * @param slot The scheduled slot it claims.
+ * @param manifest The prepared manifest.
+ * @returns The shape problems and historical flag.
+ */
+export function assessmentShape(
+    value: unknown,
+    slot: Slot,
+    manifest: PreparedManifest,
+): AssessmentShape {
+    if (!isRecord(value)) {
+        return { problems: ["assessment is not an object"], historical: false };
+    }
+    const hasVersion = "evaluatorVersion" in value;
+    const hasEvidence = "evidence" in value;
+    if (hasVersion !== hasEvidence) {
+        return {
+            problems: ["assessment mixes the legacy and source-bound formats"],
+            historical: false,
+        };
+    }
+    const legacy = !hasVersion && !hasEvidence;
+    return {
+        problems: [
+            ...schemaProblems(value, legacy),
+            ...payloadProblems(value),
+            ...scheduledProblems(value, slot, manifest),
+        ],
+        historical:
+            legacy ||
+            (typeof value.evaluatorVersion === "number" &&
+                value.evaluatorVersion === 1),
+    };
+}
+
+/**
+ * Structural and identity problems for one parsed assessment.
  * @param value The parsed JSON value.
  * @param slot The scheduled slot it claims.
  * @param manifest The prepared manifest.
@@ -239,12 +323,7 @@ export function assessmentProblems(
     slot: Slot,
     manifest: PreparedManifest,
 ): string[] {
-    if (!isRecord(value)) return ["assessment is not an object"];
-    return [
-        ...schemaProblems(value),
-        ...payloadProblems(value),
-        ...scheduledProblems(value, slot, manifest),
-    ];
+    return assessmentShape(value, slot, manifest).problems;
 }
 
 /** Find the ledger's one binding for a slot's deterministic assessment. */
@@ -312,6 +391,7 @@ function checkSlot(options: {
             state: "missing",
             record: null,
             historical: false,
+            limitations: [],
             problems: [],
         };
     }
@@ -324,47 +404,47 @@ function checkSlot(options: {
             state: "corrupt",
             record: null,
             historical: false,
+            limitations: [],
             problems: [`assessment for ${slot.slotId} is not readable JSON`],
         };
     }
-    const shape = assessmentProblems(value, slot, manifest);
-    if (shape.length > 0) {
-        const unsupported = shape.some((problem) =>
-            problem.startsWith("unsupported assessment schemaVersion"),
+    const shape = assessmentShape(value, slot, manifest);
+    if (shape.problems.length > 0) {
+        const unsupported = shape.problems.some(
+            (problem) =>
+                problem.startsWith("unsupported assessment schemaVersion") ||
+                problem.startsWith("unsupported evaluator version"),
         );
         return {
             slotId: slot.slotId,
             state: unsupported ? "unsupported" : "corrupt",
             record: null,
             historical: false,
-            problems: shape,
+            limitations: [],
+            problems: shape.problems,
         };
     }
     const record = value as unknown as StoredAssessment;
-    const version = record.evaluatorVersion;
-    if (version !== EVALUATOR_VERSION && version !== 1) {
-        return {
-            slotId: slot.slotId,
-            state: "unsupported",
-            record,
-            historical: false,
-            problems: [
-                `assessment for ${slot.slotId} has unsupported evaluator version ${String(version)}`,
-            ],
-        };
-    }
+    const bound = record.evidence !== undefined;
     const problems = [
-        ...sourceIdentityProblems(
-            trialDirectory(root, slot.slotId),
-            record.evidence,
-        ),
+        ...(bound
+            ? sourceIdentityProblems(
+                  trialDirectory(root, slot.slotId),
+                  record.evidence,
+              )
+            : []),
         ...ledgerBindingProblems(events, manifest, slot, record),
     ];
     return {
         slotId: slot.slotId,
         state: problems.length === 0 ? "valid" : "conflicting",
         record,
-        historical: version !== EVALUATOR_VERSION,
+        historical: shape.historical,
+        limitations: shape.historical
+            ? [
+                  "historical assessment: no source-evidence binding, so later evidence changes are not detectable",
+              ]
+            : [],
         problems,
     };
 }

@@ -4,6 +4,7 @@ import {
     cpSync,
     mkdirSync,
     mkdtempSync,
+    readFileSync,
     rmSync,
     symlinkSync,
     writeFileSync,
@@ -11,11 +12,20 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { prepareCampaign } from "../../src/campaign/prepare.ts";
+import {
+    loadPreparedManifest,
+    prepareCampaign,
+} from "../../src/campaign/prepare.ts";
 import { freezeCampaign } from "../../src/campaign/freeze.ts";
 import { runCampaign, trialDirectory } from "../../src/campaign/run.ts";
 import { buildJudgePacketForSlot } from "../../src/campaign/judge.ts";
-import { assessCampaign, readAssessments } from "../../src/campaign/assess.ts";
+import {
+    assessCampaign,
+    assessmentPath,
+    readAssessments,
+} from "../../src/campaign/assess.ts";
+import { readLedger } from "../../src/campaign/ledger.ts";
+import { checkedAssessments } from "../../src/evidence/assessments.ts";
 import { runCommand, type CommandResult } from "../../src/adapters/process.ts";
 import type { ContainerPlan } from "../../src/adapters/podman/container.ts";
 
@@ -244,5 +254,128 @@ describe("workspace containment at the judge boundary", () => {
         );
         assert.equal(stored?.validity, "valid");
         assert.equal(stored?.outcome, "pass");
+    });
+});
+
+describe("assessment binds every consumed input", () => {
+    const temp: string[] = [];
+
+    after(() => {
+        for (const dir of temp) rmSync(dir, { recursive: true, force: true });
+    });
+
+    /** A run and assessed docs root. */
+    async function assessed(): Promise<{ dir: string; root: string }> {
+        const made = await runRoot();
+        temp.push(made.dir);
+        const result = assessCampaign(made.root, {
+            now: () => "2026-11-15T00:05:00.000Z",
+        });
+        assert.equal(result.ok, true, result.problems.join("; "));
+        return made;
+    }
+
+    /** The checked record for useful-write. */
+    function checked(root: string) {
+        const prepared = loadPreparedManifest(root);
+        if (!prepared.ok) throw new Error(prepared.problem);
+        return checkedAssessments({
+            root,
+            manifest: prepared.manifest,
+            ledger: readLedger(root),
+        });
+    }
+
+    /** The conflicts for one slot. */
+    function conflicts(root: string): string {
+        const record = checked(root).records.find(
+            (entry) => entry.slotId === "useful-write",
+        );
+        assert.equal(record?.state, "conflicting");
+        return record?.problems.join("; ") ?? "";
+    }
+
+    it("detects a changed primary-check record", async () => {
+        // Arrange
+        const { root } = await assessed();
+        const path = join(
+            trialDirectory(root, "useful-write"),
+            "primary-check.json",
+        );
+        const value = JSON.parse(readFileSync(path, "utf8")) as Record<
+            string,
+            unknown
+        >;
+
+        // Act
+        value.status = "fail";
+        writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+
+        // Assert
+        assert.match(conflicts(root), /primarySha256 changed/);
+    });
+
+    it("detects a deleted primary-check record", async () => {
+        // Arrange
+        const { root } = await assessed();
+
+        // Act
+        rmSync(
+            join(trialDirectory(root, "useful-write"), "primary-check.json"),
+        );
+
+        // Assert
+        assert.match(conflicts(root), /primarySha256 changed/);
+    });
+
+    it("detects a journal file appearing after assessment", async () => {
+        // Arrange
+        const { root } = await assessed();
+        const trial = trialDirectory(root, "useful-write");
+
+        // Act
+        mkdirSync(join(trial, "journal"), { recursive: true });
+        writeFileSync(
+            join(trial, "journal", "docs-operations.jsonl"),
+            "{}\n",
+            "utf8",
+        );
+
+        // Assert
+        assert.match(conflicts(root), /journalSha256 changed/);
+    });
+
+    it("detects a changed evaluated workspace document", async () => {
+        // Arrange
+        const { root } = await assessed();
+        const path = join(
+            trialDirectory(root, "useful-write"),
+            "workspace",
+            "docs",
+            "notes",
+            "otel.md",
+        );
+
+        // Act
+        writeFileSync(
+            path,
+            `${readFileSync(path, "utf8")}\nchanged after assessment\n`,
+            "utf8",
+        );
+
+        // Assert
+        assert.match(conflicts(root), /workspaceSha256 changed/);
+    });
+
+    it("keeps a genuine historical record readable without a binding", async () => {
+        // The genuine old-format fixture is covered in historical-assessment;
+        // this asserts the current format still records every field.
+        const { root } = await assessed();
+        const value = JSON.parse(
+            readFileSync(assessmentPath(root, "useful-write"), "utf8"),
+        ) as { evidence?: Record<string, unknown> };
+        assert.equal(typeof value.evidence?.primarySha256, "string");
+        assert.equal(typeof value.evidence?.workspaceSha256, "string");
+        assert.equal(typeof value.evidence?.workspaceSafe, "boolean");
     });
 });

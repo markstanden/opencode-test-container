@@ -307,6 +307,73 @@ export function writeCampaign(options: {
     return path;
 }
 
+/** Write the docs fixture with concrete runtime and checker inputs. */
+export function writeDocsCampaign(options: {
+    directory: string;
+    image: string;
+    opencodeVersion: string;
+    baseUrl: string;
+    timeoutMs: number;
+    checkerScript?: string;
+    checkerTimeoutMs?: number;
+}): string {
+    mkdirSync(options.directory, { recursive: true });
+    const docs = join(FIXTURES, "docs");
+    cpSync(join(docs, "workspace"), join(options.directory, "workspace"), {
+        recursive: true,
+    });
+    cpSync(join(docs, "checker"), join(options.directory, "checker"), {
+        recursive: true,
+    });
+    const campaign = JSON.parse(
+        readFileSync(join(docs, "campaign.json"), "utf8"),
+    ) as {
+        runtime: {
+            image: string;
+            opencodeVersion: string;
+            timeoutMs: number;
+            provider: {
+                overlay: {
+                    providers: Record<
+                        string,
+                        { settings: { baseURL: string } }
+                    >;
+                };
+            };
+        };
+    };
+    campaign.runtime.image = options.image;
+    campaign.runtime.opencodeVersion = options.opencodeVersion;
+    campaign.runtime.timeoutMs = options.timeoutMs;
+    campaign.runtime.provider.overlay.providers[
+        "zai-coding-plan"
+    ]!.settings.baseURL = options.baseUrl;
+    writeFileSync(
+        join(options.directory, "campaign.json"),
+        `${JSON.stringify(campaign, null, 2)}\n`,
+        "utf8",
+    );
+    const suite = JSON.parse(
+        readFileSync(join(docs, "suite.json"), "utf8"),
+    ) as {
+        cases: Array<{
+            primaryCheck?: { script: string; timeoutMs?: number };
+        }>;
+    };
+    if (options.checkerScript !== undefined) {
+        suite.cases[0]!.primaryCheck!.script = options.checkerScript;
+    }
+    if (options.checkerTimeoutMs !== undefined) {
+        suite.cases[0]!.primaryCheck!.timeoutMs = options.checkerTimeoutMs;
+    }
+    writeFileSync(
+        join(options.directory, "suite.json"),
+        `${JSON.stringify(suite, null, 2)}\n`,
+        "utf8",
+    );
+    return join(options.directory, "campaign.json");
+}
+
 /** Read one JSON file. */
 export function readJson<T>(path: string): T {
     return JSON.parse(readFileSync(path, "utf8")) as T;
