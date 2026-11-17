@@ -1261,8 +1261,33 @@ export function validateCampaign(
             ...(value.stopOnFirstFailure === true
                 ? { stopOnFirstFailure: true }
                 : {}),
+            ...(stopPolicyOf(value.stopPolicy, problems) === undefined
+                ? {}
+                : { stopPolicy: { version: 2 as const } }),
         },
     };
+}
+
+/** Validate the optional stop-policy declaration. */
+function stopPolicyOf(
+    value: unknown,
+    problems: string[],
+): { version: 2 } | undefined {
+    if (value === undefined) return undefined;
+    if (!isRecord(value)) {
+        problems.push("campaign.stopPolicy must be an object");
+        return undefined;
+    }
+    if (value.version !== 2) {
+        problems.push("campaign.stopPolicy.version must be 2");
+        return undefined;
+    }
+    for (const key of Object.keys(value)) {
+        if (key !== "version") {
+            problems.push(`campaign.stopPolicy has unexpected field ${key}`);
+        }
+    }
+    return { version: 2 };
 }
 
 /** Check one slot's case/arm references and target-skill supply. */

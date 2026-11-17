@@ -37,13 +37,19 @@ import {
 import type { CommandResult } from "../adapters/process.ts";
 import { deliveryCheck, loadFrozen, type FrozenRecord } from "./freeze.ts";
 import { stageTree } from "./inventory.ts";
-import { executePrimaryCheck } from "./primary.ts";
+import { executePrimaryCheck, type PrimaryCheckRecord } from "./primary.ts";
+import { runShouldStop } from "./stop-policy.ts";
 import {
     appendLedgerEvent,
     readLedger,
     startedSlots,
     trialStarts,
 } from "./ledger.ts";
+import {
+    advanceClaim,
+    claimBudget,
+    releaseClaim,
+} from "../evaluators/docs/analysis/budget.ts";
 import {
     loadPreparedManifest,
     type PreparedManifest,
@@ -497,7 +503,11 @@ async function executeSlot(options: {
     trialDir: string;
     execute: (plan: ContainerPlan) => Promise<CommandResult>;
     now: () => string;
-}): Promise<{ meta: TrialMeta; primaryProblems: string[] }> {
+}): Promise<{
+    meta: TrialMeta;
+    primaryProblems: string[];
+    primaryStatus: PrimaryCheckRecord["status"] | null;
+}> {
     const { root, manifest, frozen, slot, planned, trialDir, execute, now } =
         options;
     const startedAt = now();
@@ -595,7 +605,7 @@ async function executeSlot(options: {
         options.testCase.primaryCheck === undefined ||
         preparedCase === undefined
     ) {
-        return { meta, primaryProblems: [] };
+        return { meta, primaryProblems: [], primaryStatus: null };
     }
     const checked = await executePrimaryCheck({
         root,
@@ -625,7 +635,24 @@ async function executeSlot(options: {
     return {
         meta,
         primaryProblems: checked.problem === null ? [] : [checked.problem],
+        primaryStatus: checked.record?.status ?? null,
     };
+}
+
+/** Throw for a slot selector that the prepared schedule does not contain. */
+function refuseUnknownSelectors(
+    root: string,
+    slotIds: readonly string[] | undefined,
+): void {
+    if (slotIds === undefined) return;
+    const prepared = loadPreparedManifest(root);
+    if (!prepared.ok) return;
+    const known = new Set(
+        prepared.manifest.campaign.schedule.slots.map((slot) => slot.slotId),
+    );
+    for (const slotId of slotIds) {
+        if (!known.has(slotId)) throw new Error(`unknown slotId ${slotId}`);
+    }
 }
 
 /** Resolve the selected slots, refusing an unknown selector. */
@@ -649,14 +676,6 @@ function metaProblems(slotId: string, meta: TrialMeta): string[] {
     ];
 }
 
-/** Whether the campaign stops after this trial. */
-function shouldStop(manifest: PreparedManifest, meta: TrialMeta): boolean {
-    return (
-        manifest.campaign.stopOnFirstFailure === true &&
-        (!meta.captureValid || meta.exit !== 0)
-    );
-}
-
 /** The outcome of attempting one scheduled slot. */
 interface SlotOutcome {
     ran: boolean;
@@ -678,19 +697,6 @@ function slotPrecondition(
             refused: true,
             problems: [`slot ${slot.slotId} has already started`],
             stop: false,
-        };
-    }
-    if (
-        trialStarts(readLedger(root).events).length >=
-        manifest.campaign.budgets.trials
-    ) {
-        return {
-            ran: false,
-            refused: false,
-            problems: [
-                `trial budget exhausted (${manifest.campaign.budgets.trials}) before slot ${slot.slotId}`,
-            ],
-            stop: true,
         };
     }
     if (existsSync(trialDirectory(root, slot.slotId))) {
@@ -738,20 +744,71 @@ async function dispatchSlot(options: {
     const planDirectory = dryRun
         ? mkdtempSync(join(tmpdir(), "otc-plan-"))
         : trialDir;
-    const planned = planTrial({
-        root,
-        manifest,
-        frozen,
-        slot,
-        testCase,
-        arm,
-        trialDir: planDirectory,
-        ...(options.passthrough === undefined
-            ? {}
-            : { passthrough: options.passthrough }),
-    });
+    if (dryRun) {
+        const planned = planTrial({
+            root,
+            manifest,
+            frozen,
+            slot,
+            testCase,
+            arm,
+            trialDir: planDirectory,
+            ...(options.passthrough === undefined
+                ? {}
+                : { passthrough: options.passthrough }),
+        });
+        rmSync(planDirectory, { recursive: true, force: true });
+        return planned.ok
+            ? { ran: true, refused: false, problems: [], stop: false }
+            : {
+                  ran: false,
+                  refused: false,
+                  problems: planned.problems,
+                  stop: false,
+              };
+    }
+    // The claim is the arbitration point: one slot key and one budget index
+    // are created with `wx` before anything is staged. A crash keeps the
+    // claim, so an ambiguous attempt is never silently refunded.
+    const claimed = claimBudget(
+        join(root, "evidence"),
+        "trial",
+        manifest.campaign.budgets.trials,
+        {
+            stamp: slot.slotId,
+            key: `slot:${slot.slotId}`,
+            note: "trial reservation",
+        },
+    );
+    if (!claimed.ok) {
+        return {
+            ran: false,
+            refused: claimed.reason.includes("logical attempt"),
+            problems: [claimed.reason],
+            stop: !claimed.reason.includes("logical attempt"),
+        };
+    }
+    let planned;
+    try {
+        planned = planTrial({
+            root,
+            manifest,
+            frozen,
+            slot,
+            testCase,
+            arm,
+            trialDir: planDirectory,
+            ...(options.passthrough === undefined
+                ? {}
+                : { passthrough: options.passthrough }),
+        });
+    } catch (error) {
+        releaseClaim(claimed.claim);
+        throw error;
+    }
     if (!planned.ok) {
-        if (dryRun) rmSync(planDirectory, { recursive: true, force: true });
+        // Nothing was staged or dispatched: this reservation is provably free.
+        releaseClaim(claimed.claim);
         return {
             ran: false,
             refused: false,
@@ -759,10 +816,10 @@ async function dispatchSlot(options: {
             stop: false,
         };
     }
-    if (dryRun) {
-        rmSync(planDirectory, { recursive: true, force: true });
-        return { ran: true, refused: false, problems: [], stop: false };
-    }
+    advanceClaim(claimed.claim, "spawned", {
+        stamp: slot.slotId,
+        note: "trial dispatch started",
+    });
     const meta = await executeSlot({
         root,
         manifest,
@@ -774,6 +831,9 @@ async function dispatchSlot(options: {
         execute,
         now,
     });
+    advanceClaim(claimed.claim, "closed", {
+        note: "trial terminal evidence recorded",
+    });
     return {
         ran: true,
         refused: false,
@@ -781,7 +841,11 @@ async function dispatchSlot(options: {
             ...metaProblems(slot.slotId, meta.meta),
             ...meta.primaryProblems,
         ],
-        stop: shouldStop(manifest, meta.meta),
+        stop: runShouldStop(manifest.campaign, {
+            captureValid: meta.meta.captureValid,
+            exit: meta.meta.exit,
+            primaryStatus: meta.primaryStatus,
+        }),
     };
 }
 
@@ -855,6 +919,10 @@ export async function runCampaign(
     } = {},
     deps: RunDeps = {},
 ): Promise<RunSummary> {
+    // Reject an unknown selector before any state-dependent refusal, so the
+    // caller always gets an input error rather than a misleading operational
+    // one, and nothing has been written.
+    refuseUnknownSelectors(root, options.slotIds);
     const state = runState(root, deps.tool);
     if (!state.ok) {
         return { ok: false, ran: [], refused: [], problems: state.problems };

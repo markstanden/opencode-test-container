@@ -77,6 +77,7 @@ import {
     readContainedFile,
 } from "../evidence/containment.ts";
 import { appendLedgerEvent, readLedger } from "./ledger.ts";
+import { isAdverseOutcome, judgeShouldStop } from "./stop-policy.ts";
 import {
     loadPreparedManifest,
     type PreparedCase,
@@ -1892,12 +1893,20 @@ function tallyResult(
     tally.problems.push(...result.problems);
 }
 
-/** Whether the campaign stops after this slot's result. */
-function stopAfter(manifest: PreparedManifest, tally: JudgeTally): boolean {
-    return (
-        tally.problems.length > 0 &&
-        manifest.campaign.stopOnFirstFailure === true
+/** Throw for a judge selector that the prepared schedule does not contain. */
+function refuseUnknownJudgedSlots(
+    root: string,
+    slotIds: readonly string[] | undefined,
+): void {
+    if (slotIds === undefined) return;
+    const prepared = loadPreparedManifest(root);
+    if (!prepared.ok) return;
+    const known = new Set(
+        prepared.manifest.campaign.schedule.slots.map((slot) => slot.slotId),
     );
+    for (const slotId of slotIds) {
+        if (!known.has(slotId)) throw new Error(`unknown slotId ${slotId}`);
+    }
 }
 
 /** Resolve the selected slots, refusing an unknown selector. */
@@ -1931,6 +1940,7 @@ export async function judgeCampaign(
     options: { slotIds?: readonly string[]; dryRun?: boolean } = {},
     deps: JudgeDeps = {},
 ): Promise<JudgeSummary> {
+    refuseUnknownJudgedSlots(root, options.slotIds);
     const state = judgeState(root, deps.tool);
     if (!state.ok) {
         return {
@@ -1963,7 +1973,20 @@ export async function judgeCampaign(
             now,
         });
         tallyResult(tally, slot.slotId, result);
-        if (stopAfter(manifest, tally)) break;
+        const selected =
+            result.status === "judged" && options.dryRun !== true
+                ? readSelectedJudgement(root, slot.slotId)
+                : null;
+        if (
+            judgeShouldStop(manifest.campaign, {
+                problems: result.problems,
+                adverse: isAdverseOutcome(
+                    selected?.judgement.documentationOutcome,
+                ),
+            })
+        ) {
+            break;
+        }
     }
     return {
         ok: tally.refused.length === 0 && tally.problems.length === 0,

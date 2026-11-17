@@ -4,6 +4,7 @@ import { spawnSync } from "node:child_process";
 import {
     cpSync,
     existsSync,
+    mkdirSync,
     mkdtempSync,
     readFileSync,
     rmSync,
@@ -119,6 +120,61 @@ describe("installed-shape CLI", () => {
         assert.equal(result.status, 1);
         const parsed = JSON.parse(result.stdout) as { state: string };
         assert.equal(parsed.state, "blocked");
+    });
+
+    it("exits non-zero and recommends nothing for a corrupt ledger", () => {
+        // Arrange
+        const root = join(work, "corrupt-ledger-root");
+        const prepared = otc(
+            ["prepare", "--campaign", campaignPath, "--root", root],
+            work,
+        );
+        assert.equal(prepared.status, 0, prepared.stderr);
+        mkdirSync(join(root, "evidence"), { recursive: true });
+        writeFileSync(join(root, "evidence", "ATTEMPTS.jsonl"), "{broken\n", "utf8");
+
+        // Act
+        const result = otc(["status", "--root", root, "--json"], work);
+
+        // Assert
+        assert.equal(result.status, 1);
+        const parsed = JSON.parse(result.stdout) as {
+            state: string;
+            nextActions: unknown[];
+            problems: string[];
+        };
+        assert.equal(parsed.state, "blocked");
+        assert.deepEqual(parsed.nextActions, []);
+        assert.match(parsed.problems.join("; "), /not JSON|malformed/);
+    });
+
+    it("rejects an unknown slot selector before dispatch", () => {
+        // Arrange
+        const root = join(work, "unknown-slot-root");
+        const prepared = otc(
+            ["prepare", "--campaign", campaignPath, "--root", root],
+            work,
+        );
+        assert.equal(prepared.status, 0, prepared.stderr);
+        const manifest = readFileSync(
+            join(root, "prepare", "manifest.json"),
+            "utf8",
+        );
+
+        // Act
+        const result = otc(
+            ["run", "--root", root, "--slot", "no-such-slot"],
+            work,
+        );
+
+        // Assert
+        assert.equal(result.status, 2);
+        assert.match(result.stderr, /unknown slotId no-such-slot/);
+        assert.equal(
+            readFileSync(join(root, "prepare", "manifest.json"), "utf8"),
+            manifest,
+        );
+        assert.equal(existsSync(join(root, "evidence", "ATTEMPTS.jsonl")), false);
     });
 });
 

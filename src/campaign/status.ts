@@ -153,12 +153,12 @@ function judgementOf(
             else pending += 1;
         }
     }
-    const unsettled = ["judge", "recovery"].reduce(
+    const unsettled = ["trial", "judge", "recovery"].reduce(
         (sum, kind) =>
             sum +
             readClaims(
                 join(root, "evidence"),
-                kind as "judge" | "recovery",
+                kind as "trial" | "judge" | "recovery",
             ).filter((claim) => claim.state !== "closed").length,
         0,
     );
@@ -224,7 +224,8 @@ function nextActionsOf(options: {
         ];
     }
     const slots = options.manifest.campaign.schedule.slots;
-    const remaining = options.manifest.campaign.budgets.trials - options.starts;
+    const used = readClaims(join(options.root, "evidence"), "trial").length;
+    const remaining = options.manifest.campaign.budgets.trials - used;
     const unstarted = slots.length - options.starts;
     const actions: NextAction[] = [];
     if (unstarted > 0 && remaining > 0) {
@@ -358,8 +359,10 @@ export function statusOf(root: string): StatusReport {
         tool: currentTool,
         budgets: {
             trials: manifest.campaign.budgets.trials,
-            used: starts.length,
-            remaining: manifest.campaign.budgets.trials - starts.length,
+            used: readClaims(join(root, "evidence"), "trial").length,
+            remaining:
+                manifest.campaign.budgets.trials -
+                readClaims(join(root, "evidence"), "trial").length,
         },
         judgement,
         nextActions,

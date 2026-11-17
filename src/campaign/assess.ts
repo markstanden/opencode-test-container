@@ -14,6 +14,7 @@ import {
     assessmentRecordPath,
     checkedAssessments,
 } from "../evidence/assessments.ts";
+import { assessShouldStop } from "./stop-policy.ts";
 
 /** One stored assessment. */
 export type StoredAssessment =
@@ -46,6 +47,8 @@ export interface AssessResult {
     problems: string[];
     /** Slots deliberately left unassessed, with the reason. */
     skipped: string[];
+    /** The slot the stop policy stopped after, or null. */
+    stoppedAt: string | null;
 }
 
 /** An empty aggregate. */
@@ -285,7 +288,13 @@ function readOnlyAssessment(
         }
         tally(summary, entry.record);
     }
-    return { ok: problems.length === 0, summary, problems, skipped };
+    return {
+        ok: problems.length === 0,
+        summary,
+        problems,
+        skipped,
+        stoppedAt: null,
+    };
 }
 
 /**
@@ -306,13 +315,20 @@ export function assessCampaign(
             summary: emptySummary(),
             problems: [prepared.problem],
             skipped: [],
+            stoppedAt: null,
         };
     }
     const manifest = prepared.manifest;
     let ledger = readLedger(root);
     const refusal = assessmentRefusal(root, ledger);
     if (refusal !== null) {
-        return { ok: false, summary: emptySummary(), problems: [refusal], skipped: [] };
+        return {
+            ok: false,
+            summary: emptySummary(),
+            problems: [refusal],
+            skipped: [],
+            stoppedAt: null,
+        };
     }
     if (ledger.state === "closed") {
         return readOnlyAssessment(root, manifest, ledger, options.slotIds);
@@ -326,12 +342,14 @@ export function assessCampaign(
             summary: emptySummary(),
             problems: ["delivery check failed", ...drift],
             skipped: [],
+            stoppedAt: null,
         };
     }
     const now = options.now ?? (() => new Date().toISOString());
     const summary = emptySummary();
     const problems: string[] = [];
     const skipped: string[] = [];
+    let stoppedAt: string | null = null;
     const slots = manifest.campaign.schedule.slots.filter(
         (slot) =>
             options.slotIds === undefined || options.slotIds.includes(slot.slotId),
@@ -373,8 +391,18 @@ export function assessCampaign(
         );
         ledger = readLedger(root);
         tally(summary, stored.assessment);
+        if (assessShouldStop(manifest.campaign, stored.assessment)) {
+            stoppedAt = slot.slotId;
+            break;
+        }
     }
-    return { ok: problems.length === 0, summary, problems, skipped };
+    return {
+        ok: problems.length === 0,
+        summary,
+        problems,
+        skipped,
+        stoppedAt,
+    };
 }
 
 /**

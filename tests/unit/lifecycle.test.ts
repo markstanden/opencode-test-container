@@ -357,7 +357,7 @@ describe("budget refusal", () => {
         assert.deepEqual(summary.ran, ["s1"]);
         assert.ok(
             summary.problems.some((problem) =>
-                problem.includes("budget exhausted"),
+                problem.includes("ceiling reached"),
             ),
         );
         rmSync(fixture.dir, { recursive: true, force: true });

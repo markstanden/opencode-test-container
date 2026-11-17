@@ -405,6 +405,9 @@ function assess(options: CliOptions): number {
         for (const skipped of summary.skipped) {
             console.log(skipped);
         }
+        if (summary.stoppedAt !== null) {
+            console.log(`stopped after ${summary.stoppedAt} by policy`);
+        }
         for (const problem of summary.problems) {
             console.error(`otc: ${problem}`);
         }

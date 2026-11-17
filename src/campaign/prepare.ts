@@ -189,6 +189,9 @@ export function normaliseCampaign(bundle: CampaignBundle): Campaign {
         ...(bundle.campaign.stopOnFirstFailure === undefined
             ? {}
             : { stopOnFirstFailure: bundle.campaign.stopOnFirstFailure }),
+        ...(bundle.campaign.stopPolicy === undefined
+            ? {}
+            : { stopPolicy: bundle.campaign.stopPolicy }),
     };
     return campaign;
 }

@@ -13,8 +13,8 @@ import { join } from "node:path";
 
 /** Unsettled spend claims that must stop closure, or an empty list. */
 function unsettledClaims(root: string): string[] {
-    return ["judge", "recovery"].flatMap((kind) =>
-        readClaims(join(root, "evidence"), kind as "judge" | "recovery")
+    return ["trial", "judge", "recovery"].flatMap((kind) =>
+        readClaims(join(root, "evidence"), kind as "trial" | "judge" | "recovery")
             .filter((claim) => claim.state !== "closed")
             .map(
                 (claim) =>
@@ -75,7 +75,7 @@ function closureRefusals(
     const claims = unsettledClaims(root);
     if (claims.length > 0) {
         return [
-            `unsettled judge spend: ${claims.join("; ")}; closure would hide an unknown outcome`,
+            `unsettled spend: ${claims.join("; ")}; closure would hide an unknown outcome`,
         ];
     }
     const assessments = checkedAssessments({ root, manifest, ledger });
