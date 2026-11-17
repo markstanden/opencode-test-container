@@ -276,7 +276,10 @@ console.log(JSON.stringify(result));
 
         // Assert
         for (const result of results) {
-            const parsed = JSON.parse(result) as { ok: boolean; problems: string[] };
+            const parsed = JSON.parse(result) as {
+                ok: boolean;
+                problems: string[];
+            };
             assert.equal(parsed.ok, true, parsed.problems.join("; "));
         }
         assert.equal(assessmentEvents(root, "s1").length, 1);

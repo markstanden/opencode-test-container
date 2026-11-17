@@ -292,7 +292,10 @@ function bindAssessment(options: {
     );
     let owned = false;
     try {
-        writeFileSync(lock, `${process.pid}\n`, { encoding: "utf8", flag: "wx" });
+        writeFileSync(lock, `${process.pid}\n`, {
+            encoding: "utf8",
+            flag: "wx",
+        });
         owned = true;
     } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
@@ -333,7 +336,7 @@ function bindAssessment(options: {
     }
 }
 
-/** Post-close assessment is read-only: existing checked records only. *//** Post-close assessment is read-only: existing checked records only. */
+/** Post-close assessment is read-only: existing checked records only. */ /** Post-close assessment is read-only: existing checked records only. */
 function readOnlyAssessment(
     root: string,
     manifest: PreparedManifest,
@@ -488,19 +491,20 @@ function assessSelected(options: {
     slots: readonly Slot[];
     now: () => string;
 }): AssessResult {
-    let ledger = options.ledger;
     const summary = emptySummary();
     const problems: string[] = [];
     const skipped: string[] = [];
     let stoppedAt: string | null = null;
     for (const slot of options.slots) {
-        const outcome = assessSlot({ ...options, slot });
+        const outcome = assessSlot({
+            root: options.root,
+            manifest: options.manifest,
+            slot,
+            now: options.now,
+        });
         problems.push(...outcome.problems);
         if (outcome.skipped !== null) skipped.push(outcome.skipped);
         if (outcome.assessment === null) continue;
-        // Re-read the ledger after publication: a concurrent assessor may have
-        // created the same record and its one binding.
-        ledger = readLedger(options.root);
         problems.push(
             ...bindAssessment({
                 root: options.root,
