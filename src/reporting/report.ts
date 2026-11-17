@@ -1,5 +1,14 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import {
+    existsSync,
+    mkdirSync,
+    readFileSync,
+    realpathSync,
+    renameSync,
+    rmSync,
+    writeFileSync,
+} from "node:fs";
+import { dirname, join, relative, resolve, sep } from "node:path";
+import { randomBytes } from "node:crypto";
 import { sha256Of } from "../contracts/canonical.ts";
 import { isRecord } from "../contracts/validate.ts";
 import {
@@ -8,7 +17,8 @@ import {
 } from "../campaign/prepare.ts";
 import { loadFrozen } from "../campaign/freeze.ts";
 import { readLedger } from "../campaign/ledger.ts";
-import { readAssessments, type StoredAssessment } from "../campaign/assess.ts";
+import type { StoredAssessment } from "../campaign/assess.ts";
+import { checkedAssessments } from "../evidence/assessments.ts";
 import {
     checkedSelectionForSlot,
     readSelectedJudgement,
@@ -257,11 +267,49 @@ export function analyseCampaign(
             ],
         };
     }
-    const assessments = readAssessments(root);
+    const unsafe = unsafeOutputProblems(root, outDir);
+    if (unsafe.length > 0) return { ok: false, problems: unsafe };
+    const checked = checkedAssessments({
+        root,
+        manifest: prepared.manifest,
+        ledger,
+    });
+    if (checked.problems.length > 0) {
+        return {
+            ok: false,
+            problems: [
+                "assessment evidence is not trustworthy",
+                ...checked.problems,
+            ],
+        };
+    }
+    const started = new Set(
+        ledger.events
+            .filter((event) => event.event === "trial-start")
+            .map((event) =>
+                typeof event.slotId === "string" ? event.slotId : "",
+            ),
+    );
+    const assessmentBySlot = new Map(
+        checked.records.flatMap((entry) =>
+            entry.state === "valid" && entry.record !== null
+                ? [[entry.slotId, entry.record] as const]
+                : [],
+        ),
+    );
+    const startedWithoutAssessment = started.has("")
+        ? []
+        : [...started].filter((slotId) => !assessmentBySlot.has(slotId));
+    if (startedWithoutAssessment.length > 0) {
+        return {
+            ok: false,
+            problems: [
+                `started slot(s) have no checked assessment: ${startedWithoutAssessment.join(", ")}`,
+            ],
+        };
+    }
     const slots = prepared.manifest.campaign.schedule.slots.map((slot) => {
-        const assessment = assessments.find(
-            (entry) => entry.slotId === slot.slotId,
-        );
+        const assessment = assessmentBySlot.get(slot.slotId);
         if (assessment === undefined) {
             return {
                 slotId: slot.slotId,
@@ -311,7 +359,7 @@ export function analyseCampaign(
         generatedAt: now(),
         denominators: {
             scheduled: slots.length,
-            assessed: assessments.length,
+            assessed: assessmentBySlot.size,
             valid: slots.filter((slot) => slot.validity === "valid").length,
             invalid: slots.filter((slot) => slot.validity === "invalid").length,
             unknown: slots.filter((slot) => slot.validity === "unknown").length,
@@ -328,14 +376,61 @@ export function analyseCampaign(
     };
     const report: Report = { ...body, reportSha256: sha256Of(body) };
     const markdown = markdownOf(report);
-    mkdirSync(outDir, { recursive: true });
-    writeFileSync(
-        join(outDir, "report.json"),
-        `${JSON.stringify(report, null, 2)}\n`,
-        "utf8",
-    );
-    writeFileSync(join(outDir, "report.md"), markdown, "utf8");
+    const staging = `${outDir}.tmp-${randomBytes(6).toString("hex")}`;
+    try {
+        mkdirSync(staging, { recursive: true });
+        writeFileSync(
+            join(staging, "report.json"),
+            `${JSON.stringify(report, null, 2)}\n`,
+            "utf8",
+        );
+        writeFileSync(join(staging, "report.md"), markdown, "utf8");
+        renameSync(staging, outDir);
+    } catch (error) {
+        rmSync(staging, { recursive: true, force: true });
+        return {
+            ok: false,
+            problems: [
+                `the report could not be published atomically: ${error instanceof Error ? error.message : String(error)}`,
+            ],
+        };
+    }
     return { ok: true, report, markdown, outDir };
+}
+
+/** Resolve a destination through its existing ancestors. */
+function canonicalDestination(path: string): string {
+    let ancestor = resolve(path);
+    const tail: string[] = [];
+    while (!existsSync(ancestor)) {
+        tail.unshift(ancestor.split(sep).at(-1) ?? "");
+        const parent = dirname(ancestor);
+        if (parent === ancestor) break;
+        ancestor = parent;
+    }
+    const resolved = realpathSync(ancestor);
+    return join(resolved, ...tail);
+}
+
+/** Protected trees a report may never be written into. */
+function protectedTrees(root: string): string[] {
+    return [join(root, "evidence"), join(root, "prepare")]
+        .filter((path) => existsSync(path))
+        .map((path) => realpathSync(path));
+}
+
+/**
+ * Refuse a report destination inside protected evidence or prepared inputs,
+ * resolving symlinked parents. A sibling `reports/` directory is allowed.
+ */
+function unsafeOutputProblems(root: string, outDir: string): string[] {
+    const target = canonicalDestination(outDir);
+    return protectedTrees(root).flatMap((protectedRoot) => {
+        const rel = relative(protectedRoot, target);
+        return rel === "" || (!rel.startsWith("..") && !rel.startsWith(`..${sep}`))
+            ? [`report destination ${outDir} is inside protected evidence`]
+            : [];
+    });
 }
 
 /** The canonical identity of a report without its own identity field. */

@@ -26,7 +26,12 @@ import {
 } from "../contracts/validate.ts";
 import { realpathSync } from "node:fs";
 import { isAbsolute } from "node:path";
-import { inventory, stageTree, type Inventory } from "./inventory.ts";
+import {
+    inventory,
+    inventoryDifferences,
+    stageTree,
+    type Inventory,
+} from "./inventory.ts";
 import { toolIdentity, type ToolIdentity } from "../contracts/version.ts";
 
 /** Resolve a declared local subject source. */
@@ -636,7 +641,7 @@ export function preparedDifferences(
     }
     for (const arm of manifest.subjects) {
         const directory = join(root, "prepare", "subjects", arm.armId);
-        for (const difference of inventoryDifferencesOf(
+        for (const difference of inventoryDifferences(
             directory,
             arm.inventory,
         )) {
@@ -645,7 +650,7 @@ export function preparedDifferences(
     }
     for (const testCase of manifest.cases) {
         const workspace = join(root, "prepare", "workspaces", testCase.caseId);
-        for (const difference of inventoryDifferencesOf(
+        for (const difference of inventoryDifferences(
             workspace,
             testCase.workspace,
         )) {
@@ -674,31 +679,9 @@ function primaryCheckDifferences(
 ): string[] {
     if (testCase.primaryCheck === undefined) return [];
     const checker = join(root, "prepare", testCase.primaryCheck.directory);
-    return inventoryDifferencesOf(checker, testCase.primaryCheck.inventory).map(
+    return inventoryDifferences(checker, testCase.primaryCheck.inventory).map(
         (difference) => `primary-checks/${testCase.caseId}: ${difference}`,
     );
-}
-
-/** Inventory differences with a missing-directory distinction. */
-function inventoryDifferencesOf(root: string, expected: Inventory): string[] {
-    if (!existsSync(root)) return ["directory is missing"];
-    const observed = inventory(root);
-    if (!observed.ok) return [observed.problem];
-    const expectedMap = new Map(expected.map((entry) => [entry.path, entry]));
-    const observedMap = new Map(
-        observed.entries.map((entry) => [entry.path, entry]),
-    );
-    const problems: string[] = [];
-    for (const [path, entry] of expectedMap) {
-        const found = observedMap.get(path);
-        if (found === undefined) problems.push(`missing ${path}`);
-        else if (found.sha256 !== entry.sha256)
-            problems.push(`changed ${path}`);
-    }
-    for (const path of observedMap.keys()) {
-        if (!expectedMap.has(path)) problems.push(`added ${path}`);
-    }
-    return problems;
 }
 
 /** The canonical text of a prepared manifest, for receipts and displays. */

@@ -12,8 +12,14 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
-/** The frozen evaluator-semantics version. */
-export const EVALUATOR_VERSION = 1;
+/**
+ * The frozen evaluator-semantics version.
+ *
+ * Bumped to 2 when capture validity became raw-stream-derived and assessments
+ * began binding the exact source-evidence bytes. Historical version-1 roots are
+ * read-only replay material and are never rewritten.
+ */
+export const EVALUATOR_VERSION = 2;
 
 /** The package name recorded in every manifest and freeze receipt. */
 export const PACKAGE_NAME = "@markstanden/opencode-test-container";

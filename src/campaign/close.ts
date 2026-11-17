@@ -1,7 +1,7 @@
 import { appendLedgerEvent, readLedger, trialStarts } from "./ledger.ts";
 import { loadPreparedManifest, type PreparedManifest } from "./prepare.ts";
 import { loadFrozen } from "./freeze.ts";
-import { readAssessments } from "./assess.ts";
+import { checkedAssessments } from "../evidence/assessments.ts";
 import {
     checkedSelection,
     packetIntegrityProblems,
@@ -60,6 +60,7 @@ export type CloseResult =
 function closureRefusals(
     root: string,
     manifest: PreparedManifest,
+    ledger: ReturnType<typeof readLedger>,
     starts: ReturnType<typeof trialStarts>,
     ended: ReadonlySet<string>,
 ): string[] {
@@ -75,6 +76,21 @@ function closureRefusals(
     if (claims.length > 0) {
         return [
             `unsettled judge spend: ${claims.join("; ")}; closure would hide an unknown outcome`,
+        ];
+    }
+    const assessments = checkedAssessments({ root, manifest, ledger });
+    if (assessments.problems.length > 0) {
+        return ["assessment evidence is not trustworthy", ...assessments.problems];
+    }
+    const assessed = new Set(
+        assessments.records
+            .filter((entry) => entry.state === "valid")
+            .map((entry) => entry.slotId),
+    );
+    const missing = [...ended].filter((slotId) => !assessed.has(slotId));
+    if (missing.length > 0) {
+        return [
+            `completed slot(s) have no checked assessment: ${missing.join(", ")}; assess before closure`,
         ];
     }
     const packetProblems = manifest.campaign.schedule.slots.flatMap((slot) =>
@@ -129,11 +145,21 @@ export function closeCampaign(
                 typeof event.slotId === "string" ? event.slotId : "",
             ),
     );
-    const refusals = closureRefusals(root, prepared.manifest, starts, ended);
+    const refusals = closureRefusals(
+        root,
+        prepared.manifest,
+        ledger,
+        starts,
+        ended,
+    );
     if (refusals.length > 0) {
         return { ok: false, problems: refusals };
     }
-    const assessments = readAssessments(root);
+    const assessments = checkedAssessments({
+        root,
+        manifest: prepared.manifest,
+        ledger,
+    });
     const closedAt = now();
     appendLedgerEvent(
         root,
@@ -143,7 +169,9 @@ export function closeCampaign(
             closedAt,
             trialStarts: starts.length,
             trialEnds: ended.size,
-            assessments: assessments.length,
+            assessments: assessments.records.filter(
+                (entry) => entry.state === "valid",
+            ).length,
             slots: prepared.manifest.campaign.schedule.slots.length,
         },
         closedAt,

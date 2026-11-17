@@ -278,7 +278,20 @@ export async function main(argv: readonly string[]): Promise<number> {
         return fail(["analyse needs --out <fresh-directory>"]);
     }
     const handler = HANDLERS[options.command];
-    return handler === undefined ? 0 : handler(options);
+    if (handler === undefined) return 0;
+    try {
+        return await handler(options);
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        // An unknown selector is invalid input, not an operational failure; it
+        // is rejected before any dispatch, so no evidence has been written.
+        if (error instanceof Error && message.startsWith("unknown slotId")) {
+            console.error(`otc: ${message}`);
+            return 2;
+        }
+        console.error(`otc: ${message}`);
+        return 1;
+    }
 }
 
 /** Validate a campaign bundle and print its summary. */
@@ -389,6 +402,9 @@ function assess(options: CliOptions): number {
         console.log(
             `assessed ${summary.summary.assessed}: pass ${summary.summary.pass}, fail ${summary.summary.fail}, unknown ${summary.summary.unknown}, invalid ${summary.summary.invalid}, unrun ${summary.summary.unrun}`,
         );
+        for (const skipped of summary.skipped) {
+            console.log(skipped);
+        }
         for (const problem of summary.problems) {
             console.error(`otc: ${problem}`);
         }

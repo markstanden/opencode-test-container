@@ -4,7 +4,7 @@ import type { LifecycleState } from "../contracts/types.ts";
 import { loadPreparedManifest } from "./prepare.ts";
 import { loadFrozen } from "./freeze.ts";
 import { readLedger, trialStarts } from "./ledger.ts";
-import { readAssessments, assessmentPath } from "./assess.ts";
+import { checkedAssessments } from "../evidence/assessments.ts";
 import {
     checkedSelection,
     packetIntegrityProblems,
@@ -89,19 +89,16 @@ export interface StatusReport {
 
 /** Derive the finite lifecycle state from checked evidence. */
 function lifecycleStateOf(options: {
-    root: string;
     manifest: StatusManifest;
     frozen: boolean;
     starts: number;
     closed: boolean;
+    allAssessed: boolean;
+    blocked: boolean;
 }): LifecycleState {
+    if (options.blocked) return "blocked";
     if (options.closed) return "closed";
-    const allAssessed =
-        options.manifest.campaign.schedule.slots.length > 0 &&
-        options.manifest.campaign.schedule.slots.every((slot) =>
-            existsSync(assessmentPath(options.root, slot.slotId)),
-        );
-    if (allAssessed) return "assessed";
+    if (options.allAssessed) return "assessed";
     if (options.starts > 0) return "running";
     return options.frozen ? "frozen" : "prepared";
 }
@@ -296,7 +293,11 @@ export function statusOf(root: string): StatusReport {
                 typeof event.slotId === "string" ? event.slotId : "",
             ),
     );
-    const assessments = readAssessments(root);
+    const assessments = checkedAssessments({ root, manifest, ledger });
+    const validAssessments = assessments.records.flatMap((entry) =>
+        entry.state === "valid" && entry.record !== null ? [entry.record] : [],
+    );
+    problems.push(...assessments.problems);
     const frozen = loadFrozen(root);
     if (!frozen.ok) problems.push(frozen.problem);
     const currentTool = toolIdentity();
@@ -307,23 +308,31 @@ export function statusOf(root: string): StatusReport {
     if (!policy.ok) problems.push(...policy.problems);
     const judgement = judgementOf(root, manifest);
     problems.push(...(judgement?.problems ?? []));
+    const blocked =
+        ledger.state === "malformed" || assessments.problems.length > 0;
+    const allAssessed = assessments.records.every(
+        (entry) => entry.state === "valid",
+    );
     const state = lifecycleStateOf({
-        root,
         manifest,
         frozen: frozen.ok,
         starts: starts.length,
         closed: ledger.state === "closed",
+        allAssessed,
+        blocked,
     });
-    const nextActions = nextActionsOf({
-        root,
-        manifest,
-        frozen: frozen.ok,
-        closed: ledger.state === "closed",
-        starts: starts.length,
-        completed: completed.size,
-        assessments: assessments.length,
-        judgement: judgementOf(root, manifest),
-    });
+    const nextActions = blocked
+        ? []
+        : nextActionsOf({
+              root,
+              manifest,
+              frozen: frozen.ok,
+              closed: ledger.state === "closed",
+              starts: starts.length,
+              completed: completed.size,
+              assessments: validAssessments.length,
+              judgement,
+          });
     return {
         schemaVersion: 1,
         state,
@@ -337,13 +346,14 @@ export function statusOf(root: string): StatusReport {
             slots: manifest.campaign.schedule.slots.length,
             started: starts.length,
             completed: completed.size,
-            assessed: assessments.length,
-            pass: assessments.filter((entry) => entry.outcome === "pass")
+            assessed: validAssessments.length,
+            pass: validAssessments.filter((entry) => entry.outcome === "pass")
                 .length,
-            fail: assessments.filter((entry) => entry.outcome === "fail")
+            fail: validAssessments.filter((entry) => entry.outcome === "fail")
                 .length,
-            unknown: assessments.filter((entry) => entry.outcome === "unknown")
-                .length,
+            unknown: validAssessments.filter(
+                (entry) => entry.outcome === "unknown",
+            ).length,
         },
         tool: currentTool,
         budgets: {

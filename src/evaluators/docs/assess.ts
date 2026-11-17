@@ -1,10 +1,21 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import {
+    containedEntry,
+    readContainedDocuments,
+    readContainedFile,
+} from "../../evidence/containment.ts";
 import { sha256Bytes } from "../../contracts/canonical.ts";
 import type { SuiteCase } from "../../contracts/types.ts";
 import { isRecord } from "../../contracts/validate.ts";
 import type { TrialMeta } from "../../campaign/run.ts";
-import { decodeTrail, type Usage } from "../../adapters/opencode/events.ts";
+import type { Usage } from "../../adapters/opencode/events.ts";
+import { checkCapture } from "../../evidence/capture.ts";
+import {
+    sourceIdentity,
+    type SourceIdentity,
+} from "../../evidence/source-identity.ts";
+import { EVALUATOR_VERSION } from "../../contracts/version.ts";
 import {
     hostDispatchesFromTrail,
     journalIdentityFromTrail,
@@ -47,6 +58,10 @@ export interface DocsCounts {
 export interface DocsAssessment {
     /** The schema version value. */
     schemaVersion: 1;
+    /** The evaluator semantics that produced this assessment. */
+    evaluatorVersion: number;
+    /** The exact trial artifacts this assessment consumed. */
+    evidence: SourceIdentity;
     /** The kind value. */
     kind: "docs-recording";
     /** The campaign id value. */
@@ -133,17 +148,6 @@ export function creditedWriteOf(
     };
 }
 
-/** Read meta without trusting it. */
-function readMeta(path: string): TrialMeta | null {
-    if (!existsSync(path)) return null;
-    try {
-        const value: unknown = JSON.parse(readFileSync(path, "utf8"));
-        return isRecord(value) ? (value as unknown as TrialMeta) : null;
-    } catch {
-        return null;
-    }
-}
-
 /** Read usage without trusting it. */
 function readUsage(path: string): Usage | null {
     if (!existsSync(path)) return null;
@@ -194,23 +198,49 @@ function textReasons(
     ];
 }
 
+/** One criterion check's failures and unsafe-evidence problems. */
+interface WorkspaceCheck {
+    reasons: string[];
+    problems: string[];
+}
+
 /** Check one written file's required and forbidden text. */
-function contentReasons(workspace: string, testCase: DocsCase): string[] {
+function contentReasons(workspace: string, testCase: DocsCase): WorkspaceCheck {
     const target = testCase.expectedDocs.target;
-    if (target === undefined) return [];
-    const path = join(workspace, testCase.lakeRoot ?? "docs", target);
-    if (!existsSync(path))
-        return [`expected written file ${target} is missing`];
-    return textReasons(target, readFileSync(path, "utf8"), testCase);
+    if (target === undefined) return { reasons: [], problems: [] };
+    const path = `${testCase.lakeRoot ?? "docs"}/${target}`;
+    const entry = containedEntry(workspace, path);
+    if (!entry.ok) return { reasons: [], problems: [entry.problem] };
+    if (entry.kind === "missing") {
+        return {
+            reasons: [`expected written file ${target} is missing`],
+            problems: [],
+        };
+    }
+    if (entry.kind !== "file" && entry.kind !== "symlink") {
+        return {
+            reasons: [],
+            problems: [`expected written file ${target} is not a file`],
+        };
+    }
+    const read = readContainedFile(workspace, path);
+    return read.ok
+        ? { reasons: textReasons(target, read.text, testCase), problems: [] }
+        : { reasons: [], problems: [read.problem] };
 }
 
 /** Check paths that must not exist. */
-function absentReasons(workspace: string, testCase: DocsCase): string[] {
-    return (testCase.guardrails?.absent ?? []).flatMap((path) =>
-        existsSync(join(workspace, path))
-            ? [`guardrail path ${path} exists`]
-            : [],
-    );
+function absentReasons(workspace: string, testCase: DocsCase): WorkspaceCheck {
+    const reasons: string[] = [];
+    const problems: string[] = [];
+    for (const path of testCase.guardrails?.absent ?? []) {
+        const entry = containedEntry(workspace, path);
+        if (!entry.ok) problems.push(entry.problem);
+        else if (entry.kind !== "missing") {
+            reasons.push(`guardrail path ${path} exists`);
+        }
+    }
+    return { reasons, problems };
 }
 
 /** Check paths whose prepared identity must survive unchanged. */
@@ -218,18 +248,34 @@ function unchangedReasons(
     workspace: string,
     testCase: DocsCase,
     prepared: ReadonlyMap<string, string>,
-): string[] {
-    return (testCase.guardrails?.unchanged ?? []).flatMap((path) => {
+): WorkspaceCheck {
+    const reasons: string[] = [];
+    const problems: string[] = [];
+    for (const path of testCase.guardrails?.unchanged ?? []) {
         const expected = prepared.get(path);
         if (expected === undefined) {
-            return [`guardrail path ${path} has no prepared identity`];
+            reasons.push(`guardrail path ${path} has no prepared identity`);
+            continue;
         }
-        const current = join(workspace, path);
-        if (!existsSync(current)) return [`guardrail path ${path} was removed`];
-        return sha256Bytes(readFileSync(current)) === expected
-            ? []
-            : [`guardrail path ${path} changed`];
-    });
+        const entry = containedEntry(workspace, path);
+        if (!entry.ok) {
+            problems.push(entry.problem);
+            continue;
+        }
+        if (entry.kind === "missing") {
+            reasons.push(`guardrail path ${path} was removed`);
+            continue;
+        }
+        const read = readContainedFile(workspace, path);
+        if (!read.ok) {
+            problems.push(read.problem);
+            continue;
+        }
+        if (sha256Bytes(read.text) !== expected) {
+            reasons.push(`guardrail path ${path} changed`);
+        }
+    }
+    return { reasons, problems };
 }
 
 /** Check guardrails against the final workspace and prepared inventory. */
@@ -237,11 +283,13 @@ function guardrailReasons(
     workspace: string,
     testCase: DocsCase,
     prepared: ReadonlyMap<string, string>,
-): string[] {
-    return [
-        ...absentReasons(workspace, testCase),
-        ...unchangedReasons(workspace, testCase, prepared),
-    ];
+): WorkspaceCheck {
+    const absent = absentReasons(workspace, testCase);
+    const unchanged = unchangedReasons(workspace, testCase, prepared);
+    return {
+        reasons: [...absent.reasons, ...unchanged.reasons],
+        problems: [...absent.problems, ...unchanged.problems],
+    };
 }
 
 /** The readable parts of one docs operation input. */
@@ -309,18 +357,13 @@ function journalAbsenceProblem(
         : null;
 }
 
-/** Capture integrity problems for a docs trial. */
+/** Journal integrity problems for a docs trial; capture is checked separately. */
 function docsIntegrity(
     testCase: DocsCase,
-    meta: TrialMeta,
     verification: JournalVerification,
     host: ReturnType<typeof hostDispatchesFromTrail>,
 ): string[] {
     const integrity: string[] = [];
-    if (meta.captureValid !== true)
-        integrity.push(...(meta.captureProblems ?? []));
-    if (meta.exit !== 0)
-        integrity.push(`container exited ${String(meta.exit)}`);
     const absence = journalAbsenceProblem(testCase, verification, host);
     if (absence !== null) integrity.push(absence);
     if (verification.rejected.length > 0) {
@@ -372,13 +415,14 @@ function docsReasons(
     writes: ReadonlyArray<{ path: string | null; mode: string | null }>,
     workspace: string,
     prepared: ReadonlyMap<string, string>,
-): string[] {
+): WorkspaceCheck {
     const criterion = testCase.criterion ?? { minVerifiedCalls: 0 };
     const verbs = new Set(criterion.verbs ?? []);
     const creditedForCriterion = credited.filter(
         (record) => verbs.size === 0 || verbs.has(docsVerbOf(record.input)),
     ).length;
     const reasons: string[] = [];
+    const problems: string[] = [];
     if (creditedForCriterion < criterion.minVerifiedCalls) {
         reasons.push(
             `verified calls ${creditedForCriterion} below required ${criterion.minVerifiedCalls}`,
@@ -404,10 +448,14 @@ function docsReasons(
                 `no credited ${testCase.expectedDocs.kind} write to ${String(target)}`,
             );
         }
-        reasons.push(...contentReasons(workspace, testCase));
+        const content = contentReasons(workspace, testCase);
+        reasons.push(...content.reasons);
+        problems.push(...content.problems);
     }
-    reasons.push(...guardrailReasons(workspace, testCase, prepared));
-    return reasons;
+    const guardrails = guardrailReasons(workspace, testCase, prepared);
+    reasons.push(...guardrails.reasons);
+    problems.push(...guardrails.problems);
+    return { reasons, problems };
 }
 
 /**
@@ -442,7 +490,10 @@ export function assessDocsTrial(options: {
     assessedAt: string;
 }): DocsAssessment {
     const { testCase, trialDir } = options;
-    const meta = readMeta(join(trialDir, "meta.json"));
+    const capture = checkCapture(trialDir, {
+        campaignId: options.campaignId,
+        slotId: options.slotId,
+    });
     const primaryRecord = readPrimaryCheck(trialDir);
     const primary =
         primaryRecord === null
@@ -454,6 +505,8 @@ export function assessDocsTrial(options: {
               };
     const base = {
         schemaVersion: 1 as const,
+        evaluatorVersion: EVALUATOR_VERSION,
+        evidence: sourceIdentity(trialDir),
         kind: "docs-recording" as const,
         campaignId: options.campaignId,
         slotId: options.slotId,
@@ -470,7 +523,7 @@ export function assessDocsTrial(options: {
         rejectedLines: 0,
         searchCalls: 0,
     };
-    if (meta === null || !existsSync(join(trialDir, "events.jsonl"))) {
+    if (capture.state === "unrun") {
         return {
             ...base,
             validity: "unrun",
@@ -480,18 +533,18 @@ export function assessDocsTrial(options: {
                 state: "absent",
                 credited: 0,
                 rejected: 0,
-                problems: ["trial evidence is missing"],
+                problems: capture.problems,
             },
             target: null,
             primary,
-            reasons: ["trial evidence is missing"],
+            reasons: capture.problems,
             usage: null,
             answered: false,
             assessedAt: options.assessedAt,
         };
     }
-    const events = readFileSync(join(trialDir, "events.jsonl"), "utf8");
-    const trail = decodeTrail(events);
+    const events = capture.raw;
+    const trail = capture.trail;
     const tools = existsSync(join(trialDir, "tools.jsonl"))
         ? readFileSync(join(trialDir, "tools.jsonl"), "utf8")
         : "";
@@ -513,7 +566,20 @@ export function assessDocsTrial(options: {
             (record) => docsVerbOf(record.input) === "search",
         ).length,
     };
-    const integrity = docsIntegrity(testCase, meta, verification, host);
+    // The workspace is evidence for every docs case, including restraint:
+    // an unreadable or escaping tree cannot establish that nothing changed.
+    const contained = readContainedDocuments(
+        options.workspace,
+        testCase.lakeRoot ?? "docs",
+        () => false,
+    );
+    const integrity = [
+        ...(capture.state === "invalid" ? capture.problems : []),
+        ...docsIntegrity(testCase, verification, host),
+        ...(contained.ok
+            ? []
+            : [`workspace is not containable: ${contained.problem}`]),
+    ];
     if (integrity.length > 0) {
         return {
             ...base,
@@ -545,13 +611,29 @@ export function assessDocsTrial(options: {
             assessedAt: options.assessedAt,
         };
     }
-    const reasons = docsReasons(
+    const checked = docsReasons(
         testCase,
         credited,
         writes,
         options.workspace,
         options.prepared,
     );
+    if (checked.problems.length > 0) {
+        return {
+            ...base,
+            validity: "invalid",
+            outcome: "unknown",
+            counts,
+            journal: journalSummary(verification),
+            target: null,
+            primary,
+            reasons: checked.problems,
+            usage: readUsage(join(trialDir, "usage.json")),
+            answered: trail.text.trim() !== "",
+            assessedAt: options.assessedAt,
+        };
+    }
+    const reasons = checked.reasons;
     reasons.push(...primaryFailure(primaryRecord));
     const outcome: DocsOutcome = reasons.length === 0 ? "pass" : "fail";
     return {

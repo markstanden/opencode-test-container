@@ -17,6 +17,7 @@ import { fileURLToPath } from "node:url";
 import { prepareCampaign } from "../../src/campaign/prepare.ts";
 import { freezeCampaign } from "../../src/campaign/freeze.ts";
 import { runCampaign } from "../../src/campaign/run.ts";
+import { assessCampaign } from "../../src/campaign/assess.ts";
 import { closeCampaign } from "../../src/campaign/close.ts";
 import { statusOf } from "../../src/campaign/status.ts";
 import { analyseCampaign } from "../../src/reporting/report.ts";
@@ -227,6 +228,11 @@ async function campaignRoot(
             },
         );
         assert.equal(summary.ok, true, summary.problems.join("; "));
+        // Closure requires a checked assessment for every completed trial.
+        const assessed = assessCampaign(root, {
+            now: () => "2026-11-15T00:05:00.000Z",
+        });
+        assert.equal(assessed.ok, true, assessed.problems.join("; "));
     }
     return { dir: fixture.dir, root };
 }

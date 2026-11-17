@@ -18,7 +18,10 @@ import { runCampaign } from "../../src/campaign/run.ts";
 import { assessDocsTrial } from "../../src/evaluators/docs/assess.ts";
 import { runCommand, type CommandResult } from "../../src/adapters/process.ts";
 import type { ContainerPlan } from "../../src/adapters/podman/container.ts";
-import { toolIdentity } from "../../src/contracts/version.ts";
+import {
+    EVALUATOR_VERSION,
+    toolIdentity,
+} from "../../src/contracts/version.ts";
 import type { DocsTaskCase } from "../../src/contracts/types.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -239,7 +242,7 @@ describe("product primary check", () => {
             "@markstanden/opencode-test-container",
         );
         assert.equal(manifest.tool?.version, toolIdentity().version);
-        assert.equal(manifest.tool?.evaluatorVersion, 1);
+        assert.equal(manifest.tool?.evaluatorVersion, EVALUATOR_VERSION);
         assert.deepEqual(problems, []);
     });
 

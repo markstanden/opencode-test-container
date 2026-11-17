@@ -71,7 +71,11 @@ import {
 import { creditedOperationLines } from "../evaluators/docs/assess.ts";
 import { claimAttemptDir } from "./evidence-guard.ts";
 import { deliveryCheck, loadFrozen, type FrozenRecord } from "./freeze.ts";
-import { inventory } from "./inventory.ts";
+import { changedInventoryPaths, inventory } from "./inventory.ts";
+import {
+    readContainedDocuments,
+    readContainedFile,
+} from "../evidence/containment.ts";
 import { appendLedgerEvent, readLedger } from "./ledger.ts";
 import {
     loadPreparedManifest,
@@ -278,49 +282,51 @@ function recordedAttempts(
     return { attempts, problems };
 }
 
-/** Read every Markdown document under a lake root. */
-function lakeDocuments(root: string): LakeDocument[] {
-    if (!existsSync(root)) return [];
-    const documents: LakeDocument[] = [];
-    const walk = (directory: string): void => {
-        for (const entry of readdirSync(directory, {
-            withFileTypes: true,
-        }).sort((left, right) => left.name.localeCompare(right.name))) {
-            const path = join(directory, entry.name);
-            if (entry.isDirectory()) walk(path);
-            else if (entry.isFile() && entry.name.endsWith(".md")) {
-                documents.push({
-                    path: relative(root, path).split(sep).join("/"),
-                    contents: readFileSync(path, "utf8"),
-                });
-            }
-        }
+/** Read every Markdown document under one contained workspace lake. */
+function lakeDocuments(
+    workspace: string,
+    lakeRoot: string,
+):
+    | { ok: true; documents: LakeDocument[] }
+    | { ok: false; problem: string } {
+    const read = readContainedDocuments(workspace, lakeRoot, (name) =>
+        name.endsWith(".md"),
+    );
+    if (!read.ok) return read;
+    const prefix = lakeRoot === "" ? "" : `${lakeRoot}/`;
+    return {
+        ok: true,
+        documents: read.documents.map((document) => ({
+            path: document.path.slice(prefix.length),
+            contents: document.contents,
+        })),
     };
-    walk(root);
-    return documents;
 }
 
 /** The changed, created and removed files between the pristine and live trees. */
-function changedPaths(pristine: string, live: string): string[] {
+function changedPaths(
+    pristine: string,
+    live: string,
+):
+    | { ok: true; paths: string[] }
+    | { ok: false; problems: string[] } {
     const before = inventory(pristine);
     const after = inventory(live);
-    if (!before.ok || !after.ok) return [];
-    const beforeMap = new Map(
-        before.entries.map((entry) => [entry.path, entry.sha256]),
-    );
-    const afterMap = new Map(
-        after.entries.map((entry) => [entry.path, entry.sha256]),
-    );
-    const changed = new Set<string>();
-    for (const [path, hash] of afterMap) {
-        if (path === "answer.md") continue;
-        if (beforeMap.get(path) !== hash) changed.add(path);
+    if (!before.ok || !after.ok) {
+        return {
+            ok: false,
+            problems: [
+                ...(before.ok ? [] : [`pristine workspace: ${before.problem}`]),
+                ...(after.ok ? [] : [`live workspace: ${after.problem}`]),
+            ],
+        };
     }
-    for (const path of beforeMap.keys()) {
-        if (path === "answer.md") continue;
-        if (!afterMap.has(path)) changed.add(path);
-    }
-    return [...changed].sort();
+    return {
+        ok: true,
+        paths: changedInventoryPaths(before.entries, after.entries, [
+            "answer.md",
+        ]),
+    };
 }
 
 /** The text of one file, or an empty string. */
@@ -349,19 +355,38 @@ function docStateFor(
     root: string,
     slot: Slot,
     testCase: DocsTaskCase,
-): DocState {
+):
+    | { ok: true; state: DocState }
+    | { ok: false; problems: string[] } {
     const lakeRoot = testCase.lakeRoot ?? "docs";
     const beforeDocs = lakeDocuments(
-        join(root, "prepare", "workspaces", testCase.caseId, lakeRoot),
+        join(root, "prepare", "workspaces", testCase.caseId),
+        lakeRoot,
     );
     const afterDocs = lakeDocuments(
-        join(trialDirectory(root, slot.slotId), "workspace", lakeRoot),
+        join(trialDirectory(root, slot.slotId), "workspace"),
+        lakeRoot,
     );
-    const change = docChanges(beforeDocs, afterDocs);
+    if (!beforeDocs.ok) {
+        return {
+            ok: false,
+            problems: [`pristine lake ${lakeRoot}: ${beforeDocs.problem}`],
+        };
+    }
+    if (!afterDocs.ok) {
+        return {
+            ok: false,
+            problems: [`live lake ${lakeRoot}: ${afterDocs.problem}`],
+        };
+    }
+    const change = docChanges(beforeDocs.documents, afterDocs.documents);
     return {
-        documentsChanged: change.documentsChanged,
-        createdPaths: change.createdPaths,
-        modifiedPaths: change.modifiedPaths,
+        ok: true,
+        state: {
+            documentsChanged: change.documentsChanged,
+            createdPaths: change.createdPaths,
+            modifiedPaths: change.modifiedPaths,
+        },
     };
 }
 
@@ -370,15 +395,40 @@ function buildPacket(options: {
     root: string;
     slot: Slot;
     testCase: DocsTaskCase;
-}): { packet: string; state: DocState } {
+}):
+    | { ok: true; packet: string; state: DocState }
+    | { ok: false; problems: string[] } {
     const { root, slot, testCase } = options;
     const trialDir = trialDirectory(root, slot.slotId);
     const lakeRoot = testCase.lakeRoot ?? "docs";
     const beforeDocs = lakeDocuments(
-        join(root, "prepare", "workspaces", testCase.caseId, lakeRoot),
+        join(root, "prepare", "workspaces", testCase.caseId),
+        lakeRoot,
     );
-    const afterDocs = lakeDocuments(join(trialDir, "workspace", lakeRoot));
+    const afterDocs = lakeDocuments(join(trialDir, "workspace"), lakeRoot);
+    if (!beforeDocs.ok) {
+        return {
+            ok: false,
+            problems: [`pristine lake ${lakeRoot}: ${beforeDocs.problem}`],
+        };
+    }
+    if (!afterDocs.ok) {
+        return {
+            ok: false,
+            problems: [`live lake ${lakeRoot}: ${afterDocs.problem}`],
+        };
+    }
+    const changed = changedPaths(
+        join(root, "prepare", "workspaces", testCase.caseId),
+        join(trialDir, "workspace"),
+    );
+    if (!changed.ok) return changed;
     const state = docStateFor(root, slot, testCase);
+    if (!state.ok) return state;
+    const answer = readContainedFile(trialDir, "answer.md");
+    if (!answer.ok) {
+        return { ok: false, problems: [`trial answer: ${answer.problem}`] };
+    }
     const operations = creditedOperationLines(trialDir);
     const packet = buildAcPrompt({
         taskPrompt: textOf(
@@ -388,17 +438,14 @@ function buildPacket(options: {
             join(root, "prepare", "workspaces", testCase.caseId, "AGENTS.md"),
         ),
         scenarioTruth: testCase.truth ?? "",
-        beforeDocs,
-        afterDocs,
-        changedPaths: changedPaths(
-            join(root, "prepare", "workspaces", testCase.caseId),
-            join(trialDir, "workspace"),
-        ),
+        beforeDocs: beforeDocs.documents,
+        afterDocs: afterDocs.documents,
+        changedPaths: changed.paths,
         primary: primaryEvidence(trialDir),
         docsOperations: operations.lines,
-        answer: textOf(join(trialDir, "answer.md")),
+        answer: answer.text,
     });
-    return { packet, state };
+    return { ok: true, packet, state: state.state };
 }
 
 /** The judge's immutable packet, writing it once or refusing a change. */
@@ -1193,11 +1240,13 @@ export function packetIntegrityProblems(
     const testCase = manifest.suite.cases.find(
         (entry) => entry.caseId === slot.caseId,
     );
-    const expected =
-        testCase?.kind === "docs-task"
-            ? buildPacket({ root, slot, testCase }).packet
-            : null;
     const problems = [...recorded.problems];
+    let expected: string | null = null;
+    if (testCase?.kind === "docs-task") {
+        const built = buildPacket({ root, slot, testCase });
+        if (built.ok) expected = built.packet;
+        else problems.push(...built.problems);
+    }
     for (const attempt of recorded.attempts) {
         problems.push(...packetBindingProblems(root, slot.slotId, attempt));
         const attemptBytes = packetBytes(
@@ -1379,9 +1428,12 @@ function judgementRecordProblems(
             `selection ${selected.attemptId} has an inconsistent outcome`,
         );
     }
-    problems.push(
-        ...validateAcJudgement(value, docStateFor(root, slot, testCase)),
-    );
+    const state = docStateFor(root, slot, testCase);
+    if (state.ok) {
+        problems.push(...validateAcJudgement(value, state.state));
+    } else {
+        problems.push(...state.problems);
+    }
     return {
         problems,
         meta: selected.meta,
@@ -1503,8 +1555,7 @@ export function buildJudgePacketForSlot(
     ) {
         return { ok: false, problems: [`slot ${slotId} has no docs case`] };
     }
-    const built = buildPacket({ root, slot, testCase });
-    return { ok: true, ...built };
+    return buildPacket({ root, slot, testCase });
 }
 
 /** Settle a slot that already has a selection or a usable judgement. */
@@ -1563,6 +1614,11 @@ function buildReady(options: {
         };
     }
     const built = buildPacket(options);
+    if (!built.ok) {
+        return {
+            problem: `judge packet for ${options.slot.slotId} is unavailable: ${built.problems.join("; ")}`,
+        };
+    }
     const leaks = labelLeaks(built.packet);
     return leaks.length > 0 || built.packet.includes(options.root)
         ? {
