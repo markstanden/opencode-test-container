@@ -1052,6 +1052,7 @@ async function s10(): Promise<string> {
             () => {
                 const left = run("podman", [
                     "ps",
+                    "-a",
                     "--filter",
                     "label=otc.campaign=otc-smoke",
                     "--format",
@@ -1194,6 +1195,21 @@ try {
     // Only this suite's own control containers are ever removed.
     for (const name of ownedContainers) {
         run("podman", ["rm", "-f", name]);
+    }
+    // Remove any trial/judge container this suite's campaign owns, by
+    // ownership labels only: never enumerate or touch unrelated containers.
+    const owned = run("podman", [
+        "ps",
+        "-a",
+        "--filter",
+        "label=otc.owner=otc",
+        "--filter",
+        "label=otc.campaign=otc-smoke",
+        "--format",
+        "{{.Names}}",
+    ]);
+    for (const name of owned.stdout.split("\n").map((line) => line.trim())) {
+        if (name !== "") run("podman", ["rm", "-f", name]);
     }
     receipt.cases = results;
     receipt.finishedAt = new Date().toISOString();

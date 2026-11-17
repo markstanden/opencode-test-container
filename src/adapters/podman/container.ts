@@ -169,7 +169,10 @@ export async function runContainer(
     // an unrelated container is never enumerated or touched.
     if (
         plan.name !== undefined &&
-        (result.timedOut || result.error !== null || result.signal !== null)
+        (result.timedOut ||
+            result.error !== null ||
+            result.signal !== null ||
+            result.status !== 0)
     ) {
         await cleanupContainer(plan.name, run);
     }
