@@ -328,10 +328,7 @@ console.log(JSON.stringify(result));
         // Assert
         assert.equal(assessed.ok, true, assessed.problems.join("; "));
         assert.equal(stored.validity, "invalid");
-        assert.match(
-            (stored.reasons as string[]).join("; "),
-            /unsafe object/,
-        );
+        assert.match((stored.reasons as string[]).join("; "), /unsafe object/);
     });
 
     it("blocks status when a workspace entry becomes unsafe after assessment", async () => {
