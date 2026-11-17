@@ -209,8 +209,22 @@ async function testCase(
     body: () => Promise<string>,
 ): Promise<void> {
     if (wanted !== undefined && !wanted.includes(id)) return;
+    console.log(`START ${id}`);
     try {
-        record(id, name, true, await body());
+        record(
+            id,
+            name,
+            true,
+            await Promise.race([
+                body(),
+                new Promise<string>((_, reject) =>
+                    setTimeout(
+                        () => reject(new Error("case exceeded its 180s bound")),
+                        180_000,
+                    ),
+                ),
+            ]),
+        );
     } catch (error) {
         record(
             id,
