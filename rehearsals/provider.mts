@@ -316,7 +316,17 @@ export async function startProvider(
                 .length,
         close: () =>
             new Promise<void>((resolve) => {
-                server.close(() => resolve());
+                let settled = false;
+                const finish = (): void => {
+                    if (settled) return;
+                    settled = true;
+                    resolve();
+                };
+                const timer = setTimeout(finish, 2_000);
+                server.close(() => {
+                    clearTimeout(timer);
+                    finish();
+                });
                 server.closeAllConnections();
             }),
     };

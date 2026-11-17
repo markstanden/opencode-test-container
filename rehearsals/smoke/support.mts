@@ -248,8 +248,18 @@ export async function heldPort(): Promise<{
         port,
         close: () =>
             new Promise((done) => {
+                let settled = false;
+                const finish = (): void => {
+                    if (settled) return;
+                    settled = true;
+                    done();
+                };
+                const timer = setTimeout(finish, 2_000);
                 for (const socket of sockets) socket.destroy();
-                server.close(() => done());
+                server.close(() => {
+                    clearTimeout(timer);
+                    finish();
+                });
             }),
     };
 }
