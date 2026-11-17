@@ -12,6 +12,7 @@ import type { Usage } from "../../adapters/opencode/events.ts";
 import { checkCapture } from "../../evidence/capture.ts";
 import {
     sourceIdentity,
+    unsafeIdentityFields,
     type SourceIdentity,
 } from "../../evidence/source-identity.ts";
 import { EVALUATOR_VERSION } from "../../contracts/version.ts";
@@ -697,14 +698,25 @@ export function assessDocsTrial(options: {
         testCase,
         workspace: options.workspace,
     });
-    if (context.integrity.length > 0) {
+    const evidenceProblems = [
+        ...(base.evidence.workspacePresent && !base.evidence.workspaceSafe
+            ? [
+                  "the evaluated workspace contains an unsafe object; integrity is unknown",
+              ]
+            : []),
+        ...unsafeIdentityFields(base.evidence).map(
+            (field) => `trial evidence contains an unsafe object: ${field}`,
+        ),
+    ];
+    const integrity = [...context.integrity, ...evidenceProblems];
+    if (integrity.length > 0) {
         return invalidDocs(
             responseArgs({
                 base,
                 counts: context.counts,
                 verification: context.verification,
                 primary,
-                reasons: context.integrity,
+                reasons: integrity,
                 trail: context.trail,
                 trialDir,
                 assessedAt: options.assessedAt,

@@ -5,6 +5,7 @@ import { loadPreparedManifest } from "./prepare.ts";
 import { deliveryCheck, loadFrozen } from "./freeze.ts";
 import { readLedger, trialStarts } from "./ledger.ts";
 import { checkedAssessments } from "../evidence/assessments.ts";
+import { admissionLockStatus } from "./admission.ts";
 import {
     checkedSelection,
     packetIntegrityProblems,
@@ -249,6 +250,25 @@ function nextActionsOf(options: {
     return actions;
 }
 
+/** Governance diagnostics: admission, policy and judgement state. */
+function governanceProblems(
+    root: string,
+    manifest: StatusManifest,
+    judgement: StatusReport["judgement"],
+): string[] {
+    const lock = admissionLockStatus(root);
+    const policy = policyOf(manifest);
+    return [
+        ...(lock.held
+            ? [
+                  `admission lock ${lock.path} is held${lock.pid === null ? "" : ` by pid ${lock.pid}`}; verify that process is gone before removing it`,
+              ]
+            : []),
+        ...(policy.ok ? [] : policy.problems),
+        ...(judgement?.problems ?? []),
+    ];
+}
+
 /** Whether an integrity problem makes the campaign unavailable for action. */
 function integrityBlocked(options: {
     ledger: ReturnType<typeof readLedger>;
@@ -410,14 +430,12 @@ export function statusOf(root: string): StatusReport {
     );
     const assessments = assessmentView(root, manifest, ledger);
     const frozen = frozenView(root);
-    const policy = policyOf(manifest);
     const judgement = judgementOf(root, manifest);
     const problems = [
         ...(ledger.state === "malformed" ? ledger.problems : []),
         ...assessments.problems,
         ...frozen.problems,
-        ...(policy.ok ? [] : policy.problems),
-        ...(judgement?.problems ?? []),
+        ...governanceProblems(root, manifest, judgement),
     ];
     const blocked = integrityBlocked({
         ledger,

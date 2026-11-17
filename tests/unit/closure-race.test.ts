@@ -18,6 +18,7 @@ import { freezeCampaign } from "../../src/campaign/freeze.ts";
 import { runCommand, type CommandResult } from "../../src/adapters/process.ts";
 import { readLedger } from "../../src/campaign/ledger.ts";
 import { closeCampaign } from "../../src/campaign/close.ts";
+import { admissionLockStatus } from "../../src/campaign/admission.ts";
 import { withAdmission } from "../../src/campaign/admission.ts";
 import { utimesSync } from "node:fs";
 
@@ -183,17 +184,14 @@ describe("closure and dispatch share one admission decision", () => {
 });
 
 describe("admission lock recovery", () => {
-    it("recovers a lock only when its recorded owner is gone", async () => {
+    it("fails closed on a stale lock and leaves it untouched", async () => {
         // Arrange
         const made = await root();
         const path = join(made.root, "evidence", "ADMISSION.lock");
         try {
             mkdirSync(join(made.root, "evidence"), { recursive: true });
-            writeFileSync(
-                path,
-                `${JSON.stringify({ pid: 999_999, token: "dead" })}\n`,
-                "utf8",
-            );
+            const token = `${JSON.stringify({ pid: 999_999, token: "dead" })}\n`;
+            writeFileSync(path, token, "utf8");
             const old = new Date(Date.now() - 60_000);
             utimesSync(path, old, old);
 
@@ -201,7 +199,94 @@ describe("admission lock recovery", () => {
             const entered = withAdmission(made.root, () => "entered");
 
             // Assert
-            assert.deepEqual(entered, { ok: true, value: "entered" });
+            assert.equal(entered.ok, false);
+            assert.match(
+                entered.ok ? "" : entered.problem,
+                /verify that process is gone/,
+            );
+            assert.equal(admissionLockStatus(made.root).held, true);
+            assert.equal(readFileSync(path, "utf8"), token);
+        } finally {
+            rmSync(made.dir, { recursive: true, force: true });
+        }
+    });
+
+    it("never deletes a live replacement lock", async () => {
+        // Arrange
+        const made = await root();
+        const path = join(made.root, "evidence", "ADMISSION.lock");
+        try {
+            mkdirSync(join(made.root, "evidence"), { recursive: true });
+            const live = `${JSON.stringify({
+                pid: process.pid,
+                token: "live-owner",
+            })}\n`;
+            writeFileSync(path, live, "utf8");
+
+            // Act
+            const entered = withAdmission(made.root, () => "entered");
+
+            // Assert
+            assert.equal(entered.ok, false);
+            assert.equal(readFileSync(path, "utf8"), live);
+        } finally {
+            rmSync(made.dir, { recursive: true, force: true });
+        }
+    });
+
+    it("lets two recoverers contend without either entering", async () => {
+        // Arrange
+        const made = await root();
+        const path = join(made.root, "evidence", "ADMISSION.lock");
+        try {
+            mkdirSync(join(made.root, "evidence"), { recursive: true });
+            const stale = `${JSON.stringify({ pid: 999_999, token: "stale" })}\n`;
+            writeFileSync(path, stale, "utf8");
+            const old = new Date(Date.now() - 60_000);
+            utimesSync(path, old, old);
+            const script = join(made.dir, "admit.mjs");
+            const admissions = pathToFileURL(
+                join(HERE, "..", "..", "src", "campaign", "admission.ts"),
+            ).href;
+            writeFileSync(
+                script,
+                `import { appendFileSync, existsSync } from "node:fs";
+import { withAdmission } from ${JSON.stringify(admissions)};
+const [root, start, log] = process.argv.slice(2);
+while (!existsSync(start)) await new Promise((again) => setTimeout(again, 5));
+const entered = withAdmission(root, () => "entered");
+if (entered.ok) appendFileSync(log, "ENTERED\\n");
+`,
+                "utf8",
+            );
+            const start = join(made.dir, "start");
+            const log = join(made.dir, "entered.log");
+            writeFileSync(log, "", "utf8");
+            const contender = () =>
+                new Promise<void>((done, fail) => {
+                    const process = spawn(
+                        globalThis.process.execPath,
+                        [script, made.root, start, log],
+                        { stdio: ["ignore", "pipe", "pipe"] },
+                    );
+                    let stderr = "";
+                    process.stderr.on("data", (chunk: Buffer) => {
+                        stderr += String(chunk);
+                    });
+                    process.on("error", fail);
+                    process.on("close", (code) =>
+                        code === 0 ? done() : fail(new Error(stderr)),
+                    );
+                });
+            const both = [contender(), contender()];
+
+            // Act
+            writeFileSync(start, "go\n", "utf8");
+            await Promise.all(both);
+
+            // Assert
+            assert.equal(readFileSync(log, "utf8"), "");
+            assert.equal(readFileSync(path, "utf8"), stale);
         } finally {
             rmSync(made.dir, { recursive: true, force: true });
         }

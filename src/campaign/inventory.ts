@@ -1,8 +1,12 @@
 import { createHash } from "node:crypto";
 import {
+    closeSync,
+    constants,
     existsSync,
+    fstatSync,
     lstatSync,
     mkdirSync,
+    openSync,
     readFileSync,
     readdirSync,
     readlinkSync,
@@ -66,9 +70,74 @@ export function containedRealPath(
     return { ok: true, path: realCandidate };
 }
 
-/** The SHA-256 of one file's exact bytes. */
+/**
+ * The SHA-256 of one regular file's exact bytes. The open is non-blocking and
+ * no-follow, and the descriptor is checked before reading, so a FIFO or a
+ * replacement object is refused instead of hanging or reading unexpectedly.
+ * @param path The file path.
+ * @returns The lower-case hex digest.
+ */
 export function fileSha256(path: string): string {
-    return createHash("sha256").update(readFileSync(path)).digest("hex");
+    let fd: number | null = null;
+    try {
+        fd = openSync(
+            path,
+            constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+        );
+        if (!fstatSync(fd).isFile()) {
+            throw new Error(`${path} is not a regular file`);
+        }
+        return createHash("sha256").update(readFileSync(fd)).digest("hex");
+    } finally {
+        if (fd !== null) closeSync(fd);
+    }
+}
+
+/** Inventory one contained symlink, or the controlled refusal. */
+function symlinkEntry(
+    realRoot: string,
+    root: string,
+    path: string,
+): { ok: true; entry: InventoryEntry } | { ok: false; problem: string } {
+    const target = readlinkSync(path);
+    const resolved = resolve(dirname(path), target);
+    if (!isContained(realRoot, resolved)) {
+        return { ok: false, problem: `${path} symlink escapes ${root}` };
+    }
+    let real: string;
+    try {
+        real = realpathSync(path);
+    } catch {
+        return {
+            ok: false,
+            problem: `${path} is a dangling or unreadable symlink`,
+        };
+    }
+    if (!isContained(realRoot, real)) {
+        return { ok: false, problem: `${path} resolves outside ${root}` };
+    }
+    if (!lstatSync(real).isFile()) {
+        return {
+            ok: false,
+            problem: `${path} resolves to a non-regular file`,
+        };
+    }
+    try {
+        return {
+            ok: true,
+            entry: {
+                path: relative(realRoot, path).split(sep).join("/"),
+                sha256: fileSha256(real),
+                kind: "symlink",
+                link: target,
+            },
+        };
+    } catch (error) {
+        return {
+            ok: false,
+            problem: `${path}: ${error instanceof Error ? error.message : String(error)}`,
+        };
+    }
 }
 
 /**
@@ -92,26 +161,9 @@ export function inventory(
             const path = join(directory, entry.name);
             const stat = lstatSync(path);
             if (stat.isSymbolicLink()) {
-                const target = readlinkSync(path);
-                const resolved = resolve(dirname(path), target);
-                if (!isContained(realRoot, resolved)) {
-                    return `${path} symlink escapes ${root}`;
-                }
-                let real: string;
-                try {
-                    real = realpathSync(path);
-                } catch {
-                    return `${path} is a dangling or unreadable symlink`;
-                }
-                if (!isContained(realRoot, real)) {
-                    return `${path} resolves outside ${root}`;
-                }
-                entries.push({
-                    path: relative(realRoot, path).split(sep).join("/"),
-                    sha256: fileSha256(real),
-                    kind: "symlink",
-                    link: target,
-                });
+                const linked = symlinkEntry(realRoot, root, path);
+                if (!linked.ok) return linked.problem;
+                entries.push(linked.entry);
                 continue;
             }
             if (stat.isDirectory()) {
@@ -122,9 +174,15 @@ export function inventory(
             if (!stat.isFile()) {
                 return `${path} is not a regular file`;
             }
+            let digest: string;
+            try {
+                digest = fileSha256(path);
+            } catch (error) {
+                return `${path}: ${error instanceof Error ? error.message : String(error)}`;
+            }
             entries.push({
                 path: relative(realRoot, path).split(sep).join("/"),
-                sha256: fileSha256(path),
+                sha256: digest,
                 kind: "file",
             });
         }

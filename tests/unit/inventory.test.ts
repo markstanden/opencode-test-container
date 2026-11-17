@@ -131,6 +131,48 @@ describe("inventory identity", () => {
         }
     });
 
+    it("refuses a symlink to a FIFO without blocking", () => {
+        // Arrange
+        const root = tree();
+        try {
+            assert.equal(spawnSync("mkfifo", [join(root, "z-pipe")]).status, 0);
+            symlinkSync("z-pipe", join(root, "a-link"));
+
+            // Act
+            const observed = inventory(root);
+
+            // Assert
+            assert.equal(observed.ok, false);
+            assert.match(
+                observed.ok ? "" : observed.problem,
+                /non-regular file/,
+            );
+        } finally {
+            rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    it("refuses a symlink to a directory as a controlled problem", () => {
+        // Arrange
+        const root = tree();
+        try {
+            mkdirSync(join(root, "z-dir"));
+            symlinkSync("z-dir", join(root, "a-link"));
+
+            // Act
+            const observed = inventory(root);
+
+            // Assert
+            assert.equal(observed.ok, false);
+            assert.match(
+                observed.ok ? "" : observed.problem,
+                /non-regular file/,
+            );
+        } finally {
+            rmSync(root, { recursive: true, force: true });
+        }
+    });
+
     it("refuses a symlinked directory rather than walking it", () => {
         // Arrange
         const root = tree();

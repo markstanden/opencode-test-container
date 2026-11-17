@@ -7,11 +7,10 @@
  * Hashes are of raw files; the workspace is a sorted path/kind/link/content
  * identity so a retargeted link differs even when its bytes match.
  */
-import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { sha256Of } from "../contracts/canonical.ts";
-import { inventory } from "../campaign/inventory.ts";
+import { fileSha256, inventory } from "../campaign/inventory.ts";
 
 /** Hashes of the trial evidence an assessment is bound to. */
 export interface SourceIdentity {
@@ -31,26 +30,38 @@ export interface SourceIdentity {
     journalKeySha256: string | null;
     /** Sorted workspace identity, or null when absent or unsafe. */
     workspaceSha256: string | null;
+    /** Whether the evaluated workspace existed. */
+    workspacePresent: boolean;
     /** Whether the evaluated workspace was safe to inventory. */
     workspaceSafe: boolean;
 }
 
-/** Hash one file's bytes, or null when it is absent. */
+/**
+ * Hash one artifact safely. Missing is null; an unsafe object (FIFO, directory
+ * or race replacement) is the explicit marker "unsafe", never a hang.
+ */
 function hashFile(path: string): string | null {
     if (!existsSync(path)) return null;
-    return createHash("sha256").update(readFileSync(path)).digest("hex");
+    try {
+        return fileSha256(path);
+    } catch {
+        return "unsafe";
+    }
 }
 
 /** The workspace identity: path, kind, link target and content bytes. */
 function workspaceIdentity(workspace: string): {
     sha256: string | null;
+    present: boolean;
     safe: boolean;
 } {
-    if (!existsSync(workspace)) return { sha256: null, safe: false };
+    if (!existsSync(workspace)) {
+        return { sha256: null, present: false, safe: false };
+    }
     const observed = inventory(workspace);
     return observed.ok
-        ? { sha256: sha256Of(observed.entries), safe: true }
-        : { sha256: null, safe: false };
+        ? { sha256: sha256Of(observed.entries), present: true, safe: true }
+        : { sha256: null, present: true, safe: false };
 }
 
 /**
@@ -71,8 +82,20 @@ export function sourceIdentity(trialDir: string): SourceIdentity {
         ),
         journalKeySha256: hashFile(join(trialDir, "journal-key.txt")),
         workspaceSha256: workspace.sha256,
+        workspacePresent: workspace.present,
         workspaceSafe: workspace.safe,
     };
+}
+
+/**
+ * Artifact fields that are present but unsafe to hash.
+ * @param identity The observed identity.
+ * @returns Field names carrying the "unsafe" marker.
+ */
+export function unsafeIdentityFields(identity: SourceIdentity): string[] {
+    return (Object.keys(identity) as Array<keyof SourceIdentity>).filter(
+        (field) => identity[field] === "unsafe",
+    );
 }
 
 /**

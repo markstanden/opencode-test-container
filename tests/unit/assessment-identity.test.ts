@@ -1,7 +1,7 @@
 import { after, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
     cpSync,
     existsSync,
@@ -10,6 +10,7 @@ import {
     readFileSync,
     readdirSync,
     rmSync,
+    symlinkSync,
     writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -284,6 +285,53 @@ console.log(JSON.stringify(result));
         }
         assert.equal(assessmentEvents(root, "s1").length, 1);
         assert.equal(existsSync(assessmentPath(root, "s1")), true);
+    });
+
+    it("assesses an unsafe workspace entry as invalid without hanging", async () => {
+        // Arrange
+        const root = await rootOf();
+        await run(root, ["s1"]);
+        const workspace = join(trialDirectory(root, "s1"), "workspace");
+        assert.equal(
+            spawnSync("mkfifo", [join(workspace, "z-pipe")]).status,
+            0,
+        );
+        symlinkSync("z-pipe", join(workspace, "a-link"));
+
+        // Act
+        const assessed = assessCampaign(root, {
+            now: () => "2026-11-17T00:00:00.000Z",
+        });
+        const stored = record(root, "s1");
+
+        // Assert
+        assert.equal(assessed.ok, true, assessed.problems.join("; "));
+        assert.equal(stored.validity, "invalid");
+        assert.equal(stored.outcome, "unknown");
+        assert.match((stored.reasons as string[]).join("; "), /unsafe object/);
+    });
+
+    it("blocks status when a workspace entry becomes unsafe after assessment", async () => {
+        // Arrange
+        const root = await rootOf();
+        await run(root, ["s1"]);
+        assessCampaign(root, { now: () => "2026-11-17T00:00:00.000Z" });
+        const workspace = join(trialDirectory(root, "s1"), "workspace");
+        assert.equal(
+            spawnSync("mkfifo", [join(workspace, "z-pipe")]).status,
+            0,
+        );
+        symlinkSync("z-pipe", join(workspace, "a-link"));
+
+        // Act
+        const status = statusOf(root);
+
+        // Assert
+        assert.equal(status.state, "blocked");
+        assert.match(
+            status.problems.join("; "),
+            /workspace(Safe|Sha256) changed/,
+        );
     });
 
     it("refuses a changed assessment when the evidence changed", async () => {

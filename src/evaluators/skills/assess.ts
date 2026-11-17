@@ -10,6 +10,7 @@ import {
 import { checkCapture } from "../../evidence/capture.ts";
 import {
     sourceIdentity,
+    unsafeIdentityFields,
     type SourceIdentity,
 } from "../../evidence/source-identity.ts";
 import { EVALUATOR_VERSION } from "../../contracts/version.ts";
@@ -165,6 +166,18 @@ function unrunAssessment(
     };
 }
 
+/** Reasons an unsafe evaluated workspace makes integrity unknown. */
+function unsafeWorkspaceReasons(evidence: {
+    workspacePresent: boolean;
+    workspaceSafe: boolean;
+}): string[] {
+    return evidence.workspacePresent && !evidence.workspaceSafe
+        ? [
+              "the evaluated workspace contains an unsafe object; integrity is unknown",
+          ]
+        : [];
+}
+
 /** The observed state independent of expectation. */
 function observationOf(counts: SkillCounts): SkillObservation {
     if (counts.successfulTarget > 0) return "target-activation";
@@ -240,6 +253,28 @@ export function assessSkillTrial(options: {
     const counts = countsOf(calls, testCase.targetSkillId);
     const routes = bodyRoutes(trail, testCase.targetSkillId);
     const contamination = routes.length > 0;
+    const unsafeFields = unsafeIdentityFields(base.evidence);
+    const unsafeReasons = [
+        ...unsafeWorkspaceReasons(base.evidence),
+        ...unsafeFields.map(
+            (field) => `trial evidence contains an unsafe object: ${field}`,
+        ),
+    ];
+    if (unsafeReasons.length > 0) {
+        return {
+            ...base,
+            validity: "invalid",
+            observed: "unrun",
+            outcome: "unknown",
+            counts,
+            bodyRoutes: routes,
+            contaminated: contamination,
+            reasons: unsafeReasons,
+            usage: readUsage(join(trialDir, "usage.json")),
+            answered: trail.text.trim() !== "",
+            assessedAt: options.assessedAt,
+        };
+    }
     if (capture.state === "invalid") {
         return {
             ...base,

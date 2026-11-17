@@ -389,15 +389,8 @@ function assessSlot(options: {
     now: () => string;
 }): SlotAssessment {
     const { root, manifest, slot, now } = options;
-    const assessment = assessmentForSlot(root, manifest, slot, now);
-    if (assessment === null) {
-        return {
-            assessment: null,
-            problems: [`slot ${slot.slotId} has no case ${slot.caseId}`],
-            skipped: null,
-        };
-    }
     const trialDir = trialDirectory(root, slot.slotId);
+    // Decide terminality before evaluating or reading the workspace at all.
     const claim = readClaims(join(root, "evidence"), "trial").find(
         (entry) => entry.stamp === slot.slotId,
     );
@@ -406,6 +399,14 @@ function assessSlot(options: {
             assessment: null,
             problems: [],
             skipped: `slot ${slot.slotId} trial attempt is not terminal (${claim.state}); no assessment written`,
+        };
+    }
+    const assessment = assessmentForSlot(root, manifest, slot, now);
+    if (assessment === null) {
+        return {
+            assessment: null,
+            problems: [`slot ${slot.slotId} has no case ${slot.caseId}`],
+            skipped: null,
         };
     }
     if (assessment.validity === "unrun") {

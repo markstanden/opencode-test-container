@@ -8,9 +8,11 @@
  * wins, the other observes its result. The lock is never held across a running
  * container.
  *
- * A crashed holder is recoverable only when its recorded process is gone and
- * the lock is old; a live holder is waited for, then refused. A lock is never
- * deleted merely because it is old.
+ * A lock is never deleted by another process. A live holder is waited for and
+ * then refused; a stale lock after a hard crash also fails closed until an
+ * operator verifies the owner is gone and removes that exact path. This is
+ * deliberately conservative: automatic stale recovery has a check-then-unlink
+ * race that can admit two owners.
  */
 import {
     closeSync,
@@ -18,7 +20,6 @@ import {
     mkdirSync,
     openSync,
     readFileSync,
-    statSync,
     unlinkSync,
     writeFileSync,
 } from "node:fs";
@@ -29,16 +30,6 @@ import { sleepSync } from "../contracts/sleep.ts";
 /** A completed critical section, or the refusal. */
 export type AdmissionResult<T> =
     { ok: true; value: T } | { ok: false; problem: string };
-
-/** Whether a recorded pid still exists. */
-function alive(pid: number): boolean {
-    try {
-        process.kill(pid, 0);
-        return true;
-    } catch {
-        return false;
-    }
-}
 
 /** Read one lock's pid, or null when unusable. */
 function lockPid(path: string): number | null {
@@ -55,17 +46,24 @@ function lockPid(path: string): number | null {
     }
 }
 
-/** Remove a lock only when its owner is provably gone and it is not fresh. */
-function recoverStale(path: string): boolean {
-    const pid = lockPid(path);
-    if (pid === null || alive(pid)) return false;
-    try {
-        if (Date.now() - statSync(path).mtimeMs < 1_000) return false;
-        unlinkSync(path);
-        return true;
-    } catch {
-        return false;
-    }
+/** The current admission lock, for diagnostics and controlled recovery. */
+export interface AdmissionLockStatus {
+    /** The lock path. */
+    path: string;
+    /** Whether a lock file exists. */
+    held: boolean;
+    /** The recorded owner pid, when readable. */
+    pid: number | null;
+}
+
+/**
+ * Read the admission lock without touching it.
+ * @param root The campaign root.
+ * @returns The lock status.
+ */
+export function admissionLockStatus(root: string): AdmissionLockStatus {
+    const path = join(root, "evidence", "ADMISSION.lock");
+    return { path, held: existsSync(path), pid: lockPid(path) };
 }
 
 /**
@@ -103,14 +101,14 @@ export function withAdmission<T>(
                     problem: `admission lock failed: ${error instanceof Error ? error.message : String(error)}`,
                 };
             }
-            if (recoverStale(path)) continue;
             sleepSync(10);
         }
     }
     if (!owned) {
+        const pid = lockPid(path);
         return {
             ok: false,
-            problem: "admission is held by another process; retry shortly",
+            problem: `admission lock ${path} is held${pid === null ? "" : ` by pid ${pid}`}; verify that process is gone and remove the lock deliberately`,
         };
     }
     try {
@@ -124,8 +122,8 @@ export function withAdmission<T>(
                 unlinkSync(path);
             }
         } catch {
-            // The lock is advisory; a failed release is surfaced by the next
-            // holder's stale check, never by deleting someone else's lock.
+            // Only our own token is removed. A failed release is surfaced by
+            // the next holder's refusal, never by deleting someone else's lock.
         }
     }
 }

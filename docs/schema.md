@@ -97,9 +97,13 @@ re-reads the ledger/claims and appends the close event inside the same section.
 Whichever wins, the other observes it: a post-close dispatch cannot start, and
 a close cannot slip between a dispatch's state check and its claim. The lock is
 held only for the short decision/publication window, never across a running
-container. A lock is recovered only when its recorded process is gone and the
-lock is old; a live holder is waited for and then refused. A second
-unprotected state check is never the authority.
+container. A lock is **never** deleted by another process. A live holder is waited for and
+then refused; a stale lock after a hard crash also fails closed until an
+operator verifies the recorded owner is gone and removes that exact path.
+Automatic stale recovery has a check-then-unlink race that can admit two
+owners, so it is not offered. `admissionLockStatus` and `otc status` report a
+held lock and its recorded pid. A second unprotected state check is never the
+authority.
 
 ## Lifecycle and reservations
 

@@ -122,14 +122,15 @@ function evidenceProblems(value: unknown): string[] {
         "journalSha256",
         "journalKeySha256",
         "workspaceSha256",
+        "workspacePresent",
         "workspaceSafe",
     ];
     const problems: string[] = [];
     for (const field of fields) {
         const entry = value[field];
-        if (field === "workspaceSafe") {
+        if (field === "workspaceSafe" || field === "workspacePresent") {
             if (typeof entry !== "boolean") {
-                problems.push("evidence.workspaceSafe must be a boolean");
+                problems.push(`evidence.${field} must be a boolean`);
             }
         } else if (entry !== null && typeof entry !== "string") {
             problems.push(`evidence.${field} must be a string or null`);
