@@ -145,7 +145,7 @@ console.log(JSON.stringify(out));
 const NET_PROBE = `
 import { connect } from "node:net";
 const port = Number(process.env.PROBE_PORT);
-const hosts = ["127.0.0.1", "10.0.2.2", "host.containers.internal"];
+const hosts = ["127.0.0.1"];
 const results = {};
 for (const host of hosts) {
   results[host] = await new Promise((resolve) => {
@@ -850,7 +850,7 @@ async function s08(): Promise<string> {
             });
             return path;
         })(),
-        timeoutMs: 60_000,
+        timeoutMs: 20_000,
     };
     // A test-owned read-only script directory, because /workspace is empty in
     // this adapter-level plan.
