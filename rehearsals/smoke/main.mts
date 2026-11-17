@@ -1218,7 +1218,22 @@ try {
     const receiptPath = join(work, "receipt.json");
     writeFileSync(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`, "utf8");
     console.log(`receipt: ${receiptPath}`);
-    if (!retain) remove(work);
+    if (!retain) {
+        // Successful transient state is removed best-effort. Rootless Podman
+        // may leave uid-mapped files the host user cannot unlink directly;
+        // removing our own path inside the user namespace is scoped and
+        // never touches unrelated storage.
+        try {
+            remove(work);
+        } catch {
+            const cleaned = run("podman", ["unshare", "rm", "-rf", work]);
+            if (cleaned.status !== 0) {
+                console.warn(
+                    `smoke: left ${work} for inspection (${cleaned.stderr.trim() || "cleanup refused"})`,
+                );
+            }
+        }
+    }
     const failed = results.filter((result) => !result.ok);
     console.log(
         `smoke: ${results.length - failed.length}/${results.length} case(s) passed; ${providerUsed} scripted inference request(s); image ${imageId}`,
