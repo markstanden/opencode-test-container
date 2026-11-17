@@ -121,12 +121,14 @@ function container(options: {
             };
         }
         const title = flagValue(plan, "--title");
-        if (title.startsWith("otc-judge-")) {
-            const slotId = title
-                .slice("otc-judge-".length)
-                .replace(/-attempt-\d{3}$/, "");
-            const attemptId =
-                /attempt-\d{3}$/.exec(title)?.[0] ?? "attempt-001";
+        if (plan.mounts.some((mount) => mount.target === "/judge/packet.md")) {
+            const slotId = plan.labels?.["otc.slot"] ?? "";
+            const attemptId = plan.labels?.["otc.attempt"] ?? "attempt-001";
+            assert.equal(
+                title.includes(slotId),
+                false,
+                "the judge session title exposes the slot id",
+            );
             options.record?.push(`${slotId}/${attemptId}`);
             const response =
                 options.judgeResponses?.(slotId, attemptId) ??

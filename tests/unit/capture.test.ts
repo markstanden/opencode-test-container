@@ -8,7 +8,10 @@ import { decodeTrail } from "../../src/adapters/opencode/events.ts";
 import { sha256Bytes } from "../../src/contracts/canonical.ts";
 import { assessSkillTrial } from "../../src/evaluators/skills/assess.ts";
 import { assessDocsTrial } from "../../src/evaluators/docs/assess.ts";
-import type { DocsTaskCase, SkillTriggerCase } from "../../src/contracts/types.ts";
+import type {
+    DocsTaskCase,
+    SkillTriggerCase,
+} from "../../src/contracts/types.ts";
 
 /** One completed answer event. */
 function textEvent(text: string): string {
@@ -77,7 +80,8 @@ describe("checked capture", () => {
         dirs.push(dir);
         return checkCapture(dir, { campaignId: "campaign", slotId: "slot" });
     };
-    const clean = (dir: string) => rmSync(dir, { recursive: true, force: true });
+    const clean = (dir: string) =>
+        rmSync(dir, { recursive: true, force: true });
 
     it("accepts a valid zero-tool-call completion", () => {
         // Arrange
@@ -137,7 +141,10 @@ describe("checked capture", () => {
         });
 
         // Act / Assert
-        assert.match(checked(dir).problems.join("; "), /did not end on an answer/);
+        assert.match(
+            checked(dir).problems.join("; "),
+            /did not end on an answer/,
+        );
     });
 
     it("rejects a false validity flag even when its problem list is empty", () => {
@@ -166,7 +173,10 @@ describe("checked capture", () => {
 
         // Assert
         assert.equal(capture.state, "invalid");
-        assert.match(capture.problems.join("; "), /does not describe|not readable/);
+        assert.match(
+            capture.problems.join("; "),
+            /does not describe|not readable/,
+        );
     });
 
     it("rejects non-zero exit, timeout and overflow even with readable text", () => {
@@ -188,8 +198,14 @@ describe("checked capture", () => {
         const noAnswer = trial({ answer: null });
 
         // Act / Assert
-        assert.match(checked(noEvents).problems.join("; "), /event stream is missing/);
-        assert.match(checked(noAnswer).problems.join("; "), /answer record is missing/);
+        assert.match(
+            checked(noEvents).problems.join("; "),
+            /event stream is missing/,
+        );
+        assert.match(
+            checked(noAnswer).problems.join("; "),
+            /answer record is missing/,
+        );
     });
 
     it("rejects an answer that does not match the raw capture", () => {
@@ -240,7 +256,8 @@ describe("checked capture", () => {
         // Assert
         assert.equal(skills.validity, "invalid");
         assert.equal(docs.validity, "invalid");
-        const captureReason = "metadata declared an invalid capture without a reason";
+        const captureReason =
+            "metadata declared an invalid capture without a reason";
         assert.ok(skills.reasons.includes(captureReason));
         assert.ok(docs.reasons.includes(captureReason));
     });

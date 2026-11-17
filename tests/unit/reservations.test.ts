@@ -73,8 +73,15 @@ async function root(budget = 3): Promise<{ dir: string; root: string }> {
     writeFileSync(campaignPath, `${JSON.stringify(campaign, null, 2)}\n`);
     const rootPath = join(dir, "root");
     const prepared = prepareCampaign(campaignPath, rootPath);
-    assert.equal(prepared.ok, true, prepared.ok ? "" : prepared.problems.join("; "));
-    const frozen = await freezeCampaign(rootPath, fakeImage as typeof runCommand);
+    assert.equal(
+        prepared.ok,
+        true,
+        prepared.ok ? "" : prepared.problems.join("; "),
+    );
+    const frozen = await freezeCampaign(
+        rootPath,
+        fakeImage as typeof runCommand,
+    );
     assert.equal(frozen.ok, true, frozen.ok ? "" : frozen.problems.join("; "));
     return { dir, root: rootPath };
 }
@@ -152,7 +159,10 @@ async function race(
                     { cwd: dir, stdio: ["ignore", "pipe", "pipe"] },
                 );
                 let stderr = "";
-                child.stderr.on("data", (chunk: Buffer) => (stderr += String(chunk)));
+                child.stderr.on(
+                    "data",
+                    (chunk: Buffer) => (stderr += String(chunk)),
+                );
                 child.on("error", fail);
                 child.on("close", (code) =>
                     code === 0 ? done(stderr) : fail(new Error(stderr)),
@@ -199,10 +209,16 @@ describe("durable trial reservations", () => {
         // Assert
         assert.equal(raced.dispatches, 1);
         assert.equal(
-            raced.results.filter((result) => Array.isArray(result.ran) && result.ran.length === 1).length,
+            raced.results.filter(
+                (result) =>
+                    Array.isArray(result.ran) && result.ran.length === 1,
+            ).length,
             1,
         );
-        assert.equal(readClaims(join(campaignRoot, "evidence"), "trial").length, 1);
+        assert.equal(
+            readClaims(join(campaignRoot, "evidence"), "trial").length,
+            1,
+        );
     });
 
     it("dispatches one contender for the same slot and leaves one terminal record", async () => {
@@ -221,7 +237,10 @@ describe("durable trial reservations", () => {
             .split("\n")
             .filter((line) => line.includes('"trial-end"'));
         assert.equal(terminals.length, 1);
-        assert.equal(existsSync(join(trialDirectory(campaignRoot, "s1"), "meta.json")), true);
+        assert.equal(
+            existsSync(join(trialDirectory(campaignRoot, "s1"), "meta.json")),
+            true,
+        );
     });
 
     it("spends at most the remaining allowances across three contenders", async () => {
@@ -238,12 +257,16 @@ describe("durable trial reservations", () => {
         const raced = await race(dir, campaignRoot, [["s2"], ["s3"], ["s2"]]);
 
         // Assert
-        assert.equal(raced.dispatches, 1, "one allowance remains, one dispatch");
-        assert.equal(readClaims(join(campaignRoot, "evidence"), "trial").length, 2);
         assert.equal(
-            (statusOf(campaignRoot).budgets?.remaining ?? -1),
-            0,
+            raced.dispatches,
+            1,
+            "one allowance remains, one dispatch",
         );
+        assert.equal(
+            readClaims(join(campaignRoot, "evidence"), "trial").length,
+            2,
+        );
+        assert.equal(statusOf(campaignRoot).budgets?.remaining ?? -1, 0);
     });
 
     it("does not block a separate campaign", async () => {
@@ -330,21 +353,30 @@ describe("durable trial reservations", () => {
             closed.ok ? "" : closed.problems.join("; "),
             /unresolved trial launch/,
         );
-        assert.equal(refunded, false, "a spawned claim is never silently refunded");
+        assert.equal(
+            refunded,
+            false,
+            "a spawned claim is never silently refunded",
+        );
         assert.equal(retry.ran.length, 0);
     });
 
     it("releases a claim when planning fails before dispatch", async () => {
         // Arrange
         const { root: campaignRoot } = await made(1);
-        rmSync(join(campaignRoot, "prepare", "prompts", "positive-instrument.txt"));
+        rmSync(
+            join(campaignRoot, "prepare", "prompts", "positive-instrument.txt"),
+        );
 
         // Act
         const summary = await runCampaign(campaignRoot, { slotIds: ["s1"] });
 
         // Assert
         assert.equal(summary.ok, false);
-        assert.equal(readClaims(join(campaignRoot, "evidence"), "trial").length, 0);
+        assert.equal(
+            readClaims(join(campaignRoot, "evidence"), "trial").length,
+            0,
+        );
     });
 
     it("refuses a new dispatch after closure, claiming nothing", async () => {
@@ -363,7 +395,11 @@ describe("durable trial reservations", () => {
             true,
         );
         const closed = closeCampaign(campaignRoot);
-        assert.equal(closed.ok, true, closed.ok ? "" : closed.problems.join("; "));
+        assert.equal(
+            closed.ok,
+            true,
+            closed.ok ? "" : closed.problems.join("; "),
+        );
 
         // Act
         const second = await runCampaign(campaignRoot, { slotIds: ["s2"] });
@@ -371,6 +407,9 @@ describe("durable trial reservations", () => {
         // Assert
         assert.equal(second.ran.length, 0);
         assert.match(second.problems.join("; "), /closed/);
-        assert.equal(readClaims(join(campaignRoot, "evidence"), "trial").length, 1);
+        assert.equal(
+            readClaims(join(campaignRoot, "evidence"), "trial").length,
+            1,
+        );
     });
 });

@@ -1,6 +1,6 @@
 import { appendLedgerEvent, readLedger, trialStarts } from "./ledger.ts";
 import { loadPreparedManifest, type PreparedManifest } from "./prepare.ts";
-import { loadFrozen } from "./freeze.ts";
+import { deliveryCheck, loadFrozen } from "./freeze.ts";
 import { checkedAssessments } from "../evidence/assessments.ts";
 import {
     checkedSelection,
@@ -14,7 +14,10 @@ import { join } from "node:path";
 /** Unsettled spend claims that must stop closure, or an empty list. */
 function unsettledClaims(root: string): string[] {
     return ["trial", "judge", "recovery"].flatMap((kind) =>
-        readClaims(join(root, "evidence"), kind as "trial" | "judge" | "recovery")
+        readClaims(
+            join(root, "evidence"),
+            kind as "trial" | "judge" | "recovery",
+        )
             .filter((claim) => claim.state !== "closed")
             .map(
                 (claim) =>
@@ -80,7 +83,10 @@ function closureRefusals(
     }
     const assessments = checkedAssessments({ root, manifest, ledger });
     if (assessments.problems.length > 0) {
-        return ["assessment evidence is not trustworthy", ...assessments.problems];
+        return [
+            "assessment evidence is not trustworthy",
+            ...assessments.problems,
+        ];
     }
     const assessed = new Set(
         assessments.records
@@ -126,6 +132,13 @@ export function closeCampaign(
     if (!prepared.ok) return { ok: false, problems: [prepared.problem] };
     const frozen = loadFrozen(root);
     if (!frozen.ok) return { ok: false, problems: [frozen.problem] };
+    const drift = deliveryCheck(root);
+    if (drift.length > 0) {
+        return {
+            ok: false,
+            problems: ["delivery check failed", ...drift],
+        };
+    }
     const ledger = readLedger(root);
     if (ledger.state === "malformed") {
         return { ok: false, problems: ledger.problems };

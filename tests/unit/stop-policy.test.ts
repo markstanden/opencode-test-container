@@ -1,6 +1,12 @@
 import { after, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+    cpSync,
+    mkdtempSync,
+    readFileSync,
+    rmSync,
+    writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -104,8 +110,15 @@ async function root(
     const made = fixture(source, patch);
     const rootPath = join(made.dir, "root");
     const prepared = prepareCampaign(made.campaignPath, rootPath);
-    assert.equal(prepared.ok, true, prepared.ok ? "" : prepared.problems.join("; "));
-    const frozen = await freezeCampaign(rootPath, fakeImage as typeof runCommand);
+    assert.equal(
+        prepared.ok,
+        true,
+        prepared.ok ? "" : prepared.problems.join("; "),
+    );
+    const frozen = await freezeCampaign(
+        rootPath,
+        fakeImage as typeof runCommand,
+    );
     assert.equal(frozen.ok, true, frozen.ok ? "" : frozen.problems.join("; "));
     return { dir: made.dir, root: rootPath };
 }
@@ -118,23 +131,43 @@ describe("stop-policy truth table", () => {
 
         // Act / Assert
         assert.equal(
-            runShouldStop(v2, { captureValid: false, exit: 0, primaryStatus: null }),
+            runShouldStop(v2, {
+                captureValid: false,
+                exit: 0,
+                primaryStatus: null,
+            }),
             true,
         );
         assert.equal(
-            runShouldStop(v2, { captureValid: true, exit: 1, primaryStatus: null }),
+            runShouldStop(v2, {
+                captureValid: true,
+                exit: 1,
+                primaryStatus: null,
+            }),
             true,
         );
         assert.equal(
-            runShouldStop(v2, { captureValid: true, exit: 0, primaryStatus: "fail" }),
+            runShouldStop(v2, {
+                captureValid: true,
+                exit: 0,
+                primaryStatus: "fail",
+            }),
             true,
         );
         assert.equal(
-            runShouldStop(v2, { captureValid: true, exit: 0, primaryStatus: "pass" }),
+            runShouldStop(v2, {
+                captureValid: true,
+                exit: 0,
+                primaryStatus: "pass",
+            }),
             false,
         );
         assert.equal(
-            runShouldStop(v1, { captureValid: true, exit: 0, primaryStatus: "fail" }),
+            runShouldStop(v1, {
+                captureValid: true,
+                exit: 0,
+                primaryStatus: "fail",
+            }),
             false,
             "version 1 ignores a primary-check outcome",
         );
@@ -195,7 +228,9 @@ describe("stop-policy execution", () => {
             campaign.stopOnFirstFailure = true;
         });
         dirs.push(stop.dir, legacy.dir);
-        const container = async (plan: ContainerPlan): Promise<CommandResult> => {
+        const container = async (
+            plan: ContainerPlan,
+        ): Promise<CommandResult> => {
             const failing = plan.argv[1]?.includes("fail.mjs") === true;
             return {
                 status: failing ? 3 : 0,
@@ -254,7 +289,9 @@ describe("stop-policy execution", () => {
                 );
                 const workspace = (mount as { source: string }).source;
                 const { mkdirSync } = await import("node:fs");
-                mkdirSync(join(workspace, "docs", "notes"), { recursive: true });
+                mkdirSync(join(workspace, "docs", "notes"), {
+                    recursive: true,
+                });
                 writeFileSync(
                     join(workspace, "docs", "notes", "otel.md"),
                     "# OpenTelemetry\n\nName spans after the operation.\n",
@@ -271,14 +308,15 @@ describe("stop-policy execution", () => {
             };
         };
         const judge = async (plan: ContainerPlan): Promise<CommandResult> => {
-            const title = plan.argv[plan.argv.indexOf("--title") + 1] ?? "";
-            const changed = title.includes("useful-write");
+            const changed = plan.labels?.["otc.slot"] === "useful-write";
             const value = {
                 documentationOutcome: changed ? "misleading" : "none",
                 documentationReason: changed
                     ? "The recorded note misstates the convention."
                     : "The change is not worth recording.",
-                evidence: [changed ? "The note is wrong." : "No document changed."],
+                evidence: [
+                    changed ? "The note is wrong." : "No document changed.",
+                ],
             };
             return {
                 status: 0,
@@ -291,8 +329,16 @@ describe("stop-policy execution", () => {
         };
 
         // Act
-        await runCampaign(stop.root, { slotIds: selection }, { runContainer: trial });
-        await runCampaign(legacy.root, { slotIds: selection }, { runContainer: trial });
+        await runCampaign(
+            stop.root,
+            { slotIds: selection },
+            { runContainer: trial },
+        );
+        await runCampaign(
+            legacy.root,
+            { slotIds: selection },
+            { runContainer: trial },
+        );
         const v2 = await judgeCampaign(
             stop.root,
             { slotIds: selection },
@@ -306,7 +352,11 @@ describe("stop-policy execution", () => {
 
         // Assert
         assert.deepEqual(v2.judged, ["useful-write"], v2.problems.join("; "));
-        assert.deepEqual(v1.judged, ["useful-write", "restraint"], v1.problems.join("; "));
+        assert.deepEqual(
+            v1.judged,
+            ["useful-write", "restraint"],
+            v1.problems.join("; "),
+        );
     });
 
     it("version 2 stops assessment after a deterministic fail; version 1 does not", async () => {
@@ -319,7 +369,9 @@ describe("stop-policy execution", () => {
             campaign.stopOnFirstFailure = true;
         });
         dirs.push(stop.dir, legacy.dir);
-        const silent = async (_plan: ContainerPlan): Promise<CommandResult> => ({
+        const silent = async (
+            _plan: ContainerPlan,
+        ): Promise<CommandResult> => ({
             status: 0,
             signal: null,
             stdout: `${textEvent("No activation.")}\n`,

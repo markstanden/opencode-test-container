@@ -28,11 +28,7 @@ import {
 
 /** The checked state of one slot's persisted assessment. */
 export type AssessmentRecordState =
-    | "valid"
-    | "missing"
-    | "corrupt"
-    | "unsupported"
-    | "conflicting";
+    "valid" | "missing" | "corrupt" | "unsupported" | "conflicting";
 
 /** One slot's checked assessment. */
 export interface CheckedAssessment {
@@ -137,37 +133,69 @@ function evidenceProblems(value: unknown): string[] {
     return problems;
 }
 
-/**
- * Structural and identity checks for one parsed assessment.
- * @param value The parsed JSON value.
- * @param slot The scheduled slot it claims.
- * @param manifest The prepared manifest.
- * @returns Problems; empty means the shape and identity are acceptable.
- */
-export function assessmentProblems(
-    value: unknown,
-    slot: Slot,
-    manifest: PreparedManifest,
-): string[] {
-    if (!isRecord(value)) return ["assessment is not an object"];
+/** Schema, kind, field and evidence-binding checks. */
+function schemaProblems(value: Record<string, unknown>): string[] {
     const problems: string[] = [];
     if (value.schemaVersion !== 1) {
-        return [`unsupported assessment schemaVersion ${String(value.schemaVersion)}`];
+        return [
+            `unsupported assessment schemaVersion ${String(value.schemaVersion)}`,
+        ];
     }
     if (value.kind !== "skill-activation" && value.kind !== "docs-recording") {
         problems.push("assessment kind is not recognised");
     }
     const allowed = new Set(COMMON_FIELDS);
-    for (const field of value.kind === "skill-activation"
-        ? SKILL_FIELDS
-        : DOCS_FIELDS) {
-        allowed.add(field);
-    }
+    const kindFields =
+        value.kind === "skill-activation" ? SKILL_FIELDS : DOCS_FIELDS;
+    for (const field of kindFields) allowed.add(field);
     problems.push(...unknownFields(value, allowed));
     if (typeof value.evaluatorVersion !== "number") {
         problems.push("assessment has no evaluator version");
     }
     problems.push(...evidenceProblems(value.evidence));
+    return problems;
+}
+
+/** Check the vocabulary and reason list. */
+function payloadVocabulary(value: Record<string, unknown>): string[] {
+    const problems: string[] = [];
+    if (typeof value.validity !== "string" || !VALIDITIES.has(value.validity)) {
+        problems.push("assessment validity is not recognised");
+    }
+    if (typeof value.outcome !== "string" || !OUTCOMES.has(value.outcome)) {
+        problems.push("assessment outcome is not recognised");
+    }
+    if (
+        !Array.isArray(value.reasons) ||
+        value.reasons.some((reason) => typeof reason !== "string")
+    ) {
+        problems.push("assessment reasons are not a string array");
+    }
+    return problems;
+}
+
+/** Shape checks for the result payload itself. */
+function payloadProblems(value: Record<string, unknown>): string[] {
+    const problems = payloadVocabulary(value);
+    if (typeof value.assessedAt !== "string" || value.assessedAt === "") {
+        problems.push("assessment has no assessedAt");
+    }
+    if (typeof value.answered !== "boolean") {
+        problems.push("assessment has no answered flag");
+    }
+    if (!isRecord(value.counts)) {
+        problems.push("assessment counts are not an object");
+    }
+    return problems;
+}
+
+/** Identity and kind checks against the scheduled slot. */
+function scheduledProblems(
+    value: Record<string, unknown>,
+    slot: Slot,
+    manifest: PreparedManifest,
+): string[] {
+    const problems: string[] = [];
     const expectedKind = manifest.campaign.assessment.kind;
     if (value.kind !== expectedKind) {
         problems.push(
@@ -184,31 +212,39 @@ export function assessmentProblems(
     ];
     for (const [field, saved, expected] of identity) {
         if (saved !== expected) {
-            problems.push(`assessment ${field} does not match the scheduled slot`);
+            problems.push(
+                `assessment ${field} does not match the scheduled slot`,
+            );
         }
     }
-    if (typeof value.validity !== "string" || !VALIDITIES.has(value.validity)) {
-        problems.push("assessment validity is not recognised");
-    }
-    if (typeof value.outcome !== "string" || !OUTCOMES.has(value.outcome)) {
-        problems.push("assessment outcome is not recognised");
-    }
-    if (
-        !Array.isArray(value.reasons) ||
-        value.reasons.some((reason) => typeof reason !== "string")
-    ) {
-        problems.push("assessment reasons are not a string array");
-    }
-    if (typeof value.assessedAt !== "string" || value.assessedAt === "") {
-        problems.push("assessment has no assessedAt");
-    }
-    if (typeof value.answered !== "boolean") {
-        problems.push("assessment has no answered flag");
-    }
-    if (!isRecord(value.counts)) {
-        problems.push("assessment counts are not an object");
-    }
     return problems;
+}
+
+/**
+ * Structural and identity checks for one parsed assessment.
+ * @param value The parsed JSON value.
+ * @param slot The scheduled slot it claims.
+ * @param manifest The prepared manifest.
+ * @returns Problems; empty means the shape and identity are acceptable.
+ */
+/**
+ * Structural and identity checks for one parsed assessment.
+ * @param value The parsed JSON value.
+ * @param slot The scheduled slot it claims.
+ * @param manifest The prepared manifest.
+ * @returns Problems; empty means the shape and identity are acceptable.
+ */
+export function assessmentProblems(
+    value: unknown,
+    slot: Slot,
+    manifest: PreparedManifest,
+): string[] {
+    if (!isRecord(value)) return ["assessment is not an object"];
+    return [
+        ...schemaProblems(value),
+        ...payloadProblems(value),
+        ...scheduledProblems(value, slot, manifest),
+    ];
 }
 
 /** Find the ledger's one binding for a slot's deterministic assessment. */
@@ -239,16 +275,24 @@ function ledgerBindingProblems(
     const problems: string[] = [];
     const expectedHash = sha256Of(record);
     if (event.assessmentSha256 !== expectedHash) {
-        problems.push(`assessment for ${slot.slotId} does not match its ledger hash`);
+        problems.push(
+            `assessment for ${slot.slotId} does not match its ledger hash`,
+        );
     }
     if (event.outcome !== record.outcome) {
-        problems.push(`assessment for ${slot.slotId} outcome differs from its ledger event`);
+        problems.push(
+            `assessment for ${slot.slotId} outcome differs from its ledger event`,
+        );
     }
     if (event.validity !== record.validity) {
-        problems.push(`assessment for ${slot.slotId} validity differs from its ledger event`);
+        problems.push(
+            `assessment for ${slot.slotId} validity differs from its ledger event`,
+        );
     }
     if (event.attemptId !== record.attemptId) {
-        problems.push(`assessment for ${slot.slotId} attempt differs from its ledger event`);
+        problems.push(
+            `assessment for ${slot.slotId} attempt differs from its ledger event`,
+        );
     }
     return problems;
 }
@@ -326,22 +370,25 @@ function checkSlot(options: {
 }
 
 /** Files in the assessment directory that do not belong to a scheduled slot. */
-function unexpectedFiles(
-    root: string,
-    slots: readonly Slot[],
-): string[] {
+function unexpectedFiles(root: string, slots: readonly Slot[]): string[] {
     const directory = join(root, "evidence", "assessments");
     if (!existsSync(directory)) return [];
     const expected = new Set(slots.map((slot) => `${slot.slotId}.json`));
     return readdirSync(directory)
         .filter((name) => !expected.has(name))
         .sort()
-        .map((name) => `unexpected assessment record evidence/assessments/${name}`);
+        .map(
+            (name) =>
+                `unexpected assessment record evidence/assessments/${name}`,
+        );
 }
 
 /**
  * Read every scheduled slot's assessment through the checked boundary.
  * @param options The campaign root, manifest and parsed ledger.
+ * @param options.root The campaign root.
+ * @param options.manifest The prepared manifest.
+ * @param options.ledger The parsed ledger.
  * @returns One checked record per slot, plus aggregate problems.
  */
 export function checkedAssessments(options: {

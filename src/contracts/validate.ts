@@ -777,6 +777,28 @@ function parseProvider(
     return { route, model, ...(overlay === undefined ? {} : { overlay }) };
 }
 
+/** Validate the optional passthrough environment names. */
+function passthroughEnvOf(
+    value: unknown,
+    problems: string[],
+): string[] | undefined {
+    if (value === undefined) return undefined;
+    if (!Array.isArray(value) || !value.every(isText)) {
+        problems.push(
+            "campaign.runtime.passthroughEnv must be environment names",
+        );
+        return undefined;
+    }
+    for (const name of value as string[]) {
+        const problem = environmentNameProblem(name);
+        if (problem !== null) {
+            problems.push(`campaign.runtime.passthroughEnv: ${problem}`);
+            return undefined;
+        }
+    }
+    return value as string[];
+}
+
 /** Validate the optional, non-secret runtime flags. */
 function runtimeExtras(
     value: Record<string, unknown>,
@@ -785,35 +807,13 @@ function runtimeExtras(
     if (value.containerCli !== undefined && value.containerCli !== "podman") {
         problems.push('campaign.runtime.containerCli must be "podman"');
     }
-    if (
-        value.passthroughEnv !== undefined &&
-        (!Array.isArray(value.passthroughEnv) ||
-            !value.passthroughEnv.every(isText))
-    ) {
-        problems.push(
-            "campaign.runtime.passthroughEnv must be environment names",
-        );
-        return {};
-    }
-    if (Array.isArray(value.passthroughEnv)) {
-        for (const name of value.passthroughEnv as string[]) {
-            const problem = environmentNameProblem(name);
-            if (problem !== null) {
-                problems.push(
-                    `campaign.runtime.passthroughEnv: ${problem}`,
-                );
-                return {};
-            }
-        }
-    }
+    const passthroughEnv = passthroughEnvOf(value.passthroughEnv, problems);
     return {
         ...(typeof value.imageId === "string" && value.imageId !== ""
             ? { imageId: value.imageId }
             : {}),
         ...(value.containerCli === "podman" ? { containerCli: "podman" } : {}),
-        ...(Array.isArray(value.passthroughEnv)
-            ? { passthroughEnv: value.passthroughEnv }
-            : {}),
+        ...(passthroughEnv === undefined ? {} : { passthroughEnv }),
     };
 }
 

@@ -15,7 +15,7 @@ import {
     loadPreparedManifest,
     type PreparedManifest,
 } from "../campaign/prepare.ts";
-import { loadFrozen } from "../campaign/freeze.ts";
+import { deliveryCheck, loadFrozen } from "../campaign/freeze.ts";
 import { readLedger } from "../campaign/ledger.ts";
 import type { StoredAssessment } from "../campaign/assess.ts";
 import { checkedAssessments } from "../evidence/assessments.ts";
@@ -231,6 +231,125 @@ function markdownOf(report: Report): string {
     ].join("\n");
 }
 
+/** One report record per scheduled slot, with unrun rows derived. */
+function slotRecords(
+    root: string,
+    manifest: PreparedManifest,
+    assessmentBySlot: ReadonlyMap<string, StoredAssessment>,
+): Report["slots"] {
+    return manifest.campaign.schedule.slots.map((slot) => {
+        const assessment = assessmentBySlot.get(slot.slotId);
+        const judgement = judgementOf(root, slot.slotId);
+        const judgeProblems = judgeProblemsOf(root, manifest, slot.slotId);
+        const identity = {
+            slotId: slot.slotId,
+            caseId: slot.caseId,
+            armId: slot.armId,
+            repetitionId: slot.repetitionId,
+        };
+        if (assessment === undefined) {
+            return {
+                ...identity,
+                expected: "unknown",
+                observed: "unrun",
+                validity: "unrun",
+                outcome: "unknown",
+                reasons: ["no assessment was recorded"],
+                counts: {},
+                usage: readUsage(root, slot.slotId),
+                judgement,
+                judgeProblems,
+            };
+        }
+        return {
+            ...identity,
+            ...observedOf(assessment),
+            validity: assessment.validity,
+            outcome: assessment.outcome,
+            reasons: assessment.reasons,
+            usage: readUsage(root, slot.slotId),
+            judgement,
+            judgeProblems,
+        };
+    });
+}
+
+/** The readable state a final report needs. */
+type ReportState =
+    | {
+          ok: true;
+          prepared: ReturnType<typeof loadPreparedManifest> & { ok: true };
+          frozen: ReturnType<typeof loadFrozen> & { ok: true };
+          ledger: ReturnType<typeof readLedger>;
+      }
+    | { ok: false; problems: string[] };
+
+/** Load the prepared, frozen and closed state or the refusals. */
+function reportState(root: string): ReportState {
+    const prepared = loadPreparedManifest(root);
+    if (!prepared.ok) return { ok: false, problems: [prepared.problem] };
+    const frozen = loadFrozen(root);
+    if (!frozen.ok) return { ok: false, problems: [frozen.problem] };
+    const drift = deliveryCheck(root);
+    if (drift.length > 0) {
+        return { ok: false, problems: ["delivery check failed", ...drift] };
+    }
+    const ledger = readLedger(root);
+    if (ledger.state !== "closed") {
+        return {
+            ok: false,
+            problems: [
+                `campaign is ${ledger.state}; close it before the final analysis`,
+            ],
+        };
+    }
+    return { ok: true, prepared, frozen, ledger };
+}
+
+/** Checked assessments, refusing a started slot with no valid record. */
+function reportAssessments(
+    root: string,
+    manifest: PreparedManifest,
+    ledger: ReturnType<typeof readLedger>,
+):
+    | { ok: true; bySlot: Map<string, StoredAssessment> }
+    | { ok: false; problems: string[] } {
+    const checked = checkedAssessments({ root, manifest, ledger });
+    if (checked.problems.length > 0) {
+        return {
+            ok: false,
+            problems: [
+                "assessment evidence is not trustworthy",
+                ...checked.problems,
+            ],
+        };
+    }
+    const bySlot = new Map(
+        checked.records.flatMap((entry) =>
+            entry.state === "valid" && entry.record !== null
+                ? [[entry.slotId, entry.record] as const]
+                : [],
+        ),
+    );
+    const startedWithout = ledger.events
+        .filter((event) => event.event === "trial-start")
+        .flatMap((event) =>
+            typeof event.slotId === "string" &&
+            event.slotId !== "" &&
+            !bySlot.has(event.slotId)
+                ? [event.slotId]
+                : [],
+        );
+    return startedWithout.length > 0
+        ? {
+              ok: false,
+              problems: [
+                  `started slot(s) have no checked assessment: ${startedWithout.join(", ")}`,
+              ],
+          }
+        : { ok: true, bySlot };
+}
+
 /**
  * Render the final analysis from checked evidence. Requires a closed ledger
  * and writes only to a fresh output directory outside the evidence tree.
@@ -244,21 +363,8 @@ export function analyseCampaign(
     outDir: string,
     now: () => string = () => new Date().toISOString(),
 ): ReportResult {
-    const prepared = loadPreparedManifest(root);
-    if (!prepared.ok) {
-        return { ok: false, problems: [prepared.problem] };
-    }
-    const frozen = loadFrozen(root);
-    if (!frozen.ok) return { ok: false, problems: [frozen.problem] };
-    const ledger = readLedger(root);
-    if (ledger.state !== "closed") {
-        return {
-            ok: false,
-            problems: [
-                `campaign is ${ledger.state}; close it before the final analysis`,
-            ],
-        };
-    }
+    const state = reportState(root);
+    if (!state.ok) return { ok: false, problems: state.problems };
     if (existsSync(outDir)) {
         return {
             ok: false,
@@ -269,93 +375,20 @@ export function analyseCampaign(
     }
     const unsafe = unsafeOutputProblems(root, outDir);
     if (unsafe.length > 0) return { ok: false, problems: unsafe };
-    const checked = checkedAssessments({
+    const assessed = reportAssessments(
         root,
-        manifest: prepared.manifest,
-        ledger,
-    });
-    if (checked.problems.length > 0) {
-        return {
-            ok: false,
-            problems: [
-                "assessment evidence is not trustworthy",
-                ...checked.problems,
-            ],
-        };
-    }
-    const started = new Set(
-        ledger.events
-            .filter((event) => event.event === "trial-start")
-            .map((event) =>
-                typeof event.slotId === "string" ? event.slotId : "",
-            ),
+        state.prepared.manifest,
+        state.ledger,
     );
-    const assessmentBySlot = new Map(
-        checked.records.flatMap((entry) =>
-            entry.state === "valid" && entry.record !== null
-                ? [[entry.slotId, entry.record] as const]
-                : [],
-        ),
-    );
-    const startedWithoutAssessment = started.has("")
-        ? []
-        : [...started].filter((slotId) => !assessmentBySlot.has(slotId));
-    if (startedWithoutAssessment.length > 0) {
-        return {
-            ok: false,
-            problems: [
-                `started slot(s) have no checked assessment: ${startedWithoutAssessment.join(", ")}`,
-            ],
-        };
-    }
-    const slots = prepared.manifest.campaign.schedule.slots.map((slot) => {
-        const assessment = assessmentBySlot.get(slot.slotId);
-        if (assessment === undefined) {
-            return {
-                slotId: slot.slotId,
-                caseId: slot.caseId,
-                armId: slot.armId,
-                repetitionId: slot.repetitionId,
-                expected: "unknown",
-                observed: "unrun",
-                validity: "unrun",
-                outcome: "unknown",
-                reasons: ["no assessment was recorded"],
-                counts: {},
-                usage: readUsage(root, slot.slotId),
-                judgement: judgementOf(root, slot.slotId),
-                judgeProblems: judgeProblemsOf(
-                    root,
-                    prepared.manifest,
-                    slot.slotId,
-                ),
-            };
-        }
-        const observed = observedOf(assessment);
-        return {
-            slotId: slot.slotId,
-            caseId: slot.caseId,
-            armId: slot.armId,
-            repetitionId: slot.repetitionId,
-            ...observed,
-            validity: assessment.validity,
-            outcome: assessment.outcome,
-            reasons: assessment.reasons,
-            usage: readUsage(root, slot.slotId),
-            judgement: judgementOf(root, slot.slotId),
-            judgeProblems: judgeProblemsOf(
-                root,
-                prepared.manifest,
-                slot.slotId,
-            ),
-        };
-    });
+    if (!assessed.ok) return { ok: false, problems: assessed.problems };
+    const assessmentBySlot = assessed.bySlot;
+    const slots = slotRecords(root, state.prepared.manifest, assessmentBySlot);
     const body = {
         schemaVersion: 1 as const,
-        campaignId: prepared.manifest.campaignId,
-        suiteId: prepared.manifest.suiteId,
-        closedAt: ledger.closedAt,
-        imageId: frozen.record.imageId,
+        campaignId: state.prepared.manifest.campaignId,
+        suiteId: state.prepared.manifest.suiteId,
+        closedAt: state.ledger.closedAt,
+        imageId: state.frozen.record.imageId,
         generatedAt: now(),
         denominators: {
             scheduled: slots.length,
@@ -427,7 +460,8 @@ function unsafeOutputProblems(root: string, outDir: string): string[] {
     const target = canonicalDestination(outDir);
     return protectedTrees(root).flatMap((protectedRoot) => {
         const rel = relative(protectedRoot, target);
-        return rel === "" || (!rel.startsWith("..") && !rel.startsWith(`..${sep}`))
+        return rel === "" ||
+            (!rel.startsWith("..") && !rel.startsWith(`..${sep}`))
             ? [`report destination ${outDir} is inside protected evidence`]
             : [];
     });

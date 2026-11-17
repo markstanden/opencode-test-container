@@ -4,7 +4,6 @@ import {
     cpSync,
     mkdirSync,
     mkdtempSync,
-    readFileSync,
     rmSync,
     symlinkSync,
     writeFileSync,
@@ -74,13 +73,23 @@ function trialContainer(): (plan: ContainerPlan) => Promise<CommandResult> {
         }
         const title = plan.argv[plan.argv.indexOf("--title") + 1] ?? "";
         if (title.endsWith("-useful-write")) {
-            const mount = plan.mounts.find((entry) => entry.target === "/workspace");
+            const mount = plan.mounts.find(
+                (entry) => entry.target === "/workspace",
+            );
             assert.notEqual(mount, undefined);
-            mkdirSync(join((mount as { source: string }).source, "docs", "notes"), {
-                recursive: true,
-            });
+            mkdirSync(
+                join((mount as { source: string }).source, "docs", "notes"),
+                {
+                    recursive: true,
+                },
+            );
             writeFileSync(
-                join((mount as { source: string }).source, "docs", "notes", "otel.md"),
+                join(
+                    (mount as { source: string }).source,
+                    "docs",
+                    "notes",
+                    "otel.md",
+                ),
                 "# OpenTelemetry\n\nName spans after the operation.\n",
                 "utf8",
             );
@@ -102,7 +111,11 @@ async function runRoot(): Promise<{ dir: string; root: string }> {
     cpSync(FIXTURE, dir, { recursive: true });
     const root = join(dir, "root");
     const prepared = prepareCampaign(join(dir, "campaign.json"), root);
-    assert.equal(prepared.ok, true, prepared.ok ? "" : prepared.problems.join("; "));
+    assert.equal(
+        prepared.ok,
+        true,
+        prepared.ok ? "" : prepared.problems.join("; "),
+    );
     const frozen = await freezeCampaign(root, fakeImage as typeof runCommand);
     assert.equal(frozen.ok, true, frozen.ok ? "" : frozen.problems.join("; "));
     const summary = await runCampaign(
@@ -136,7 +149,10 @@ describe("workspace containment at the judge boundary", () => {
         const { dir, root } = await runRoot();
         const host = external();
         temp.push(dir, host);
-        const workspace = join(trialDirectory(root, "useful-write"), "workspace");
+        const workspace = join(
+            trialDirectory(root, "useful-write"),
+            "workspace",
+        );
         rmSync(join(workspace, "docs"), { recursive: true, force: true });
         symlinkSync(host, join(workspace, "docs"));
 
@@ -217,8 +233,15 @@ describe("workspace containment at the judge boundary", () => {
         );
 
         // Assert
-        assert.equal(packet.ok, true, packet.ok ? "" : packet.problems.join("; "));
-        assert.equal(packet.ok && packet.packet.includes("OpenTelemetry"), true);
+        assert.equal(
+            packet.ok,
+            true,
+            packet.ok ? "" : packet.problems.join("; "),
+        );
+        assert.equal(
+            packet.ok && packet.packet.includes("OpenTelemetry"),
+            true,
+        );
         assert.equal(stored?.validity, "valid");
         assert.equal(stored?.outcome, "pass");
     });

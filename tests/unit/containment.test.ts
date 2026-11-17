@@ -45,7 +45,10 @@ describe("contained evidence reads", () => {
         try {
             mkdirSync(join(root, "docs"));
             writeFileSync(join(external, "secret.md"), "HOST_ONLY_SENTINEL\n");
-            symlinkSync(join(external, "secret.md"), join(root, "docs", "linked.md"));
+            symlinkSync(
+                join(external, "secret.md"),
+                join(root, "docs", "linked.md"),
+            );
 
             // Act
             const read = readContainedFile(root, "docs/linked.md");
@@ -137,7 +140,10 @@ describe("contained evidence reads", () => {
             // Assert
             assert.equal(dangling.ok, false);
             assert.equal(directory.ok, false);
-            assert.match(directory.ok ? "" : directory.problem, /not a regular file/);
+            assert.match(
+                directory.ok ? "" : directory.problem,
+                /not a regular file/,
+            );
         } finally {
             rmSync(root, { recursive: true, force: true });
         }
@@ -159,10 +165,10 @@ describe("contained evidence reads", () => {
             // Assert
             assert.equal(read.ok, true);
             const documents = read.ok ? read.documents : [];
-            assert.deepEqual(
-                documents.map((entry) => entry.path).sort(),
-                ["docs/alias.md", "docs/real.md"],
-            );
+            assert.deepEqual(documents.map((entry) => entry.path).sort(), [
+                "docs/alias.md",
+                "docs/real.md",
+            ]);
             for (const document of documents) {
                 assert.equal(document.contents, "contained\n");
             }
@@ -195,28 +201,38 @@ describe("contained evidence reads", () => {
 });
 
 describe("contained read race defence", () => {
-    it("refuses a final component swapped" + " to a symlink after resolution", () => {
-        // Arrange
-        const root = workspace();
-        const external = mkdtempSync(join(tmpdir(), "otc-swap-"));
-        try {
-            mkdirSync(join(root, "docs"));
-            writeFileSync(join(root, "docs", "target.md"), "inside\n");
-            writeFileSync(join(external, "secret.md"), "HOST_ONLY_SENTINEL\n");
+    it(
+        "refuses a final component swapped" + " to a symlink after resolution",
+        () => {
+            // Arrange
+            const root = workspace();
+            const external = mkdtempSync(join(tmpdir(), "otc-swap-"));
+            try {
+                mkdirSync(join(root, "docs"));
+                writeFileSync(join(root, "docs", "target.md"), "inside\n");
+                writeFileSync(
+                    join(external, "secret.md"),
+                    "HOST_ONLY_SENTINEL\n",
+                );
 
-            // Act
-            const read = readContainedFile(root, "docs/target.md", {
-                beforeOpen: (realPath) => {
-                    rmSync(realPath);
-                    symlinkSync(join(external, "secret.md"), realPath);
-                },
-            });
+                // Act
+                const read = readContainedFile(root, "docs/target.md", {
+                    beforeOpen: (realPath) => {
+                        rmSync(realPath);
+                        symlinkSync(join(external, "secret.md"), realPath);
+                    },
+                });
 
-            // Assert
-            assert.equal(read.ok, false, "O_NOFOLLOW must refuse the swapped link");
-        } finally {
-            rmSync(root, { recursive: true, force: true });
-            rmSync(external, { recursive: true, force: true });
-        }
-    });
+                // Assert
+                assert.equal(
+                    read.ok,
+                    false,
+                    "O_NOFOLLOW must refuse the swapped link",
+                );
+            } finally {
+                rmSync(root, { recursive: true, force: true });
+                rmSync(external, { recursive: true, force: true });
+            }
+        },
+    );
 });

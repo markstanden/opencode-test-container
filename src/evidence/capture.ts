@@ -68,7 +68,9 @@ function counterProblems(
     ];
     for (const [field, saved, observed] of fields) {
         if (saved !== undefined && saved !== observed) {
-            problems.push(`saved meta ${field} does not describe the raw capture`);
+            problems.push(
+                `saved meta ${field} does not describe the raw capture`,
+            );
         }
     }
     return problems;
@@ -114,34 +116,71 @@ function answerProblems(
         : ["the answer record does not match the raw capture"];
 }
 
-/** Validity problems the saved metadata itself declares. */
-function metaProblems(meta: Record<string, unknown>): string[] {
-    const problems: string[] = [];
+/** Problems with the validity claim and its recorded problem list. */
+function validityProblems(meta: Record<string, unknown>): string[] {
     if (meta.captureValid !== true) {
         const saved = Array.isArray(meta.captureProblems)
             ? meta.captureProblems.filter(
                   (entry): entry is string => typeof entry === "string",
               )
             : [];
-        problems.push(...saved);
-        if (saved.length === 0) {
-            problems.push("metadata declared an invalid capture without a reason");
-        }
-    } else if (
-        Array.isArray(meta.captureProblems) &&
+        return saved.length > 0
+            ? saved
+            : ["metadata declared an invalid capture without a reason"];
+    }
+    return Array.isArray(meta.captureProblems) &&
         meta.captureProblems.length > 0
-    ) {
-        problems.push("metadata claims a valid capture but lists problems");
-    }
-    if (meta.exit !== 0) {
-        problems.push(`container exited ${String(meta.exit)}`);
-    }
-    if (meta.timedOut === true) problems.push("container timed out");
-    if (typeof meta.error === "string" && meta.error !== "") {
-        problems.push(`container error: ${meta.error}`);
-    }
-    if (meta.overflowed === true) {
-        problems.push("the captured output exceeded its byte limit");
+        ? ["metadata claims a valid capture but lists problems"]
+        : [];
+}
+
+/** Flags in metadata that make a capture unusable regardless of content. */
+function flagProblems(meta: Record<string, unknown>): string[] {
+    const flags: Array<[boolean, string]> = [
+        [meta.exit !== 0, `container exited ${String(meta.exit)}`],
+        [meta.timedOut === true, "container timed out"],
+        [
+            typeof meta.error === "string" && meta.error !== "",
+            `container error: ${String(meta.error)}`,
+        ],
+        [
+            meta.overflowed === true,
+            "the captured output exceeded its byte limit",
+        ],
+    ];
+    return flags.filter(([present]) => present).map(([, problem]) => problem);
+}
+
+/** Validity problems the saved metadata itself declares. */
+function metaProblems(meta: Record<string, unknown>): string[] {
+    return [...validityProblems(meta), ...flagProblems(meta)];
+}
+
+/** Metadata-only problems, including identity and declaration checks. */
+function metadataProblems(
+    meta: Record<string, unknown> | null,
+    expected: { campaignId?: string; slotId?: string },
+): string[] {
+    return meta === null
+        ? ["capture metadata is missing or unreadable"]
+        : [...identityProblems(meta, expected), ...metaProblems(meta)];
+}
+
+/** Raw-stream and bound-artifact problems. */
+function artifactProblems(options: {
+    trialDir: string;
+    hasEvents: boolean;
+    trail: DecodedTrail;
+    meta: Record<string, unknown> | null;
+}): string[] {
+    const problems = captureProblems(options.trail);
+    if (!options.hasEvents)
+        return ["the raw event stream is missing", ...problems];
+    problems.push(
+        ...answerProblems(options.trialDir, options.trail, options.meta ?? {}),
+    );
+    if (options.meta !== null) {
+        problems.push(...counterProblems(options.meta, options.trail));
     }
     return problems;
 }
@@ -151,6 +190,8 @@ function metaProblems(meta: Record<string, unknown>): string[] {
  * saved metadata and bound artifacts.
  * @param trialDir The trial evidence directory.
  * @param expected The campaign/slot identity the capture must match.
+ * @param expected.campaignId The campaign the capture must belong to.
+ * @param expected.slotId The slot the capture must belong to.
  * @returns The checked capture state.
  */
 export function checkCapture(
@@ -169,26 +210,19 @@ export function checkCapture(
             raw: null,
         };
     }
-    const problems: string[] = [];
-    if (metaValue === null) {
-        problems.push("capture metadata is missing or unreadable");
-    } else {
-        problems.push(
-            ...identityProblems(metaValue, expected),
-            ...metaProblems(metaValue),
-        );
-    }
     const raw = hasEvents ? readFileSync(eventsPath, "utf8") : "";
-    if (!hasEvents) problems.push("the raw event stream is missing");
     const trail = decodeTrail(raw);
-    problems.push(...captureProblems(trail));
-    if (hasEvents) {
-        problems.push(...answerProblems(trialDir, trail, metaValue ?? {}));
-        if (metaValue !== null) {
-            problems.push(...counterProblems(metaValue, trail));
-        }
-    }
-    const unique = [...new Set(problems)];
+    const unique = [
+        ...new Set([
+            ...metadataProblems(metaValue, expected),
+            ...artifactProblems({
+                trialDir,
+                hasEvents,
+                trail,
+                meta: metaValue,
+            }),
+        ]),
+    ];
     const meta = metaValue as unknown as TrialMeta | null;
     return unique.length === 0 && meta !== null && hasEvents
         ? {

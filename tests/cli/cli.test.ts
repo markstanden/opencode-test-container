@@ -131,7 +131,11 @@ describe("installed-shape CLI", () => {
         );
         assert.equal(prepared.status, 0, prepared.stderr);
         mkdirSync(join(root, "evidence"), { recursive: true });
-        writeFileSync(join(root, "evidence", "ATTEMPTS.jsonl"), "{broken\n", "utf8");
+        writeFileSync(
+            join(root, "evidence", "ATTEMPTS.jsonl"),
+            "{broken\n",
+            "utf8",
+        );
 
         // Act
         const result = otc(["status", "--root", root, "--json"], work);
@@ -174,7 +178,10 @@ describe("installed-shape CLI", () => {
             readFileSync(join(root, "prepare", "manifest.json"), "utf8"),
             manifest,
         );
-        assert.equal(existsSync(join(root, "evidence", "ATTEMPTS.jsonl")), false);
+        assert.equal(
+            existsSync(join(root, "evidence", "ATTEMPTS.jsonl")),
+            false,
+        );
     });
 });
 

@@ -28,8 +28,7 @@ import { isAbsolute, join, relative, resolve, sep } from "node:path";
 
 /** One successful contained text read, or the refusal. */
 export type ContainedText =
-    | { ok: true; text: string }
-    | { ok: false; problem: string };
+    { ok: true; text: string } | { ok: false; problem: string };
 
 /** One successful contained document, or the refusal. */
 export type ContainedDocuments =
@@ -45,7 +44,9 @@ export function isSafeRelativePath(path: string): boolean {
 }
 
 /** Resolve a root, refusing a symlink at the root itself. */
-function realRoot(root: string): { ok: true; path: string } | { ok: false; problem: string } {
+function realRoot(
+    root: string,
+): { ok: true; path: string } | { ok: false; problem: string } {
     try {
         const stat = lstatSync(root);
         if (stat.isSymbolicLink()) {
@@ -148,6 +149,56 @@ interface WalkResult {
 }
 
 /** Walk one directory without traversing symlinked directories or special files. */
+function fileAt(
+    root: string,
+    relativePath: string,
+    name: string,
+    accept: (name: string) => boolean,
+):
+    | { ok: true; file: { path: string; contents: string } | null }
+    | {
+          ok: false;
+          problem: string;
+      } {
+    if (!accept(name)) return { ok: true, file: null };
+    const text = readContainedFile(root, relativePath);
+    return text.ok
+        ? { ok: true, file: { path: relativePath, contents: text.text } }
+        : { ok: false, problem: text.problem };
+}
+
+/** Read one symlink's target, refusing directory traversal and special files. */
+function symlinkFile(
+    root: string,
+    realBase: string,
+    path: string,
+    name: string,
+    accept: (name: string) => boolean,
+):
+    | { ok: true; file: { path: string; contents: string } | null }
+    | {
+          ok: false;
+          problem: string;
+      } {
+    const relativePath = relative(realBase, path).split(sep).join("/");
+    const resolved = resolveContained(root, relativePath);
+    if (!resolved.ok) return { ok: false, problem: resolved.problem };
+    const target = lstatSync(resolved.path);
+    if (target.isDirectory()) {
+        return {
+            ok: false,
+            problem: `${relativePath} is a symlinked directory; directories are not traversed`,
+        };
+    }
+    if (!target.isFile()) {
+        return {
+            ok: false,
+            problem: `${relativePath} resolves to a special file`,
+        };
+    }
+    return fileAt(root, relativePath, name, accept);
+}
+
 function walk(
     root: string,
     realBase: string,
@@ -162,29 +213,16 @@ function walk(
         const path = join(directory, entry.name);
         const stat = lstatSync(path);
         if (stat.isSymbolicLink()) {
-            const relativePath = relative(realBase, path).split(sep).join("/");
-            const resolved = resolveContained(root, relativePath);
-            if (!resolved.ok) return { ok: false, problem: resolved.problem, files };
-            const target = lstatSync(resolved.path);
-            if (target.isDirectory()) {
-                return {
-                    ok: false,
-                    problem: `${relativePath} is a symlinked directory; directories are not traversed`,
-                    files,
-                };
-            }
-            if (!target.isFile()) {
-                return {
-                    ok: false,
-                    problem: `${relativePath} resolves to a special file`,
-                    files,
-                };
-            }
-            if (accept(entry.name)) {
-                const text = readContainedFile(root, relativePath);
-                if (!text.ok) return { ok: false, problem: text.problem, files };
-                files.push({ path: relativePath, contents: text.text });
-            }
+            const linked = symlinkFile(
+                root,
+                realBase,
+                path,
+                entry.name,
+                accept,
+            );
+            if (!linked.ok)
+                return { ok: false, problem: linked.problem, files };
+            if (linked.file !== null) files.push(linked.file);
             continue;
         }
         if (stat.isDirectory()) {
@@ -196,16 +234,18 @@ function walk(
         if (!stat.isFile()) {
             return {
                 ok: false,
-                problem: `${relative(root, path)} is not a regular file`,
+                problem: `${relative(realBase, path)} is not a regular file`,
                 files,
             };
         }
-        if (accept(entry.name)) {
-            const relativePath = relative(realBase, path).split(sep).join("/");
-            const text = readContainedFile(root, relativePath);
-            if (!text.ok) return { ok: false, problem: text.problem, files };
-            files.push({ path: relativePath, contents: text.text });
-        }
+        const plain = fileAt(
+            root,
+            relative(realBase, path).split(sep).join("/"),
+            entry.name,
+            accept,
+        );
+        if (!plain.ok) return { ok: false, problem: plain.problem, files };
+        if (plain.file !== null) files.push(plain.file);
     }
     return { ok: true, problem: null, files };
 }
@@ -269,6 +309,54 @@ export type ContainedEntry =
  * @param path The root-relative path.
  * @returns The entry kind, or the refusal.
  */
+/** Classify one existing object for the final path component. */
+function kindOf(
+    stat: import("node:fs").Stats,
+): "file" | "directory" | "symlink" {
+    if (stat.isDirectory()) return "directory";
+    return stat.isFile() ? "file" : "symlink";
+}
+
+/** Descend through one non-final component. */
+function descend(
+    candidate: string,
+    stat: import("node:fs").Stats,
+    path: string,
+): { ok: true; path: string } | { ok: false; problem: string } {
+    return stat.isDirectory()
+        ? { ok: true, path: candidate }
+        : { ok: false, problem: `${path} crosses a non-directory` };
+}
+
+/** Resolve one symlink component, or the final entry kind. */
+function symlinkComponent(
+    base: string,
+    candidate: string,
+    path: string,
+    last: boolean,
+):
+    | { ok: true; kind: "symlink" }
+    | { ok: true; next: string }
+    | { ok: false; problem: string } {
+    const linked = linkedTarget(base, candidate, path);
+    if (!linked.ok) return linked;
+    if (last) return { ok: true, kind: "symlink" };
+    return lstatSync(linked.real).isDirectory()
+        ? { ok: true, next: linked.real }
+        : {
+              ok: false,
+              problem: `${path} crosses a symlink to a non-directory`,
+          };
+}
+
+/**
+ * Classify one root-relative path without following a final symlink. A
+ * dangling or escaping symlink is a refusal, never "missing": refusing is the
+ * only safe interpretation when the object's identity is unknown.
+ * @param root The contained root.
+ * @param path The root-relative path.
+ * @returns The entry kind, or the refusal.
+ */
 export function containedEntry(root: string, path: string): ContainedEntry {
     if (!isSafeRelativePath(path)) {
         return { ok: false, problem: `${path} is not a safe relative path` };
@@ -287,46 +375,36 @@ export function containedEntry(root: string, path: string): ContainedEntry {
         }
         const last = index === parts.length - 1;
         if (stat.isSymbolicLink()) {
-            let real: string;
-            try {
-                real = realpathSync(candidate);
-            } catch {
-                return {
-                    ok: false,
-                    problem: `${path} is a dangling or unreadable symlink`,
-                };
-            }
-            if (!inside(base.path, real)) {
-                return { ok: false, problem: `${path} resolves outside ${root}` };
-            }
-            if (last) return { ok: true, kind: "symlink" };
-            const target = lstatSync(real);
-            if (!target.isDirectory()) {
-                return {
-                    ok: false,
-                    problem: `${path} crosses a symlink to a non-directory`,
-                };
-            }
-            current = real;
+            const linked = symlinkComponent(base.path, candidate, path, last);
+            if (!linked.ok) return linked;
+            if ("kind" in linked) return { ok: true, kind: "symlink" };
+            current = linked.next;
             continue;
         }
-        if (last) {
-            return {
-                ok: true,
-                kind: stat.isDirectory()
-                    ? "directory"
-                    : stat.isFile()
-                      ? "file"
-                      : "symlink",
-            };
-        }
-        if (!stat.isDirectory()) {
-            return {
-                ok: false,
-                problem: `${path} crosses a non-directory`,
-            };
-        }
-        current = candidate;
+        if (last) return { ok: true, kind: kindOf(stat) };
+        const next = descend(candidate, stat, path);
+        if (!next.ok) return next;
+        current = next.path;
     }
     return { ok: true, kind: "directory" };
+}
+
+/** Resolve one symlink and prove its target stays inside the root. */ /** Resolve one symlink and prove its target stays inside the root. */
+function linkedTarget(
+    base: string,
+    candidate: string,
+    path: string,
+): { ok: true; real: string } | { ok: false; problem: string } {
+    let real: string;
+    try {
+        real = realpathSync(candidate);
+    } catch {
+        return {
+            ok: false,
+            problem: `${path} is a dangling or unreadable symlink`,
+        };
+    }
+    return inside(base, real)
+        ? { ok: true, real }
+        : { ok: false, problem: `${path} resolves outside the root` };
 }

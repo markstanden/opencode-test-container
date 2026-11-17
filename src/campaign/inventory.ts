@@ -162,7 +162,9 @@ export function inventoryEntryDifferences(
     const expectedKind = kindOf(expected);
     const observedKind = kindOf(observed);
     if (expectedKind !== observedKind) {
-        problems.push(`changed kind ${path} (${expectedKind} -> ${observedKind})`);
+        problems.push(
+            `changed kind ${path} (${expectedKind} -> ${observedKind})`,
+        );
     }
     if ((expected.link ?? null) !== (observed.link ?? null)) {
         problems.push(

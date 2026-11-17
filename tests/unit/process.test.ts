@@ -21,7 +21,11 @@ describe("bounded process capture", () => {
         assert.equal(atCap.stdout, "abcd");
         assert.equal(atCap.overflowed, false);
         assert.equal(overCap.overflowed, true);
-        assert.equal(overCap.stdout, "", "an over-cap stream is not a usable capture");
+        assert.equal(
+            overCap.stdout,
+            "",
+            "an over-cap stream is not a usable capture",
+        );
     });
 
     it("never silently discards a later chunk", async () => {
@@ -95,6 +99,26 @@ describe("bounded process capture", () => {
         assert.equal(result.status, null);
         assert.match(result.error ?? "", /ENOENT|not found/);
         assert.equal(result.overflowed, false);
+    });
+
+    it("cancels a running child on an abort signal", async () => {
+        // Arrange
+        const controller = new AbortController();
+        const pending = node("setTimeout(() => {}, 5000)", {
+            signal: controller.signal,
+        });
+        setTimeout(() => controller.abort(), 50);
+
+        // Act
+        const result = await pending;
+
+        // Assert
+        assert.equal(result.timedOut, false, "cancellation is not a timeout");
+        assert.equal(
+            result.signal === null,
+            false,
+            "the child was not signalled",
+        );
     });
 
     it("bounds a timeout and terminates the child", async () => {

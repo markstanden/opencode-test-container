@@ -249,6 +249,36 @@ function fail(problems: string[], code = 2): number {
     return code;
 }
 
+/** Print a parser refusal and return the usage exit code. */
+function usageFailure(error: unknown): number | null {
+    if (!(error instanceof UsageError)) return null;
+    console.error(`otc: ${error.message}`);
+    console.error(USAGE);
+    return 2;
+}
+
+/** Map a handler exception to a documented exit code and concise message. */
+function handlerFailure(error: unknown): number {
+    const message = error instanceof Error ? error.message : String(error);
+    // An unknown selector is invalid input, not an operational failure; it is
+    // rejected before any dispatch, so no evidence has been written.
+    const usage =
+        error instanceof Error && message.startsWith("unknown slotId");
+    console.error(`otc: ${message}`);
+    return usage ? 2 : 1;
+}
+
+/** Dispatch one parsed command through its handler. */
+async function dispatch(options: CliOptions): Promise<number> {
+    const handler = HANDLERS[options.command];
+    if (handler === undefined) return 0;
+    try {
+        return await handler(options);
+    } catch (error) {
+        return handlerFailure(error);
+    }
+}
+
 /**
  * Run one command and return its exit code.
  * @param argv Arguments after the executable.
@@ -259,11 +289,8 @@ export async function main(argv: readonly string[]): Promise<number> {
     try {
         options = parseArgs(argv);
     } catch (error) {
-        if (error instanceof UsageError) {
-            console.error(`otc: ${error.message}`);
-            console.error(USAGE);
-            return 2;
-        }
+        const usage = usageFailure(error);
+        if (usage !== null) return usage;
         throw error;
     }
     if (options.help || options.command === "help") {
@@ -277,21 +304,7 @@ export async function main(argv: readonly string[]): Promise<number> {
     if (options.command === "analyse" && options.out === null) {
         return fail(["analyse needs --out <fresh-directory>"]);
     }
-    const handler = HANDLERS[options.command];
-    if (handler === undefined) return 0;
-    try {
-        return await handler(options);
-    } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        // An unknown selector is invalid input, not an operational failure; it
-        // is rejected before any dispatch, so no evidence has been written.
-        if (error instanceof Error && message.startsWith("unknown slotId")) {
-            console.error(`otc: ${message}`);
-            return 2;
-        }
-        console.error(`otc: ${message}`);
-        return 1;
-    }
+    return dispatch(options);
 }
 
 /** Validate a campaign bundle and print its summary. */
@@ -349,11 +362,24 @@ async function freeze(options: CliOptions): Promise<number> {
 
 /** Execute the selected slots. */
 async function run(options: CliOptions): Promise<number> {
-    const summary = await runCampaign(requireRoot(options), {
-        ...(options.slots.length === 0 ? {} : { slotIds: options.slots }),
-        dryRun: options.dryRun,
-        passthrough: options.passthrough,
-    });
+    // Ctrl-C cancels the owned container with the same bounded cleanup as a
+    // timeout; it never leaves the dispatch unowned.
+    const controller = new AbortController();
+    const cancel = (): void => controller.abort();
+    process.once("SIGINT", cancel);
+    process.once("SIGTERM", cancel);
+    let summary;
+    try {
+        summary = await runCampaign(requireRoot(options), {
+            ...(options.slots.length === 0 ? {} : { slotIds: options.slots }),
+            dryRun: options.dryRun,
+            passthrough: options.passthrough,
+            signal: controller.signal,
+        });
+    } finally {
+        process.removeListener("SIGINT", cancel);
+        process.removeListener("SIGTERM", cancel);
+    }
     if (options.json) {
         console.log(JSON.stringify(summary, null, 2));
     } else {

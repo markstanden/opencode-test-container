@@ -157,39 +157,43 @@ function foldToolPart(
 }
 
 /** Fold one step-finish event's usage into the accumulator. */
-function foldUsage(event: Record<string, unknown>, usage: Usage): void {
-    const part = isRecord(event.part) ? event.part : undefined;
-    if (part?.type !== "step-finish") return;
-    usage.reported = true;
-    usage.steps += 1;
-    const tokens = isRecord(part.tokens) ? part.tokens : null;
-    const cache = isRecord(tokens?.cache) ? (tokens?.cache ?? {}) : {};
+/** Fold one token block, keeping missing values distinct from zero. */
+function foldTokens(
+    usage: Usage,
+    tokens: Record<string, unknown>,
+    cache: Record<string, unknown>,
+): void {
     const token = (field: string): number =>
-        typeof tokens?.[field] === "number" ? (tokens[field] as number) : 0;
-    const tokenFields = [
-        tokens?.input,
-        tokens?.output,
-        tokens?.reasoning,
+        typeof tokens[field] === "number" ? (tokens[field] as number) : 0;
+    const seen = [
+        tokens.input,
+        tokens.output,
+        tokens.reasoning,
         cache.read,
         cache.write,
-    ];
-    const present = tokenFields.filter(
-        (value) => typeof value === "number",
-    ).length;
+    ].filter((value) => typeof value === "number").length;
     usage.inputTokens += token("input");
     usage.outputTokens += token("output");
     usage.reasoningTokens += token("reasoning");
     usage.cacheReadTokens += typeof cache.read === "number" ? cache.read : 0;
     usage.cacheWriteTokens += typeof cache.write === "number" ? cache.write : 0;
-    usage.costUsd += typeof part.cost === "number" ? part.cost : 0;
-    if (present === tokenFields.length) {
-        if (usage.coverage.tokens !== "partial") {
-            usage.coverage.tokens = "measured";
-        }
-    } else {
+    if (seen < 5) {
         usage.coverage.tokens = "partial";
+    } else if (usage.coverage.tokens !== "partial") {
+        usage.coverage.tokens = "measured";
     }
+}
+
+/** Fold one step-finish event's usage and coverage. */
+function foldUsage(event: Record<string, unknown>, usage: Usage): void {
+    const part = isRecord(event.part) ? event.part : undefined;
+    if (part?.type !== "step-finish") return;
+    usage.reported = true;
+    usage.steps += 1;
+    const tokens = isRecord(part.tokens) ? part.tokens : {};
+    foldTokens(usage, tokens, isRecord(tokens.cache) ? tokens.cache : {});
     if (typeof part.cost === "number") {
+        usage.costUsd += part.cost;
         if (usage.coverage.cost !== "partial") {
             usage.coverage.cost = "measured";
         }

@@ -17,7 +17,11 @@ import {
     prepareCampaign,
 } from "../../src/campaign/prepare.ts";
 import { freezeCampaign, loadFrozen } from "../../src/campaign/freeze.ts";
-import { runCampaign, planTrial, trialDirectory } from "../../src/campaign/run.ts";
+import {
+    runCampaign,
+    planTrial,
+    trialDirectory,
+} from "../../src/campaign/run.ts";
 import { closeCampaign } from "../../src/campaign/close.ts";
 import {
     containerArgv,
@@ -70,7 +74,11 @@ async function frozenRoot(): Promise<{ dir: string; root: string }> {
     cpSync(FIXTURE, dir, { recursive: true });
     const root = join(dir, "root");
     const prepared = prepareCampaign(join(dir, "campaign.json"), root);
-    assert.equal(prepared.ok, true, prepared.ok ? "" : prepared.problems.join("; "));
+    assert.equal(
+        prepared.ok,
+        true,
+        prepared.ok ? "" : prepared.problems.join("; "),
+    );
     const frozen = await freezeCampaign(root, fakeImage as typeof runCommand);
     assert.equal(frozen.ok, true, frozen.ok ? "" : frozen.problems.join("; "));
     return { dir, root };
@@ -273,7 +281,9 @@ describe("container ownership and mount syntax", () => {
                 { encoding: "utf8" },
             ).trim();
             assert.notEqual(claims, "");
-            const claim = JSON.parse(readFileSync(claims.split("\n")[0]!, "utf8")) as {
+            const claim = JSON.parse(
+                readFileSync(claims.split("\n")[0]!, "utf8"),
+            ) as {
                 state: string;
             };
             assert.equal(claim.state, "spawned");

@@ -13,7 +13,8 @@ export type ScriptedResponse =
     | { kind: "text"; content: string }
     | { kind: "tool"; tool: string; args: unknown; id?: string }
     | { kind: "error"; status: number; message?: string }
-    | { kind: "truncate"; content: string };
+    | { kind: "truncate"; content: string }
+    | { kind: "stall" };
 
 /** A captured provider request. */
 export interface CapturedRequest {
@@ -108,6 +109,45 @@ function stream(
     response.end("data: [DONE]\n\n");
 }
 
+/** Hold a response open so a live dispatch can be cancelled. */
+function stall(response: ServerResponse, body: Record<string, unknown>): void {
+    response.writeHead(200, {
+        "content-type": "text/event-stream",
+        "cache-control": "no-cache",
+    });
+    response.write(
+        `data: ${JSON.stringify({ id: "chatcmpl-otc-stall", object: "chat.completion.chunk", created: 1, model: body.model, choices: [{ index: 0, delta: { role: "assistant", content: "" }, finish_reason: null }] })}\n\n`,
+    );
+}
+
+/** Send one partial stream, then cut the connection. */
+function truncate(
+    response: ServerResponse,
+    body: Record<string, unknown>,
+    content: string,
+): void {
+    response.writeHead(200, {
+        "content-type": "text/event-stream",
+        "cache-control": "no-cache",
+    });
+    response.write(
+        `data: ${JSON.stringify({
+            id: "chatcmpl-otc-cut",
+            object: "chat.completion.chunk",
+            created: 1,
+            model: body.model,
+            choices: [
+                {
+                    index: 0,
+                    delta: { role: "assistant", content },
+                    finish_reason: null,
+                },
+            ],
+        })}\n\n`,
+    );
+    response.destroy();
+}
+
 /** Serve one scripted response. */
 function serve(
     response: ServerResponse,
@@ -120,103 +160,100 @@ function serve(
         });
         return;
     }
+    if (scripted.kind === "stall") return stall(response, body);
     if (scripted.kind === "error") {
-        json(response, scripted.status, {
+        return json(response, scripted.status, {
             error: {
                 message: scripted.message ?? "scripted error",
                 type: "server_error",
             },
         });
-        return;
     }
     if (scripted.kind === "truncate") {
-        response.writeHead(200, {
-            "content-type": "text/event-stream",
-            "cache-control": "no-cache",
-        });
-        response.write(
-            `data: ${JSON.stringify({
-                id: "chatcmpl-otc-cut",
-                object: "chat.completion.chunk",
-                created: 1,
-                model: body.model,
-                choices: [
-                    {
-                        index: 0,
-                        delta: { role: "assistant", content: scripted.content },
-                        finish_reason: null,
-                    },
-                ],
-            })}\n\n`,
-        );
-        response.destroy();
-        return;
+        return truncate(response, body, scripted.content);
     }
-    const streaming = body.stream === true || body.stream_options !== undefined;
     if (scripted.kind === "text") {
-        if (!streaming) {
-            json(response, 200, {
-                id: "chatcmpl-otc",
-                object: "chat.completion",
-                created: 1,
-                model: body.model,
-                choices: [
-                    {
-                        index: 0,
-                        message: {
-                            role: "assistant",
-                            content: scripted.content,
-                        },
-                        finish_reason: "stop",
-                    },
-                ],
-                usage: {
-                    prompt_tokens: 1,
-                    completion_tokens: 1,
-                    total_tokens: 2,
-                },
-            });
-            return;
-        }
-        stream(response, body.model, [
-            { role: "assistant", content: scripted.content },
-        ]);
+        return serveText(response, body, scripted.content);
+    }
+    return serveTool(response, body, scripted);
+}
+
+/** Serve one complete text completion, streaming when asked. */
+function serveText(
+    response: ServerResponse,
+    body: Record<string, unknown>,
+    content: string,
+): void {
+    const streaming = body.stream === true || body.stream_options !== undefined;
+    if (streaming) {
+        stream(response, body.model, [{ role: "assistant", content }]);
         return;
     }
+    json(response, 200, {
+        id: "chatcmpl-otc",
+        object: "chat.completion",
+        created: 1,
+        model: body.model,
+        choices: [
+            {
+                index: 0,
+                message: { role: "assistant", content },
+                finish_reason: "stop",
+            },
+        ],
+        usage: {
+            prompt_tokens: 1,
+            completion_tokens: 1,
+            total_tokens: 2,
+        },
+    });
+}
+
+/** Serve one tool-call completion, streaming when asked. */
+function serveTool(
+    response: ServerResponse,
+    body: Record<string, unknown>,
+    scripted: { tool: string; args: unknown; id?: string },
+): void {
+    const streaming = body.stream === true || body.stream_options !== undefined;
     const call = toolDelta(
         scripted.tool,
         scripted.args,
         scripted.id ?? "call_otc_1",
     );
-    if (!streaming) {
-        json(response, 200, {
-            id: "chatcmpl-otc-tool",
-            object: "chat.completion",
-            created: 1,
-            model: body.model,
-            choices: [
-                {
-                    index: 0,
-                    message: {
-                        role: "assistant",
-                        content: null,
-                        tool_calls: [
-                            {
-                                id: call.id,
-                                type: "function",
-                                function: call.function,
-                            },
-                        ],
-                    },
-                    finish_reason: "tool_calls",
-                },
-            ],
-        });
+    if (streaming) {
+        stream(response, body.model, [
+            {
+                role: "assistant",
+                content: null,
+                tool_calls: [call],
+            },
+        ]);
         return;
     }
-    stream(response, body.model, [
-        { role: "assistant", content: null, tool_calls: [call] },
-    ]);
+    json(response, 200, {
+        id: "chatcmpl-otc-tool",
+        object: "chat.completion",
+        created: 1,
+        model: body.model,
+        choices: [
+            {
+                index: 0,
+                message: {
+                    role: "assistant",
+                    content: null,
+                    tool_calls: [
+                        {
+                            id: call.id,
+                            type: "function",
+                            function: call.function,
+                        },
+                    ],
+                },
+                finish_reason: "tool_calls",
+            },
+        ],
+    });
 }
 
 /**
@@ -228,8 +265,11 @@ function serve(
 export async function startProvider(
     port: number,
     plan: readonly ScriptedResponse[],
-): Promise<ScriptedProvider> {
+    options: { repeatLast?: boolean } = {},
+): Promise<ScriptedProvider & { exhausted: () => number }> {
     const requests: CapturedRequest[] = [];
+    const repeatLast = options.repeatLast ?? true;
+    let exhausted = 0;
     const server = createServer((request, response) => {
         void bodyOf(request).then((body) => {
             requests.push({
@@ -244,6 +284,16 @@ export async function startProvider(
             const count = requests.filter((entry) =>
                 entry.path.includes("chat/completions"),
             ).length;
+            if (!repeatLast && count > plan.length) {
+                exhausted += 1;
+                json(response, 500, {
+                    error: {
+                        message: "script exhausted",
+                        type: "server_error",
+                    },
+                });
+                return;
+            }
             serve(response, body, plan[Math.min(count - 1, plan.length - 1)]);
         });
     });
@@ -251,9 +301,13 @@ export async function startProvider(
         server.on("error", reject);
         server.listen(port, "127.0.0.1", () => resolve());
     });
+    const address = server.address();
+    const bound =
+        typeof address === "object" && address !== null ? address.port : port;
     return {
-        port,
+        port: bound,
         requests,
+        exhausted: () => exhausted,
         chatCount: () =>
             requests.filter((entry) => entry.path.includes("chat/completions"))
                 .length,

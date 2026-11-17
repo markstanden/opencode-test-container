@@ -12,8 +12,14 @@
  * either population drops below its declared floor.
  */
 import { spawnSync } from "node:child_process";
-import { mkdirSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
-import { join, relative, resolve, sep } from "node:path";
+import {
+    mkdirSync,
+    readFileSync,
+    readdirSync,
+    rmSync,
+    statSync,
+} from "node:fs";
+import { join, relative, sep } from "node:path";
 
 const ROOT = process.cwd();
 const LCOV = join(ROOT, "coverage", "lcov.info");
@@ -55,6 +61,8 @@ function runCoverage() {
             "--test-coverage-exclude=**/*.test.ts",
             "--test-reporter=lcov",
             `--test-reporter-destination=${LCOV}`,
+            "--test-reporter=spec",
+            "--test-reporter-destination=stdout",
             "tests/**/*.test.ts",
         ],
         { cwd: ROOT, encoding: "utf8", stdio: "inherit" },
@@ -139,7 +147,9 @@ const SOURCE_EXCLUSIONS = new Map([
 runCoverage();
 const files = parseLcov(readFileSync(LCOV, "utf8"));
 const measuredFiles = new Set(
-    files.map((entry) => relative(join(ROOT, "src"), entry.file).split(sep).join("/")),
+    files.map((entry) =>
+        relative(join(ROOT, "src"), entry.file).split(sep).join("/"),
+    ),
 );
 const unmeasured = sourceFiles()
     .filter((file) => !SOURCE_EXCLUSIONS.has(file))

@@ -52,11 +52,10 @@ export function sourceIdentityProblems(
     recorded: SourceIdentity,
 ): string[] {
     const observed = sourceIdentity(trialDir);
-    return (
-        Object.keys(observed) as Array<keyof SourceIdentity>
-    ).flatMap((field) =>
-        observed[field] === recorded[field]
-            ? []
-            : [`source evidence ${field} changed after assessment`],
+    return (Object.keys(observed) as Array<keyof SourceIdentity>).flatMap(
+        (field) =>
+            observed[field] === recorded[field]
+                ? []
+                : [`source evidence ${field} changed after assessment`],
     );
 }

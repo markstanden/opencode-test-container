@@ -17,10 +17,7 @@ import { fileURLToPath } from "node:url";
 import { prepareCampaign } from "../../src/campaign/prepare.ts";
 import { freezeCampaign } from "../../src/campaign/freeze.ts";
 import { runCampaign, trialDirectory } from "../../src/campaign/run.ts";
-import {
-    assessCampaign,
-    assessmentPath,
-} from "../../src/campaign/assess.ts";
+import { assessCampaign, assessmentPath } from "../../src/campaign/assess.ts";
 import { closeCampaign } from "../../src/campaign/close.ts";
 import { statusOf } from "../../src/campaign/status.ts";
 import { analyseCampaign } from "../../src/reporting/report.ts";
@@ -123,7 +120,11 @@ async function frozenRoot(): Promise<{ dir: string; root: string }> {
     cpSync(FIXTURE, dir, { recursive: true });
     const root = join(dir, "root");
     const prepared = prepareCampaign(join(dir, "campaign.json"), root);
-    assert.equal(prepared.ok, true, prepared.ok ? "" : prepared.problems.join("; "));
+    assert.equal(
+        prepared.ok,
+        true,
+        prepared.ok ? "" : prepared.problems.join("; "),
+    );
     const frozen = await freezeCampaign(root, fakeImage as typeof runCommand);
     assert.equal(frozen.ok, true, frozen.ok ? "" : frozen.problems.join("; "));
     return { dir, root };
@@ -166,10 +167,9 @@ function snapshot(root: string): string {
 
 /** Read one stored assessment. */
 function record(root: string, slotId: string): Record<string, unknown> {
-    return JSON.parse(readFileSync(assessmentPath(root, slotId), "utf8")) as Record<
-        string,
-        unknown
-    >;
+    return JSON.parse(
+        readFileSync(assessmentPath(root, slotId), "utf8"),
+    ) as Record<string, unknown>;
 }
 
 /** Rewrite one stored assessment. */
@@ -283,7 +283,10 @@ describe("semantic assessment identity", () => {
         const assessed = assessCampaign(root, { slotIds: ["s1"] });
 
         // Assert
-        assert.equal(assessed.skipped.join("; "), "slot s1 is in flight; no assessment written");
+        assert.equal(
+            assessed.skipped.join("; "),
+            "slot s1 is in flight; no assessment written",
+        );
         assert.equal(existsSync(assessmentPath(root, "s1")), false);
     });
 
@@ -318,7 +321,11 @@ describe("semantic assessment identity", () => {
             refused.ok ? "" : refused.problems.join("; "),
             /no checked assessment/,
         );
-        assert.equal(closed.ok, true, closed.ok ? "" : closed.problems.join("; "));
+        assert.equal(
+            closed.ok,
+            true,
+            closed.ok ? "" : closed.problems.join("; "),
+        );
     });
 
     it("treats a post-close identical assessment as a read-only result", async () => {
@@ -482,7 +489,8 @@ describe("tampered assessment evidence", () => {
         // Arrange
         const root = await assessedRoot();
         rewrite(root, "s1", (value) => {
-            (value.evidence as Record<string, unknown>).captureSha256 = "0".repeat(64);
+            (value.evidence as Record<string, unknown>).captureSha256 =
+                "0".repeat(64);
         });
 
         // Act
@@ -494,6 +502,40 @@ describe("tampered assessment evidence", () => {
             status.problems.join("; "),
             /source evidence captureSha256 changed/,
         );
+    });
+
+    it("refuses status, closure and reporting after prepared-input drift", async () => {
+        // Arrange
+        const root = await assessedRoot();
+        const prompt = join(
+            root,
+            "prepare",
+            "prompts",
+            "positive-instrument.txt",
+        );
+        writeFileSync(
+            prompt,
+            `${readFileSync(prompt, "utf8")}drifted\n`,
+            "utf8",
+        );
+
+        // Act
+        const status = statusOf(root);
+        const closed = closeCampaign(root);
+        const report = analyseCampaign(root, join(root, "reports", "drift"));
+
+        // Assert
+        assert.equal(status.state, "blocked");
+        assert.match(
+            status.problems.join("; "),
+            /prompts\/positive-instrument/,
+        );
+        assert.equal(closed.ok, false);
+        assert.match(
+            closed.ok ? "" : closed.problems.join("; "),
+            /delivery check failed/,
+        );
+        assert.equal(report.ok, false);
     });
 
     it("refuses a report over a tampered assessment after closure", async () => {
@@ -518,16 +560,17 @@ describe("tampered assessment evidence", () => {
     it("rejects a missing and a duplicate ledger binding", async () => {
         // Arrange
         const missing = await assessedRoot();
-        const missingLedger = readLedger(missing);
-        const binding = missingLedger.events.find(
-            (event) => event.event === "assessment" && event.slotId === "s2",
-        );
-        const text = readFileSync(join(missing, "evidence", "ATTEMPTS.jsonl"), "utf8")
+        const text = readFileSync(
+            join(missing, "evidence", "ATTEMPTS.jsonl"),
+            "utf8",
+        )
             .split("\n")
             .filter((line) => {
                 if (line.trim() === "") return false;
                 const parsed = JSON.parse(line) as Record<string, unknown>;
-                return !(parsed.event === "assessment" && parsed.slotId === "s2");
+                return !(
+                    parsed.event === "assessment" && parsed.slotId === "s2"
+                );
             })
             .join("\n");
         writeFileSync(
@@ -536,9 +579,20 @@ describe("tampered assessment evidence", () => {
             "utf8",
         );
         const duplicate = await assessedRoot();
+        const duplicateLedger = readFileSync(
+            join(duplicate, "evidence", "ATTEMPTS.jsonl"),
+            "utf8",
+        );
+        const ownBinding = duplicateLedger
+            .split("\n")
+            .find(
+                (line) =>
+                    line.includes('"assessment"') &&
+                    line.includes('"slotId":"s2"'),
+            );
         writeFileSync(
             join(duplicate, "evidence", "ATTEMPTS.jsonl"),
-            `${readFileSync(join(duplicate, "evidence", "ATTEMPTS.jsonl"), "utf8")}${JSON.stringify(binding)}\n`,
+            `${duplicateLedger}${ownBinding ?? ""}\n`,
             "utf8",
         );
 
@@ -548,7 +602,10 @@ describe("tampered assessment evidence", () => {
 
         // Assert
         assert.match(missingStatus.problems.join("; "), /no ledger binding/);
-        assert.match(duplicateStatus.problems.join("; "), /bound more than once/);
+        assert.match(
+            duplicateStatus.problems.join("; "),
+            /bound more than once/,
+        );
     });
 
     it("rejects an unsupported evaluator version and an unexpected record", async () => {
@@ -568,7 +625,13 @@ describe("tampered assessment evidence", () => {
 
         // Assert
         assert.equal(status.state, "blocked");
-        assert.match(status.problems.join("; "), /unsupported evaluator version/);
-        assert.match(status.problems.join("; "), /unexpected assessment record/);
+        assert.match(
+            status.problems.join("; "),
+            /unsupported evaluator version/,
+        );
+        assert.match(
+            status.problems.join("; "),
+            /unexpected assessment record/,
+        );
     });
 });

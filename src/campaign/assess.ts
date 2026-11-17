@@ -1,4 +1,12 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync, linkSync } from "node:fs";
+import {
+    existsSync,
+    mkdirSync,
+    readFileSync,
+    readdirSync,
+    rmSync,
+    writeFileSync,
+    linkSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { canonicalJson, sha256Of } from "../contracts/canonical.ts";
@@ -18,8 +26,7 @@ import { assessShouldStop } from "./stop-policy.ts";
 
 /** One stored assessment. */
 export type StoredAssessment =
-    | ReturnType<typeof assessSkillTrial>
-    | ReturnType<typeof assessDocsTrial>;
+    ReturnType<typeof assessSkillTrial> | ReturnType<typeof assessDocsTrial>;
 
 /** Aggregate counts for a status/report line. */
 export interface AssessmentSummary {
@@ -63,7 +70,8 @@ export function assessmentPath(root: string, slotId: string): string {
 
 /** The semantic identity of an assessment: everything but its creation time. */
 export function assessmentIdentity(assessment: StoredAssessment): string {
-    const { assessedAt: _assessedAt, ...semantic } = assessment;
+    const semantic: Record<string, unknown> = { ...assessment };
+    delete semantic.assessedAt;
     return canonicalJson(semantic);
 }
 
@@ -190,10 +198,16 @@ function compareWithExisting(
     try {
         existing = JSON.parse(readFileSync(path, "utf8"));
     } catch {
-        return { ok: false, problem: `${path} is unreadable; refusing to overwrite it` };
+        return {
+            ok: false,
+            problem: `${path} is unreadable; refusing to overwrite it`,
+        };
     }
     if (!isRecord(existing)) {
-        return { ok: false, problem: `${path} is not an assessment; refusing to overwrite it` };
+        return {
+            ok: false,
+            problem: `${path} is not an assessment; refusing to overwrite it`,
+        };
     }
     const stored = existing as unknown as StoredAssessment;
     return assessmentIdentity(stored) === assessmentIdentity(assessment)
@@ -218,9 +232,8 @@ function bindAssessment(options: {
     ledger: LedgerRead;
     slot: Slot;
     assessment: StoredAssessment;
-    created: boolean;
 }): string[] {
-    const { root, manifest, ledger, slot, assessment, created } = options;
+    const { root, manifest, ledger, slot, assessment } = options;
     const bindings = bindingsFor(ledger, slot.slotId);
     if (bindings > 1) {
         return [
@@ -297,11 +310,67 @@ function readOnlyAssessment(
     };
 }
 
+/** The outcome of attempting one slot without persisting an unrun state. */
+interface SlotAssessment {
+    assessment: StoredAssessment | null;
+    problems: string[];
+    skipped: string | null;
+}
+
+/** Assess and publish one slot, or explain why it is left alone. */
+function assessSlot(options: {
+    root: string;
+    manifest: PreparedManifest;
+    ledger: LedgerRead;
+    slot: Slot;
+    now: () => string;
+}): SlotAssessment {
+    const { root, manifest, ledger, slot, now } = options;
+    const assessment = assessmentForSlot(root, manifest, slot, now);
+    if (assessment === null) {
+        return {
+            assessment: null,
+            problems: [`slot ${slot.slotId} has no case ${slot.caseId}`],
+            skipped: null,
+        };
+    }
+    if (assessment.validity === "unrun") {
+        const trialDir = trialDirectory(root, slot.slotId);
+        return {
+            assessment: null,
+            problems: [],
+            skipped: existsSync(join(trialDir, "launch.json"))
+                ? `slot ${slot.slotId} is in flight; no assessment written`
+                : `slot ${slot.slotId} has not run; no assessment written`,
+        };
+    }
+    const stored = storeAssessment(
+        assessmentPath(root, slot.slotId),
+        assessment,
+    );
+    if (!stored.ok) {
+        return { assessment: null, problems: [stored.problem], skipped: null };
+    }
+    return {
+        assessment: stored.assessment,
+        problems: bindAssessment({
+            root,
+            manifest,
+            ledger,
+            slot,
+            assessment: stored.assessment,
+        }),
+        skipped: null,
+    };
+}
+
 /**
  * Deterministically assess every scheduled slot from captured evidence.
  * Deterministic suites make zero model calls.
  * @param root The frozen campaign root.
  * @param options Slot selection and injected clock.
+ * @param options.slotIds The selected slots; all when omitted.
+ * @param options.now The injected clock for deterministic tests.
  * @returns Aggregate counts, skips and any refusals.
  */
 export function assessCampaign(
@@ -319,7 +388,7 @@ export function assessCampaign(
         };
     }
     const manifest = prepared.manifest;
-    let ledger = readLedger(root);
+    const ledger = readLedger(root);
     const refusal = assessmentRefusal(root, ledger);
     if (refusal !== null) {
         return {
@@ -345,64 +414,46 @@ export function assessCampaign(
             stoppedAt: null,
         };
     }
-    const now = options.now ?? (() => new Date().toISOString());
+    const selected = manifest.campaign.schedule.slots.filter(
+        (slot) =>
+            options.slotIds === undefined ||
+            options.slotIds.includes(slot.slotId),
+    );
+    return assessSelected({
+        root,
+        manifest,
+        ledger,
+        slots: selected,
+        now: options.now ?? (() => new Date().toISOString()),
+    });
+}
+
+/** Assess the selected slots, persisting only real terminal evidence. */
+function assessSelected(options: {
+    root: string;
+    manifest: PreparedManifest;
+    ledger: LedgerRead;
+    slots: readonly Slot[];
+    now: () => string;
+}): AssessResult {
+    let ledger = options.ledger;
     const summary = emptySummary();
     const problems: string[] = [];
     const skipped: string[] = [];
     let stoppedAt: string | null = null;
-    const slots = manifest.campaign.schedule.slots.filter(
-        (slot) =>
-            options.slotIds === undefined || options.slotIds.includes(slot.slotId),
-    );
-    for (const slot of slots) {
-        const assessment = assessmentForSlot(root, manifest, slot, now);
-        if (assessment === null) {
-            problems.push(`slot ${slot.slotId} has no case ${slot.caseId}`);
-            continue;
-        }
-        if (assessment.validity === "unrun") {
-            // Early inspection must not poison later work: derive unrun state
-            // and persist nothing.
-            const trialDir = trialDirectory(root, slot.slotId);
-            skipped.push(
-                existsSync(join(trialDir, "launch.json"))
-                    ? `slot ${slot.slotId} is in flight; no assessment written`
-                    : `slot ${slot.slotId} has not run; no assessment written`,
-            );
-            continue;
-        }
-        const stored = storeAssessment(
-            assessmentPath(root, slot.slotId),
-            assessment,
-        );
-        if (!stored.ok) {
-            problems.push(stored.problem);
-            continue;
-        }
-        problems.push(
-            ...bindAssessment({
-                root,
-                manifest,
-                ledger,
-                slot,
-                assessment: stored.assessment,
-                created: stored.kind === "created",
-            }),
-        );
-        ledger = readLedger(root);
-        tally(summary, stored.assessment);
-        if (assessShouldStop(manifest.campaign, stored.assessment)) {
+    for (const slot of options.slots) {
+        const outcome = assessSlot({ ...options, ledger, slot });
+        problems.push(...outcome.problems);
+        if (outcome.skipped !== null) skipped.push(outcome.skipped);
+        if (outcome.assessment === null) continue;
+        ledger = readLedger(options.root);
+        tally(summary, outcome.assessment);
+        if (assessShouldStop(options.manifest.campaign, outcome.assessment)) {
             stoppedAt = slot.slotId;
             break;
         }
     }
-    return {
-        ok: problems.length === 0,
-        summary,
-        problems,
-        skipped,
-        stoppedAt,
-    };
+    return { ok: problems.length === 0, summary, problems, skipped, stoppedAt };
 }
 
 /**
@@ -423,7 +474,9 @@ export function readAssessments(root: string): StoredAssessment[] {
                 const value: unknown = JSON.parse(
                     readFileSync(join(directory, name), "utf8"),
                 );
-                return isRecord(value) ? [value as unknown as StoredAssessment] : [];
+                return isRecord(value)
+                    ? [value as unknown as StoredAssessment]
+                    : [];
             } catch {
                 return [];
             }

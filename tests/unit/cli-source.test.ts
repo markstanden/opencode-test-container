@@ -23,7 +23,9 @@ describe("CLI source surface", () => {
 
     it("keeps every documented command dispatchable", () => {
         // Act
-        const documented = COMMANDS.filter((command) => USAGE.includes(command));
+        const documented = COMMANDS.filter((command) =>
+            USAGE.includes(command),
+        );
 
         // Assert
         assert.deepEqual(documented, [...COMMANDS]);

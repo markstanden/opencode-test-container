@@ -1,0 +1,12 @@
+{
+    "name": "otc-smoke-probe",
+    "version": "1.0.0",
+    "type": "module",
+    "description": "Deterministic OpenCode plugin used only by the OTC smoke suite.",
+    "exports": {
+        ".": "./index.js"
+    },
+    "files": [
+        "index.js"
+    ]
+}

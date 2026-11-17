@@ -1,6 +1,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { buildImage, containerfileText } from "../../src/adapters/podman/image.ts";
+import {
+    buildImage,
+    containerfileText,
+} from "../../src/adapters/podman/image.ts";
 import type { CommandResult } from "../../src/adapters/process.ts";
 
 /** One accepted command result. */
@@ -26,7 +29,8 @@ describe("packaged container recipe", () => {
         );
 
         // Act
-        const ordered = argIndex !== -1 && fromIndex !== -1 && argIndex < fromIndex;
+        const ordered =
+            argIndex !== -1 && fromIndex !== -1 && argIndex < fromIndex;
 
         // Assert
         assert.equal(
@@ -73,7 +77,9 @@ describe("packaged container recipe", () => {
         assert.equal(calls.length, 1);
         assert.equal(calls[0]?.command, "podman");
         const args = calls[0]?.args ?? [];
-        assert.ok(args.includes("NODE_BASE=docker.io/library/node:26.13.0-slim"));
+        assert.ok(
+            args.includes("NODE_BASE=docker.io/library/node:26.13.0-slim"),
+        );
         assert.ok(args.includes("OPENCODE_VERSION=2.2.6"));
         assert.match(args.at(-1) ?? "", /container$/);
     });

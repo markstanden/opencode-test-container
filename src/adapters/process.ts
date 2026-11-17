@@ -36,6 +36,8 @@ export interface CommandOptions {
     maxBuffer?: number;
     /** The stdin value. */
     stdin?: "ignore" | "pipe";
+    /** Cancels the child with the same bounded grace as a timeout. */
+    signal?: AbortSignal;
 }
 
 /** One captured stream, with an exact byte bound. */
@@ -81,11 +83,21 @@ export function runCommand(
         const err: Capture = { chunks: [], bytes: 0, overflowed: false };
         let timer: NodeJS.Timeout | null = null;
         let killTimer: NodeJS.Timeout | null = null;
+        let onAbort: (() => void) | null = null;
+        const clearTimers = (): void => {
+            if (timer !== null) clearTimeout(timer);
+            if (killTimer !== null) clearTimeout(killTimer);
+        };
+        const detachAbort = (): void => {
+            if (onAbort !== null) {
+                options.signal?.removeEventListener("abort", onAbort);
+            }
+        };
         const finish = (result: Partial<CommandResult>): void => {
             if (settled) return;
             settled = true;
-            if (timer !== null) clearTimeout(timer);
-            if (killTimer !== null) clearTimeout(killTimer);
+            clearTimers();
+            detachAbort();
             resolvePromise({
                 status: result.status ?? null,
                 signal: result.signal ?? null,
@@ -121,9 +133,27 @@ export function runCommand(
             capture.chunks.push(bytes);
             capture.bytes += bytes.byteLength;
         };
-        child.stdout?.on("data", (chunk: Buffer | string) => append(out, chunk));
-        child.stderr?.on("data", (chunk: Buffer | string) => append(err, chunk));
+        child.stdout?.on("data", (chunk: Buffer | string) =>
+            append(out, chunk),
+        );
+        child.stderr?.on("data", (chunk: Buffer | string) =>
+            append(err, chunk),
+        );
         child.on("error", (error) => finish({ error: error.message }));
+        if (options.signal !== undefined) {
+            onAbort = () => {
+                if (settled) return;
+                child.kill("SIGTERM");
+                killTimer = setTimeout(() => {
+                    if (!settled) child.kill("SIGKILL");
+                }, 2_000);
+            };
+            if (options.signal.aborted) onAbort();
+            else
+                options.signal.addEventListener("abort", onAbort, {
+                    once: true,
+                });
+        }
         timer = setTimeout(() => {
             timedOut = true;
             child.kill("SIGTERM");
@@ -131,8 +161,6 @@ export function runCommand(
                 if (!settled) child.kill("SIGKILL");
             }, 2_000);
         }, timeoutMs);
-        child.on("close", (status, signal) =>
-            finish({ status, signal }),
-        );
+        child.on("close", (status, signal) => finish({ status, signal }));
     });
 }

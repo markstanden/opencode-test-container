@@ -1,0 +1,27 @@
+{
+    "schemaVersion": 1,
+    "suiteId": "otc-smoke-docs",
+    "description": "Smoke fixture for primary-check and judge sandbox boundaries.",
+    "assessment": "docs-recording",
+    "cases": [
+        {
+            "caseId": "checker-case",
+            "kind": "docs-task",
+            "prompt": "Answer briefly and do not change any document.",
+            "fixture": "workspace",
+            "lakeRoot": "docs",
+            "expectedDocs": {
+                "kind": "none"
+            },
+            "criterion": {
+                "minVerifiedCalls": 0
+            },
+            "primaryCheck": {
+                "id": "boundary-probe",
+                "directory": "checker",
+                "script": "probe.mjs",
+                "timeoutMs": 30000
+            }
+        }
+    ]
+}

@@ -42,16 +42,12 @@ import { deliveryCheck, loadFrozen, type FrozenRecord } from "./freeze.ts";
 import { stageTree } from "./inventory.ts";
 import { executePrimaryCheck, type PrimaryCheckRecord } from "./primary.ts";
 import { runShouldStop } from "./stop-policy.ts";
-import {
-    appendLedgerEvent,
-    readLedger,
-    startedSlots,
-    trialStarts,
-} from "./ledger.ts";
+import { appendLedgerEvent, readLedger, startedSlots } from "./ledger.ts";
 import {
     advanceClaim,
     claimBudget,
     releaseClaim,
+    type BudgetClaim,
 } from "../evaluators/docs/analysis/budget.ts";
 import {
     loadPreparedManifest,
@@ -260,7 +256,9 @@ function writeTrialEnvironment(
     campaign: Campaign,
     journal: string | null,
     passthrough: readonly string[],
-): { ok: true; envFile: string; names: string[] } | { ok: false; problems: string[] } {
+):
+    | { ok: true; envFile: string; names: string[] }
+    | { ok: false; problems: string[] } {
     const env = sessionEnv(process.env, {
         configHome: CONTAINER_CONFIG_HOME,
         dataHome: "/tmp/agent-home/.local/share",
@@ -619,19 +617,50 @@ async function executeSlot(options: {
         },
         completedAt,
     );
+    const primary = await primaryStage({
+        root,
+        manifest,
+        frozen,
+        slot,
+        testCase: options.testCase,
+        trialDir,
+        execute,
+        now,
+    });
+    return { meta, ...primary };
+}
+
+/** Run the declared primary checker, if this case has one. */
+async function primaryStage(options: {
+    root: string;
+    manifest: PreparedManifest;
+    frozen: FrozenRecord;
+    slot: Slot;
+    testCase: SuiteCase;
+    trialDir: string;
+    execute: (plan: ContainerPlan) => Promise<CommandResult>;
+    now: () => string;
+}): Promise<{
+    primaryProblems: string[];
+    primaryStatus: PrimaryCheckRecord["status"] | null;
+}> {
+    const { root, manifest, frozen, slot, testCase, trialDir, execute, now } =
+        options;
     const preparedCase = manifest.cases.find(
         (entry) => entry.caseId === slot.caseId,
     );
-    if (
-        options.testCase.kind !== "docs-task" ||
-        options.testCase.primaryCheck === undefined ||
-        preparedCase === undefined
-    ) {
-        return { meta, primaryProblems: [], primaryStatus: null };
+    if (testCase.kind !== "docs-task" || testCase.primaryCheck === undefined) {
+        return { primaryProblems: [], primaryStatus: null };
+    }
+    if (preparedCase === undefined) {
+        return {
+            primaryProblems: ["the case has no prepared primary checker"],
+            primaryStatus: null,
+        };
     }
     const checked = await executePrimaryCheck({
         root,
-        testCase: options.testCase,
+        testCase,
         prepared: preparedCase,
         trialDir,
         workspace: join(trialDir, "workspace"),
@@ -655,7 +684,6 @@ async function executeSlot(options: {
         );
     }
     return {
-        meta,
         primaryProblems: checked.problem === null ? [] : [checked.problem],
         primaryStatus: checked.record?.status ?? null,
     };
@@ -743,6 +771,7 @@ async function dispatchSlot(options: {
     already: ReadonlySet<string>;
     dryRun: boolean;
     passthrough: readonly string[] | undefined;
+    signal: AbortSignal | undefined;
     execute: (plan: ContainerPlan) => Promise<CommandResult>;
     now: () => string;
 }): Promise<SlotOutcome> {
@@ -763,81 +792,21 @@ async function dispatchSlot(options: {
         };
     }
     const trialDir = trialDirectory(root, slot.slotId);
-    const planDirectory = dryRun
-        ? mkdtempSync(join(tmpdir(), "otc-plan-"))
-        : trialDir;
     if (dryRun) {
-        const planned = planTrial({
-            root,
-            manifest,
-            frozen,
-            slot,
-            testCase,
-            arm,
-            trialDir: planDirectory,
-            ...(options.passthrough === undefined
-                ? {}
-                : { passthrough: options.passthrough }),
-        });
-        rmSync(planDirectory, { recursive: true, force: true });
-        return planned.ok
-            ? { ran: true, refused: false, problems: [], stop: false }
-            : {
-                  ran: false,
-                  refused: false,
-                  problems: planned.problems,
-                  stop: false,
-              };
+        return dryRunPlan({ ...options, testCase, arm });
     }
-    // The claim is the arbitration point: one slot key and one budget index
-    // are created with `wx` before anything is staged. A crash keeps the
-    // claim, so an ambiguous attempt is never silently refunded.
-    const claimed = claimBudget(
-        join(root, "evidence"),
-        "trial",
-        manifest.campaign.budgets.trials,
-        {
-            stamp: slot.slotId,
-            key: `slot:${slot.slotId}`,
-            note: "trial reservation",
-        },
-    );
-    if (!claimed.ok) {
-        return {
-            ran: false,
-            refused: claimed.reason.includes("logical attempt"),
-            problems: [claimed.reason],
-            stop: !claimed.reason.includes("logical attempt"),
-        };
-    }
-    let planned;
-    try {
-        planned = planTrial({
-            root,
-            manifest,
-            frozen,
-            slot,
-            testCase,
-            arm,
-            trialDir: planDirectory,
-            ...(options.passthrough === undefined
-                ? {}
-                : { passthrough: options.passthrough }),
-        });
-    } catch (error) {
-        releaseClaim(claimed.claim);
-        throw error;
-    }
-    if (!planned.ok) {
-        // Nothing was staged or dispatched: this reservation is provably free.
-        releaseClaim(claimed.claim);
-        return {
-            ran: false,
-            refused: false,
-            problems: planned.problems,
-            stop: false,
-        };
-    }
+    const claimed = claimTrial(root, manifest, slot);
+    if (!claimed.ok) return claimed.outcome;
+    const planned = planClaimed({
+        ...options,
+        testCase,
+        arm,
+        trialDir,
+        claim: claimed.claim,
+    });
+    if (!planned.ok) return planned.outcome;
+    if (options.signal !== undefined)
+        planned.planned.plan.signal = options.signal;
     advanceClaim(claimed.claim, "spawned", {
         stamp: slot.slotId,
         note: "trial dispatch started",
@@ -848,7 +817,7 @@ async function dispatchSlot(options: {
         frozen,
         slot,
         testCase,
-        planned,
+        planned: planned.planned,
         trialDir,
         execute,
         now,
@@ -868,6 +837,116 @@ async function dispatchSlot(options: {
             exit: meta.meta.exit,
             primaryStatus: meta.primaryStatus,
         }),
+    };
+}
+
+/** The slot inputs shared by planning helpers. */
+interface SlotPlanning {
+    root: string;
+    manifest: PreparedManifest;
+    frozen: FrozenRecord;
+    slot: Slot;
+    testCase: SuiteCase;
+    arm: StagedArm;
+    passthrough: readonly string[] | undefined;
+}
+
+/** Plan a dry run in a disposable directory, then remove it. */
+function dryRunPlan(options: SlotPlanning): SlotOutcome {
+    const planDirectory = mkdtempSync(join(tmpdir(), "otc-plan-"));
+    const planned = planTrial({
+        root: options.root,
+        manifest: options.manifest,
+        frozen: options.frozen,
+        slot: options.slot,
+        testCase: options.testCase,
+        arm: options.arm,
+        trialDir: planDirectory,
+        ...(options.passthrough === undefined
+            ? {}
+            : { passthrough: options.passthrough }),
+    });
+    rmSync(planDirectory, { recursive: true, force: true });
+    return planned.ok
+        ? { ran: true, refused: false, problems: [], stop: false }
+        : {
+              ran: false,
+              refused: false,
+              problems: planned.problems,
+              stop: false,
+          };
+}
+
+/** Claim one trial's slot key and budget index, or report the refusal. */
+function claimTrial(
+    root: string,
+    manifest: PreparedManifest,
+    slot: Slot,
+): { ok: true; claim: BudgetClaim } | { ok: false; outcome: SlotOutcome } {
+    const claimed = claimBudget(
+        join(root, "evidence"),
+        "trial",
+        manifest.campaign.budgets.trials,
+        {
+            stamp: slot.slotId,
+            key: `slot:${slot.slotId}`,
+            note: "trial reservation",
+        },
+    );
+    if (claimed.ok) return { ok: true, claim: claimed.claim };
+    const logical = claimed.reason.includes("logical attempt");
+    return {
+        ok: false,
+        outcome: {
+            ran: false,
+            refused: logical,
+            problems: [claimed.reason],
+            stop: !logical,
+        },
+    };
+}
+
+/** Stage a claimed trial; release only when nothing was dispatched. */
+function planClaimed(
+    options: SlotPlanning & { trialDir: string; claim: BudgetClaim },
+):
+    | {
+          ok: true;
+          planned: {
+              plan: ContainerPlan;
+              argv: string[];
+              configSha256: string;
+          };
+      }
+    | { ok: false; outcome: SlotOutcome } {
+    let planned;
+    try {
+        planned = planTrial({
+            root: options.root,
+            manifest: options.manifest,
+            frozen: options.frozen,
+            slot: options.slot,
+            testCase: options.testCase,
+            arm: options.arm,
+            trialDir: options.trialDir,
+            ...(options.passthrough === undefined
+                ? {}
+                : { passthrough: options.passthrough }),
+        });
+    } catch (error) {
+        releaseClaim(options.claim);
+        throw error;
+    }
+    if (planned.ok) return { ok: true, planned };
+    releaseClaim(options.claim);
+    return {
+        ok: false,
+        outcome: {
+            ran: false,
+            refused: false,
+            problems: planned.problems,
+            stop: false,
+        },
     };
 }
 
@@ -929,6 +1008,7 @@ function runState(
  * @param options.slotIds The selected slots.
  * @param options.dryRun Plan without dispatch.
  * @param options.passthrough Named environment values to pass through.
+ * @param options.signal Cancels an in-flight dispatch with bounded cleanup.
  * @param deps Injected process runner and clock.
  * @returns What ran and what was refused.
  */
@@ -938,6 +1018,7 @@ export async function runCampaign(
         slotIds?: readonly string[];
         dryRun?: boolean;
         passthrough?: readonly string[];
+        signal?: AbortSignal;
     } = {},
     deps: RunDeps = {},
 ): Promise<RunSummary> {
@@ -966,6 +1047,7 @@ export async function runCampaign(
             already,
             dryRun: options.dryRun === true,
             passthrough: options.passthrough,
+            signal: options.signal,
             execute,
             now,
         });

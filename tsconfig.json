@@ -1,14 +1,10 @@
 {
     "compilerOptions": {
         "target": "es2024",
-        "lib": [
-            "es2024"
-        ],
+        "lib": ["es2024"],
         "module": "nodenext",
         "moduleResolution": "nodenext",
-        "types": [
-            "node"
-        ],
+        "types": ["node"],
         "strict": true,
         "noUncheckedIndexedAccess": true,
         "exactOptionalPropertyTypes": true,
@@ -25,9 +21,5 @@
         "outDir": "dist",
         "rootDir": "."
     },
-    "include": [
-        "src/**/*.ts",
-        "tests/**/*.ts",
-        "rehearsals/**/*.mts"
-    ]
+    "include": ["src/**/*.ts", "tests/**/*.ts", "rehearsals/**/*.mts"]
 }

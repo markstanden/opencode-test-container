@@ -21,10 +21,10 @@ is rendered as `r<N>` only at the adapter boundary.
 | Document      | Version | Notes                                                                 |
 | ------------- | ------- | --------------------------------------------------------------------- |
 | suite         | 1       | discriminated `skill-trigger` / `docs-task`; no executable fields     |
-| campaign      | 1       | explicit slots, runtime, budgets, assessment                          |
+| campaign      | 1       | explicit slots, runtime, budgets, assessment, optional stop policy    |
 | manifest      | 1       | embedded suite and normalised campaign; no source absolute paths      |
 | freeze        | 1       | `kind: "otc-freeze"`, immutable IDs, tool identity and `freezeSha256` |
-| assessment    | 1       | skill or docs shape; deterministic `attemptId`                        |
+| assessment    | 1       | skill or docs shape; evaluator version and source-evidence binding    |
 | primary check | 1       | product checker identity, fixed interpreter and outcome               |
 | judgement     | 1       | arm-blind judge verdict and its failure class                         |
 | selection     | 1       | per-slot chosen attempt and every attempt fact                        |
@@ -48,11 +48,83 @@ build and installed JavaScript execution each fingerprint the right tree. `run`,
 `status` compare the executing identity with the frozen identity before
 dispatch; read-only historical replay does not require it.
 
-Judge and recovery claims live only under
-`<root>/evidence/{judge,recovery}`. A recovery settles both of its claims
+Trial, judge and recovery claims live only under
+`<root>/evidence/{trial,judge,recovery}`. A recovery settles both of its claims
 according to the dispatch outcome; an interrupted dispatch keeps the claim
 `spawned` and closure refuses it. Status counts `judged`, `pending`, `failed`,
 `invalid` and `unsettled` from the same checked state.
+
+## Checked evidence
+
+Persisted evidence is loaded through `src/evidence`, never by `JSON.parse` at a
+consumer. The checked states are `missing`, `valid`, `corrupt`, `unsupported`
+and `conflicting`.
+
+- **Capture** validity is derived from the raw `events.jsonl` stream and the
+  supported OpenCode event contract, then reconciled with `meta.json`: counters,
+  answer hash, exit, timeout, error and byte overflow must agree. A metadata
+  flag is a claim, never proof. Invalid or unknown captures are never a passing
+  restraint or activation.
+- **Assessments** must match the scheduled slot, schema and evaluator version,
+  the exact source-evidence hashes they recorded, and one authoritative
+  `assessment` ledger event with the same SHA-256, outcome and validity. An
+  unexpected record file, duplicate binding or changed evidence is a
+  conflicting assessment.
+- **Local limit.** These hashes detect an edited record, missing binding or
+  changed evidence. They cannot defeat an operator who coherently rewrites every
+  trusted record on the machine.
+
+Assessments carry `evaluatorVersion` (currently 2). Version 1 roots are
+read-only replay material; they are accepted only when their hashes bind and
+are never rewritten.
+
+## Lifecycle and reservations
+
+Trial, judge and recovery spend use durable claim files created with `wx`
+under `<root>/evidence/<kind>/`. The filesystem is the arbitration point, so
+two processes cannot both take the last allowance, and two processes cannot
+claim the same slot key. A claim counts from `reserved` onward:
+`reserved → spawned → closed`. A crash keeps the claim, so an ambiguous attempt
+is never silently refunded. Only a claim that provably never staged or
+dispatched is released.
+
+Closure is the final mutation boundary. It refuses unresolved trial launches,
+any non-closed claim, untrustworthy assessments, and completed trials with no
+checked assessment. A never-started slot is legitimate `unrun` state and may be
+closed over. Post-close assessment is a read-only view of checked records; a
+request needing new evidence is refused.
+
+## Stop policy
+
+`stopOnFirstFailure` enables stopping; `stopPolicy: { version: 2 }` declares the
+semantics. Absent means legacy version 1.
+
+| Stage  | Version 2 stops after                                                   | Version 1 stops after            |
+| ------ | ----------------------------------------------------------------------- | -------------------------------- |
+| run    | invalid capture, non-zero exit, or a declared non-passing primary check | invalid capture or non-zero exit |
+| assess | a deterministic fail or invalid                                         | never                            |
+| judge  | a valid adverse verdict, or an operational refusal/error                | any recorded problem             |
+
+Already-running work is accounted for; no stage cancels a completed trial.
+
+## Containment and publication
+
+Workspace and lake content is read only through `src/evidence/containment.ts`:
+a real directory root, no symlinked directory traversal, containment of every
+resolved target, `O_NOFOLLOW` on the final open, and controlled refusal of
+FIFOs and special files. An invalid inventory or escaping object blocks packet
+and assessment construction instead of becoming “no changes”.
+
+Reports must resolve outside `evidence/` and `prepare/`; existing ancestors and
+symlinked parents are resolved before anything is created. Output is staged in
+a sibling temporary directory and renamed, so a failed publication leaves no
+misleading completed report.
+
+Environment files accept only portable names, reject newline/CR/NUL values, and
+never override OTC-owned `HOME`, `XDG_*`, `OPENCODE_CONFIG_CONTENT` or
+`DOCS_OPERATION_JOURNAL*`. Mount sources and targets may not contain commas or
+NULs. Containers carry an owned unique name and labels; cleanup addresses that
+name only.
 
 A selection is trusted only through the shared checked reader: attempt set,
 packet bytes, policy hash, selected judgement SHA-256, outcome/utility and the
@@ -90,6 +162,9 @@ and historical `.mjs` files are never rewritten by a rename.
 - Docs refused writes retain zero recording credit; attempts are reported.
 - A primary checker that fails makes the criterion fail; a timeout or spawn
   error is `unknown`; a declared checker with no result is `invalid`.
+- Usage coverage is explicit per field: no step-finish event is `unknown`,
+  an incomplete token block is `partial`, and an explicit zero is `measured`.
+  Unknown usage is never reported as a measured zero.
 - Judge failure classes: `json-syntax`, `schema`, `semantic`,
   `empty-or-truncated`, `transport-or-process`. Only a complete `json-syntax`
   failure is recoverable, once, from identical packet bytes.

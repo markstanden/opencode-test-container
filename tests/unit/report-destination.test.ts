@@ -11,7 +11,6 @@ import {
     readdirSync,
     rmSync,
     symlinkSync,
-    writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -79,7 +78,11 @@ async function closedRoot(): Promise<{ dir: string; root: string }> {
     cpSync(FIXTURE, dir, { recursive: true });
     const root = join(dir, "root");
     const prepared = prepareCampaign(join(dir, "campaign.json"), root);
-    assert.equal(prepared.ok, true, prepared.ok ? "" : prepared.problems.join("; "));
+    assert.equal(
+        prepared.ok,
+        true,
+        prepared.ok ? "" : prepared.problems.join("; "),
+    );
     const frozen = await freezeCampaign(root, fakeImage as typeof runCommand);
     assert.equal(frozen.ok, true, frozen.ok ? "" : frozen.problems.join("; "));
     const ran = await runCampaign(root, {}, { runContainer: container });
@@ -133,7 +136,10 @@ describe("report destination containment", () => {
 
         // Assert
         assert.equal(result.ok, false);
-        assert.match(result.ok ? "" : result.problems.join("; "), /protected evidence/);
+        assert.match(
+            result.ok ? "" : result.problems.join("; "),
+            /protected evidence/,
+        );
         assert.equal(existsSync(out), false);
     });
 
@@ -166,7 +172,10 @@ describe("report destination containment", () => {
 
         // Assert
         assert.equal(result.ok, false);
-        assert.match(result.ok ? "" : result.problems.join("; "), /protected evidence/);
+        assert.match(
+            result.ok ? "" : result.problems.join("; "),
+            /protected evidence/,
+        );
         assert.equal(existsSync(join(root, "evidence", "descendant")), false);
     });
 
@@ -179,7 +188,11 @@ describe("report destination containment", () => {
         const result = analyseCampaign(root, out);
 
         // Assert
-        assert.equal(result.ok, true, result.ok ? "" : result.problems.join("; "));
+        assert.equal(
+            result.ok,
+            true,
+            result.ok ? "" : result.problems.join("; "),
+        );
         assert.equal(existsSync(join(out, "report.json")), true);
         assert.equal(existsSync(join(out, "report.md")), true);
     });
@@ -226,6 +239,9 @@ describe("report destination containment", () => {
 
         // Assert
         assert.equal(second.ok, false);
-        assert.match(second.ok ? "" : second.problems.join("; "), /never overwritten/);
+        assert.match(
+            second.ok ? "" : second.problems.join("; "),
+            /never overwritten/,
+        );
     });
 });

@@ -1,6 +1,8 @@
 # OTC container
 
-`Containerfile` builds the sandbox image. Both floating inputs are explicit:
+`Containerfile` builds the sandbox image. `ARG NODE_BASE` is declared before
+the first `FROM` so the build argument is in scope for the base reference. Both
+floating inputs are explicit:
 
 ```sh
 podman build \

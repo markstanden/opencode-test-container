@@ -34,6 +34,8 @@ export interface ContainerPlan {
     name?: string;
     /** Ownership labels recorded on the container. */
     labels?: Record<string, string>;
+    /** Cancels the dispatch with bounded cleanup. */
+    signal?: AbortSignal;
 }
 
 /** Check one proposed mount's path syntax and existence. */
@@ -160,6 +162,7 @@ export async function runContainer(
     const result = await run("podman", containerArgv(plan), {
         timeoutMs: plan.timeoutMs,
         maxBuffer: 64 * 1024 * 1024,
+        ...(plan.signal === undefined ? {} : { signal: plan.signal }),
     });
     // Killing the Podman client is not proof the container stopped. A timeout,
     // error or signal triggers a bounded stop/remove of this owned name only;

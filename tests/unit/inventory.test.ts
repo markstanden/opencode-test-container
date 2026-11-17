@@ -161,7 +161,10 @@ describe("inventory identity", () => {
 
             // Assert
             assert.equal(observed.ok, false);
-            assert.match(observed.ok ? "" : observed.problem, /not a regular file/);
+            assert.match(
+                observed.ok ? "" : observed.problem,
+                /not a regular file/,
+            );
         } finally {
             rmSync(root, { recursive: true, force: true });
         }

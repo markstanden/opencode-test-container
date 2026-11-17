@@ -11,12 +11,14 @@
 import {
     existsSync,
     mkdirSync,
+    mkdtempSync,
     readFileSync,
     readdirSync,
     rmSync,
     writeFileSync,
 } from "node:fs";
-import { join, relative, sep } from "node:path";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { sha256Bytes, sha256Of } from "../contracts/canonical.ts";
 import type { ToolIdentity } from "../contracts/version.ts";
 import type { Campaign, DocsTaskCase, Slot } from "../contracts/types.ts";
@@ -66,11 +68,7 @@ import {
     type DocumentationOutcome,
     type JudgeFailureClass,
 } from "../evaluators/docs/scoring.ts";
-import {
-    docChanges,
-    labelLeaks,
-    type LakeDocument,
-} from "../evaluators/docs/campaign.ts";
+import { docChanges, type LakeDocument } from "../evaluators/docs/campaign.ts";
 import { creditedOperationLines } from "../evaluators/docs/assess.ts";
 import { claimAttemptDir } from "./evidence-guard.ts";
 import { deliveryCheck, loadFrozen, type FrozenRecord } from "./freeze.ts";
@@ -291,9 +289,7 @@ function recordedAttempts(
 function lakeDocuments(
     workspace: string,
     lakeRoot: string,
-):
-    | { ok: true; documents: LakeDocument[] }
-    | { ok: false; problem: string } {
+): { ok: true; documents: LakeDocument[] } | { ok: false; problem: string } {
     const read = readContainedDocuments(workspace, lakeRoot, (name) =>
         name.endsWith(".md"),
     );
@@ -312,9 +308,7 @@ function lakeDocuments(
 function changedPaths(
     pristine: string,
     live: string,
-):
-    | { ok: true; paths: string[] }
-    | { ok: false; problems: string[] } {
+): { ok: true; paths: string[] } | { ok: false; problems: string[] } {
     const before = inventory(pristine);
     const after = inventory(live);
     if (!before.ok || !after.ok) {
@@ -360,9 +354,7 @@ function docStateFor(
     root: string,
     slot: Slot,
     testCase: DocsTaskCase,
-):
-    | { ok: true; state: DocState }
-    | { ok: false; problems: string[] } {
+): { ok: true; state: DocState } | { ok: false; problems: string[] } {
     const lakeRoot = testCase.lakeRoot ?? "docs";
     const beforeDocs = lakeDocuments(
         join(root, "prepare", "workspaces", testCase.caseId),
@@ -496,7 +488,9 @@ function judgeMounts(options: {
 function writeJudgeEnvironment(
     attemptDir: string,
     campaign: Campaign,
-): { ok: true; envFile: string; names: string[] } | { ok: false; problems: string[] } {
+):
+    | { ok: true; envFile: string; names: string[] }
+    | { ok: false; problems: string[] } {
     const env = sessionEnv(process.env, {
         configHome: "/config-home",
         dataHome: "/tmp/agent-home/.local/share",
@@ -686,12 +680,11 @@ function planAttempt(options: {
     packetSha256: string;
     packetFile: string;
     judgeModel: string;
+    attemptDirOverride?: string;
 }): AttemptPlan | { ok: false; problems: string[] } {
-    const attemptDir = attemptDirectory(
-        options.root,
-        options.slot.slotId,
-        options.attemptId,
-    );
+    const attemptDir =
+        options.attemptDirOverride ??
+        attemptDirectory(options.root, options.slot.slotId, options.attemptId);
     mkdirSync(attemptDir, { recursive: true });
     const configHome = writeJudgeConfigHome(
         attemptDir,
@@ -716,7 +709,9 @@ function planAttempt(options: {
             "opencode",
             ...opencodeRunArgs({
                 model: options.judgeModel,
-                title: `otc-judge-${options.slot.slotId}-${options.attemptId}`,
+                // The session title is model-visible metadata: never encode a
+                // slot, arm or attempt identity in it.
+                title: `otc-judge-${sha256Bytes(options.attemptId).slice(0, 12)}`,
                 prompt: options.packet,
                 printLogs: process.env.OTC_PRINT_LOGS === "1",
             }),
@@ -733,6 +728,7 @@ function planAttempt(options: {
         ),
         labels: {
             "otc.owner": "otc",
+            "otc.judge": "1",
             "otc.campaign": options.campaign.campaignId,
             "otc.slot": options.slot.slotId,
             "otc.attempt": options.attemptId,
@@ -1657,10 +1653,7 @@ function campaignLeaks(
         // structural position (path segment, quoted value, assignment), so
         // legitimate task prose such as "the candidate must" is preserved.
         const pattern = /[0-9-]/.test(identifier)
-            ? new RegExp(
-                  `(^|[^A-Za-z0-9_-])${escaped}([^A-Za-z0-9_-]|$)`,
-                  "i",
-              )
+            ? new RegExp(`(^|[^A-Za-z0-9_-])${escaped}([^A-Za-z0-9_-]|$)`, "i")
             : new RegExp(
                   `(?:[/\\\\]${escaped}(?:[/\\\\]|$)|"${escaped}"|${escaped}=)`,
               );
@@ -1668,7 +1661,8 @@ function campaignLeaks(
             ? [`the packet names campaign identifier ${identifier}`]
             : [];
     });
-    if (packet.includes(root)) problems.push("the packet names the evidence root");
+    if (packet.includes(root))
+        problems.push("the packet names the evidence root");
     return [...new Set(problems)];
 }
 
@@ -2024,46 +2018,79 @@ export async function judgeCampaign(
         };
     }
     const manifest = state.manifest;
-    const slots = judgeSlots(manifest, options.slotIds);
     const execute = deps.runContainer ?? runContainer;
     const now = deps.now ?? (() => new Date().toISOString());
+    const tally = await judgeInOrder({
+        root,
+        manifest,
+        frozen: state.frozen,
+        policy: state.policy,
+        slots: judgeSlots(manifest, options.slotIds),
+        dryRun: options.dryRun === true,
+        execute,
+        now,
+    });
+    return {
+        ok: tally.refused.length === 0 && tally.problems.length === 0,
+        ...tally,
+    };
+}
+
+/** Judge one slot and report whether its checked verdict was adverse. */
+async function judgeOne(options: {
+    root: string;
+    manifest: PreparedManifest;
+    frozen: FrozenRecord;
+    policy: RecoveryPolicy | null;
+    slot: Slot;
+    dryRun: boolean;
+    execute: (plan: ContainerPlan) => Promise<CommandResult>;
+    now: () => string;
+}): Promise<{
+    result: { status: "judged" | "skipped" | "refused"; problems: string[] };
+    adverse: boolean;
+}> {
+    const result = await judgeSlot(options);
+    const selected =
+        result.status === "judged" && !options.dryRun
+            ? readSelectedJudgement(options.root, options.slot.slotId)
+            : null;
+    return {
+        result,
+        adverse: isAdverseOutcome(selected?.judgement.documentationOutcome),
+    };
+}
+
+/** Judge selected slots in order, honouring the declared stop policy. */
+async function judgeInOrder(options: {
+    root: string;
+    manifest: PreparedManifest;
+    frozen: FrozenRecord;
+    policy: RecoveryPolicy | null;
+    slots: readonly Slot[];
+    dryRun: boolean;
+    execute: (plan: ContainerPlan) => Promise<CommandResult>;
+    now: () => string;
+}): Promise<JudgeTally> {
     const tally: JudgeTally = {
         judged: [],
         skipped: [],
         refused: [],
         problems: [],
     };
-    for (const slot of slots) {
-        const result = await judgeSlot({
-            root,
-            manifest,
-            frozen: state.frozen,
-            slot,
-            policy: state.policy,
-            dryRun: options.dryRun === true,
-            execute,
-            now,
-        });
+    for (const slot of options.slots) {
+        const { result, adverse } = await judgeOne({ ...options, slot });
         tallyResult(tally, slot.slotId, result);
-        const selected =
-            result.status === "judged" && options.dryRun !== true
-                ? readSelectedJudgement(root, slot.slotId)
-                : null;
         if (
-            judgeShouldStop(manifest.campaign, {
+            judgeShouldStop(options.manifest.campaign, {
                 problems: result.problems,
-                adverse: isAdverseOutcome(
-                    selected?.judgement.documentationOutcome,
-                ),
+                adverse,
             })
         ) {
             break;
         }
     }
-    return {
-        ok: tally.refused.length === 0 && tally.problems.length === 0,
-        ...tally,
-    };
+    return tally;
 }
 
 /** Read a slot's attempt metadata, sorted by attempt id. */
@@ -2108,4 +2135,59 @@ export function readSelectedJudgement(
               judgement: checked.value.judgement,
           }
         : null;
+}
+
+/**
+ * Build a judge sandbox plan for one docs slot without claiming a budget or
+ * dispatching. Internal smoke/ops hook: it uses the production mount plan and
+ * packet builder, and writes only into a fresh temporary attempt directory.
+ * @param root The campaign root.
+ * @param slotId The scheduled docs slot.
+ * @param attemptId The attempt identity to render.
+ * @returns The plan, or every refusal.
+ */
+export function judgeSandboxPlanForSlot(
+    root: string,
+    slotId: string,
+    attemptId: string,
+): { ok: true; plan: ContainerPlan } | { ok: false; problems: string[] } {
+    const prepared = loadPreparedManifest(root);
+    if (!prepared.ok) return { ok: false, problems: [prepared.problem] };
+    const frozen = loadFrozen(root);
+    if (!frozen.ok) return { ok: false, problems: [frozen.problem] };
+    const slot = prepared.manifest.campaign.schedule.slots.find(
+        (entry) => entry.slotId === slotId,
+    );
+    const testCase = prepared.manifest.suite.cases.find(
+        (entry) => entry.caseId === slot?.caseId,
+    );
+    const judgeModel = prepared.manifest.campaign.assessment.judge?.model;
+    if (slot === undefined || testCase?.kind !== "docs-task") {
+        return { ok: false, problems: [`slot ${slotId} has no docs case`] };
+    }
+    if (judgeModel === undefined) {
+        return {
+            ok: false,
+            problems: ["the campaign declares no judge model"],
+        };
+    }
+    const built = buildPacket({ root, slot, testCase });
+    if (!built.ok) return built;
+    const directory = mkdtempSync(join(tmpdir(), "otc-judge-plan-"));
+    const packetFile = join(directory, "packet.md");
+    writeFileSync(packetFile, built.packet, "utf8");
+    const planned = planAttempt({
+        root,
+        campaign: prepared.manifest.campaign,
+        slot,
+        attemptId,
+        packet: built.packet,
+        packetSha256: sha256Bytes(built.packet),
+        packetFile,
+        judgeModel,
+        attemptDirOverride: directory,
+    });
+    if (!planned.ok) return planned;
+    planned.plan.imageId = frozen.record.imageId;
+    return { ok: true, plan: planned.plan };
 }

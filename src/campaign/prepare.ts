@@ -206,6 +206,10 @@ function write(path: string, contents: string): void {
 export const DEFAULT_PLUGIN_INCLUDE = [
     "package.json",
     "package-lock.json",
+    "index.js",
+    "index.ts",
+    "server.js",
+    "server.ts",
     "src",
     "dist",
     "node_modules",

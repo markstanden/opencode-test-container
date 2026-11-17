@@ -1,0 +1,57 @@
+{
+    "schemaVersion": 1,
+    "campaignId": "otc-smoke-docs",
+    "suite": {
+        "path": "suite.json"
+    },
+    "subjects": [
+        {
+            "armId": "docs-arm"
+        }
+    ],
+    "schedule": {
+        "kind": "explicit",
+        "slots": [
+            {
+                "slotId": "checker-slot",
+                "caseId": "checker-case",
+                "armId": "docs-arm",
+                "repetitionId": "r0"
+            }
+        ]
+    },
+    "runtime": {
+        "image": "localhost/otc-smoke:runtime",
+        "opencodeVersion": "2.2.6",
+        "provider": {
+            "route": "scripted",
+            "model": "zai-coding-plan/glm-5.3-flash",
+            "overlay": {
+                "providers": {
+                    "zai-coding-plan": {
+                        "settings": {
+                            "baseURL": "http://127.0.0.1:1/v1"
+                        }
+                    }
+                }
+            }
+        },
+        "timeoutMs": 60000,
+        "network": "host",
+        "passthroughEnv": ["ZAI_API_KEY"]
+    },
+    "budgets": {
+        "trials": 1,
+        "judgeAttempts": 1
+    },
+    "assessment": {
+        "kind": "docs-recording",
+        "judge": {
+            "model": "zai-coding-plan/glm-5.3-flash"
+        }
+    },
+    "stopOnFirstFailure": true,
+    "stopPolicy": {
+        "version": 2
+    }
+}
