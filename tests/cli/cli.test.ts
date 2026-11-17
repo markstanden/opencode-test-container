@@ -12,6 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { stagePackageInputs } from "../support/package-stage.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "..", "..");
@@ -124,17 +125,20 @@ describe("installed-shape CLI", () => {
 describe("packaged consumer", () => {
     it("installs the tarball and runs the binary with no repository paths", () => {
         const consumer = mkdtempSync(join(tmpdir(), "otc consumer-"));
+        const stage = stagePackageInputs(REPO);
         try {
             writeFileSync(
                 join(consumer, "package.json"),
                 `${JSON.stringify({ name: "otc-consumer", private: true, version: "1.0.0" }, null, 2)}\n`,
                 "utf8",
             );
+            // Pack the staged copy: prepack rebuilds *its* dist, never the
+            // checkout's shared build output.
             const packed = spawnSync(
                 "npm",
                 ["pack", "--json", "--pack-destination", consumer],
                 {
-                    cwd: REPO,
+                    cwd: stage,
                     encoding: "utf8",
                 },
             );
@@ -218,6 +222,7 @@ describe("packaged consumer", () => {
             );
         } finally {
             rmSync(consumer, { recursive: true, force: true });
+            rmSync(stage, { recursive: true, force: true });
         }
     });
 });
