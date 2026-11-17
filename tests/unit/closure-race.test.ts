@@ -17,6 +17,7 @@ import { prepareCampaign } from "../../src/campaign/prepare.ts";
 import { freezeCampaign } from "../../src/campaign/freeze.ts";
 import { runCommand, type CommandResult } from "../../src/adapters/process.ts";
 import { readLedger } from "../../src/campaign/ledger.ts";
+import { closeCampaign } from "../../src/campaign/close.ts";
 import { withAdmission } from "../../src/campaign/admission.ts";
 import { utimesSync } from "node:fs";
 
@@ -170,7 +171,7 @@ describe("closure and dispatch share one admission decision", () => {
                     assert.equal(
                         existsSync(join(made.root, "evidence", "trials", "s1")),
                         false,
-                        `attempt ${attempt}: closure succeeded but a trial exists`,
+                        `attempt ${attempt}: closure succeeded but a trial exists; close=${JSON.stringify(outcome.close)} run=${JSON.stringify(outcome.run)} events=${names.join(",")}`,
                     );
                     assert.equal(outcome.run.ran.length, 0);
                 }
@@ -201,6 +202,30 @@ describe("admission lock recovery", () => {
 
             // Assert
             assert.deepEqual(entered, { ok: true, value: "entered" });
+        } finally {
+            rmSync(made.dir, { recursive: true, force: true });
+        }
+    });
+});
+
+describe("orphan trial evidence", () => {
+    it("refuses closure for a trial directory with no terminal record", async () => {
+        // Arrange
+        const made = await root();
+        try {
+            mkdirSync(join(made.root, "evidence", "trials", "s1"), {
+                recursive: true,
+            });
+
+            // Act
+            const closed = closeCampaign(made.root);
+
+            // Assert
+            assert.equal(closed.ok, false);
+            assert.match(
+                closed.ok ? "" : closed.problems.join("; "),
+                /trial director\(ies\) without a terminal record/,
+            );
         } finally {
             rmSync(made.dir, { recursive: true, force: true });
         }

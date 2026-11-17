@@ -9,6 +9,7 @@ import {
     readJudgeAttempts,
 } from "./judge.ts";
 import { readClaims } from "./budget.ts";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { withAdmission } from "./admission.ts";
 
@@ -98,6 +99,17 @@ function closureRefusals(
     if (missing.length > 0) {
         return [
             `completed slot(s) have no checked assessment: ${missing.join(", ")}; assess before closure`,
+        ];
+    }
+    const orphanDirectories = manifest.campaign.schedule.slots
+        .filter((slot) =>
+            existsSync(join(root, "evidence", "trials", slot.slotId)),
+        )
+        .filter((slot) => !ended.has(slot.slotId))
+        .map((slot) => slot.slotId);
+    if (orphanDirectories.length > 0) {
+        return [
+            `trial director(ies) without a terminal record: ${orphanDirectories.join(", ")}; closure would hide unknown spend`,
         ];
     }
     const packetProblems = manifest.campaign.schedule.slots.flatMap((slot) =>
