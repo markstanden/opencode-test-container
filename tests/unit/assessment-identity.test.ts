@@ -311,6 +311,29 @@ console.log(JSON.stringify(result));
         assert.match((stored.reasons as string[]).join("; "), /unsafe object/);
     });
 
+    it("assesses a directory symlink in the workspace as invalid", async () => {
+        // Arrange
+        const root = await rootOf();
+        await run(root, ["s1"]);
+        const workspace = join(trialDirectory(root, "s1"), "workspace");
+        mkdirSync(join(workspace, "z-dir"));
+        symlinkSync("z-dir", join(workspace, "a-link"));
+
+        // Act
+        const assessed = assessCampaign(root, {
+            now: () => "2026-11-17T00:00:00.000Z",
+        });
+        const stored = record(root, "s1");
+
+        // Assert
+        assert.equal(assessed.ok, true, assessed.problems.join("; "));
+        assert.equal(stored.validity, "invalid");
+        assert.match(
+            (stored.reasons as string[]).join("; "),
+            /unsafe object/,
+        );
+    });
+
     it("blocks status when a workspace entry becomes unsafe after assessment", async () => {
         // Arrange
         const root = await rootOf();
