@@ -126,6 +126,11 @@ never override OTC-owned `HOME`, `XDG_*`, `OPENCODE_CONFIG_CONTENT` or
 NULs. Containers carry an owned unique name and labels; cleanup addresses that
 name only.
 
+Assessment publication is atomic: the record is linked into place and exactly
+one ledger binding is created under an exclusive per-slot binding lock. A
+leftover lock after a crash is a controlled refusal, never an invitation to
+re-bind or delete evidence.
+
 A selection is trusted only through the shared checked reader: attempt set,
 packet bytes, policy hash, selected judgement SHA-256, outcome/utility and the
 judged documentation state are re-derived. The slot and attempt `packet.md`
