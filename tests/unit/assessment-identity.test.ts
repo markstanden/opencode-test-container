@@ -1,6 +1,7 @@
 import { after, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { spawn } from "node:child_process";
 import {
     cpSync,
     existsSync,
@@ -13,7 +14,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { prepareCampaign } from "../../src/campaign/prepare.ts";
 import { freezeCampaign } from "../../src/campaign/freeze.ts";
 import { runCampaign, trialDirectory } from "../../src/campaign/run.ts";
@@ -223,6 +224,63 @@ describe("semantic assessment identity", () => {
         assert.equal(after.assessedAt, "2026-11-17T00:00:00.000Z");
         assert.deepEqual(after, before);
         assert.equal(assessmentEvents(root, "s1").length, 1);
+    });
+
+    it("publishes one record when two processes assess the same slot", async () => {
+        // Arrange
+        const root = await rootOf();
+        await run(root, ["s1"]);
+        const script = join(root, "race-assess.mjs");
+        writeFileSync(
+            script,
+            `import { existsSync } from "node:fs";
+import { assessCampaign } from ${JSON.stringify(
+                pathToFileURL(
+                    join(HERE, "..", "..", "src", "campaign", "assess.ts"),
+                ).href,
+            )};
+const [root, start] = process.argv.slice(2);
+while (!existsSync(start)) await new Promise((again) => setTimeout(again, 5));
+const result = assessCampaign(root, { now: () => "2026-11-17T00:00:00.000Z" });
+console.log(JSON.stringify(result));
+`,
+            "utf8",
+        );
+        const start = join(root, "start");
+        const children = [0, 1].map(
+            () =>
+                new Promise<string>((done, fail) => {
+                    const child = spawn(
+                        process.execPath,
+                        [script, root, start],
+                        { stdio: ["ignore", "pipe", "pipe"] },
+                    );
+                    let stdout = "";
+                    let stderr = "";
+                    child.stdout.on("data", (chunk: Buffer) => {
+                        stdout += String(chunk);
+                    });
+                    child.stderr.on("data", (chunk: Buffer) => {
+                        stderr += String(chunk);
+                    });
+                    child.on("error", fail);
+                    child.on("close", (code) =>
+                        code === 0 ? done(stdout) : fail(new Error(stderr)),
+                    );
+                }),
+        );
+
+        // Act
+        writeFileSync(start, "go\n", "utf8");
+        const results = await Promise.all(children);
+
+        // Assert
+        for (const result of results) {
+            const parsed = JSON.parse(result) as { ok: boolean; problems: string[] };
+            assert.equal(parsed.ok, true, parsed.problems.join("; "));
+        }
+        assert.equal(assessmentEvents(root, "s1").length, 1);
+        assert.equal(existsSync(assessmentPath(root, "s1")), true);
     });
 
     it("refuses a changed assessment when the evidence changed", async () => {

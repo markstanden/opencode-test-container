@@ -13,7 +13,12 @@ import { canonicalJson, sha256Of } from "../contracts/canonical.ts";
 import { isRecord } from "../contracts/validate.ts";
 import { loadPreparedManifest, type PreparedManifest } from "./prepare.ts";
 import { deliveryCheck, loadFrozen } from "./freeze.ts";
-import { appendLedgerEvent, readLedger, type LedgerRead } from "./ledger.ts";
+import {
+    appendLedgerEvent,
+    readLedger,
+    type LedgerEvent,
+    type LedgerRead,
+} from "./ledger.ts";
 import { trialDirectory } from "./run.ts";
 import type { Slot } from "../contracts/types.ts";
 import { assessSkillTrial } from "../evaluators/skills/assess.ts";
@@ -225,56 +230,110 @@ function bindingsFor(ledger: LedgerRead, slotId: string): number {
     ).length;
 }
 
-/** Record one created assessment in the ledger, or refuse a duplicate. */
+/** A short synchronous wait for a concurrent binder to publish. */
+function sleepSync(ms: number): void {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/** The ledger event a slot's assessment should be bound to, or null. */
+function boundEvent(
+    ledger: LedgerRead,
+    slotId: string,
+    assessment: StoredAssessment,
+): LedgerEvent | null {
+    return (
+        ledger.events.find(
+            (event) =>
+                event.event === "assessment" &&
+                event.slotId === slotId &&
+                event.assessmentSha256 === sha256Of(assessment) &&
+                event.outcome === assessment.outcome &&
+                event.validity === assessment.validity &&
+                event.attemptId === assessment.attemptId,
+        ) ?? null
+    );
+}
+
+/** Wait for a concurrent binder, bounded, and return the settled event. */
+function awaitBinding(
+    root: string,
+    slotId: string,
+    assessment: StoredAssessment,
+): LedgerEvent | null {
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+        const found = boundEvent(readLedger(root), slotId, assessment);
+        if (found !== null) return found;
+        sleepSync(10);
+    }
+    return null;
+}
+
+/** Record one created assessment in the ledger, exactly once. */
 function bindAssessment(options: {
     root: string;
     manifest: PreparedManifest;
-    ledger: LedgerRead;
     slot: Slot;
     assessment: StoredAssessment;
 }): string[] {
-    const { root, manifest, ledger, slot, assessment } = options;
-    const bindings = bindingsFor(ledger, slot.slotId);
-    if (bindings > 1) {
+    const { root, manifest, slot, assessment } = options;
+    const ledger = readLedger(root);
+    if (bindingsFor(ledger, slot.slotId) > 1) {
         return [
-            `slot ${slot.slotId} has ${bindings} assessment ledger bindings; refusing to add another`,
+            `slot ${slot.slotId} has more than one assessment ledger binding; refusing to add another`,
         ];
     }
-    if (bindings === 1) {
-        const bound = ledger.events.find(
-            (event) =>
-                event.event === "assessment" && event.slotId === slot.slotId,
-        );
-        const agrees =
-            bound?.assessmentSha256 === sha256Of(assessment) &&
-            bound.outcome === assessment.outcome &&
-            bound.validity === assessment.validity &&
-            bound.attemptId === assessment.attemptId;
-        return agrees
-            ? []
-            : [
-                  `slot ${slot.slotId} has a ledger binding for different assessment bytes`,
-              ];
-    }
-    // A record with no binding is completed by this mutating command; a
-    // created record gets its one binding. Neither invents a second event.
-    appendLedgerEvent(
+    const bound = boundEvent(ledger, slot.slotId, assessment);
+    if (bound !== null) return [];
+    const lock = join(
         root,
-        {
-            event: "assessment",
-            campaignId: manifest.campaignId,
-            slotId: slot.slotId,
-            attemptId: assessment.attemptId,
-            outcome: assessment.outcome,
-            validity: assessment.validity,
-            assessmentSha256: sha256Of(assessment),
-        },
-        assessment.assessedAt,
+        "evidence",
+        "assessments",
+        `${slot.slotId}.binding`,
     );
-    return [];
+    let owned = false;
+    try {
+        writeFileSync(lock, `${process.pid}\n`, { encoding: "utf8", flag: "wx" });
+        owned = true;
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+            return [
+                `slot ${slot.slotId} binding lock failed: ${error instanceof Error ? error.message : String(error)}`,
+            ];
+        }
+    }
+    if (!owned) {
+        return awaitBinding(root, slot.slotId, assessment) === null
+            ? [`slot ${slot.slotId} assessment binding did not settle`]
+            : [];
+    }
+    try {
+        const fresh = readLedger(root);
+        if (boundEvent(fresh, slot.slotId, assessment) !== null) return [];
+        if (bindingsFor(fresh, slot.slotId) > 1) {
+            return [
+                `slot ${slot.slotId} has more than one assessment ledger binding; refusing to add another`,
+            ];
+        }
+        appendLedgerEvent(
+            root,
+            {
+                event: "assessment",
+                campaignId: manifest.campaignId,
+                slotId: slot.slotId,
+                attemptId: assessment.attemptId,
+                outcome: assessment.outcome,
+                validity: assessment.validity,
+                assessmentSha256: sha256Of(assessment),
+            },
+            assessment.assessedAt,
+        );
+        return [];
+    } finally {
+        rmSync(lock, { force: true });
+    }
 }
 
-/** Post-close assessment is read-only: existing checked records only. */
+/** Post-close assessment is read-only: existing checked records only. *//** Post-close assessment is read-only: existing checked records only. */
 function readOnlyAssessment(
     root: string,
     manifest: PreparedManifest,
@@ -321,11 +380,10 @@ interface SlotAssessment {
 function assessSlot(options: {
     root: string;
     manifest: PreparedManifest;
-    ledger: LedgerRead;
     slot: Slot;
     now: () => string;
 }): SlotAssessment {
-    const { root, manifest, ledger, slot, now } = options;
+    const { root, manifest, slot, now } = options;
     const assessment = assessmentForSlot(root, manifest, slot, now);
     if (assessment === null) {
         return {
@@ -353,13 +411,7 @@ function assessSlot(options: {
     }
     return {
         assessment: stored.assessment,
-        problems: bindAssessment({
-            root,
-            manifest,
-            ledger,
-            slot,
-            assessment: stored.assessment,
-        }),
+        problems: [],
         skipped: null,
     };
 }
@@ -442,11 +494,21 @@ function assessSelected(options: {
     const skipped: string[] = [];
     let stoppedAt: string | null = null;
     for (const slot of options.slots) {
-        const outcome = assessSlot({ ...options, ledger, slot });
+        const outcome = assessSlot({ ...options, slot });
         problems.push(...outcome.problems);
         if (outcome.skipped !== null) skipped.push(outcome.skipped);
         if (outcome.assessment === null) continue;
+        // Re-read the ledger after publication: a concurrent assessor may have
+        // created the same record and its one binding.
         ledger = readLedger(options.root);
+        problems.push(
+            ...bindAssessment({
+                root: options.root,
+                manifest: options.manifest,
+                slot,
+                assessment: outcome.assessment,
+            }),
+        );
         tally(summary, outcome.assessment);
         if (assessShouldStop(options.manifest.campaign, outcome.assessment)) {
             stoppedAt = slot.slotId;
