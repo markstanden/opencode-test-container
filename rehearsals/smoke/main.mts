@@ -15,6 +15,7 @@ import { startProvider, type ScriptedResponse } from "../provider.mts";
 import {
     FIXTURES,
     REPO,
+    fileSha256,
     runAsync,
     filesUnder,
     heldPort,
@@ -396,7 +397,6 @@ async function setup(): Promise<void> {
     receipt.consumer = consumer;
     receipt.node = process.version;
     receipt.podman = must("podman", ["--version"]).stdout.trim();
-    receipt.imageTag = imageTag;
 
     const nodeBase =
         process.env.OTC_SMOKE_NODE_BASE ??
@@ -419,9 +419,13 @@ async function setup(): Promise<void> {
     if (!resolved.ok)
         throw new Error(`image resolve failed: ${resolved.problem}`);
     imageId = resolved.image.imageId;
+    receipt.imageTag = imageTag;
     receipt.imageId = imageId;
     receipt.opencodeVersion = resolved.image.opencodeVersion;
     receipt.nodeBase = nodeBase;
+    receipt.containerfileSha256 = fileSha256(
+        join(REPO, "container", "Containerfile"),
+    );
 }
 
 // ---------------------------------------------------------------------------
