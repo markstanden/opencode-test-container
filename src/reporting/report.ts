@@ -7,9 +7,10 @@ import {
     rmSync,
     writeFileSync,
 } from "node:fs";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import { randomBytes } from "node:crypto";
 import { sha256Of } from "../contracts/canonical.ts";
+import { pathWithin } from "../evidence/paths.ts";
 import { isRecord } from "../contracts/validate.ts";
 import {
     loadPreparedManifest,
@@ -454,17 +455,17 @@ function protectedTrees(root: string): string[] {
 
 /**
  * Refuse a report destination inside protected evidence or prepared inputs,
- * resolving symlinked parents. A sibling `reports/` directory is allowed.
+ * resolving symlinked parents. A sibling `reports/` directory is allowed, as
+ * is a child whose name merely starts with dots; containment is compared by
+ * path components, never by a string prefix.
  */
 function unsafeOutputProblems(root: string, outDir: string): string[] {
     const target = canonicalDestination(outDir);
-    return protectedTrees(root).flatMap((protectedRoot) => {
-        const rel = relative(protectedRoot, target);
-        return rel === "" ||
-            (!rel.startsWith("..") && !rel.startsWith(`..${sep}`))
+    return protectedTrees(root).flatMap((protectedRoot) =>
+        pathWithin(protectedRoot, target)
             ? [`report destination ${outDir} is inside protected evidence`]
-            : [];
-    });
+            : [],
+    );
 }
 
 /** The canonical identity of a report without its own identity field. */

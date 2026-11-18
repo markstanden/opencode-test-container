@@ -25,6 +25,7 @@ import {
     realpathSync,
 } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { pathWithin } from "./paths.ts";
 
 /** One successful contained text read, or the refusal. */
 export type ContainedText =
@@ -69,8 +70,7 @@ function realRoot(
 
 /** Whether a resolved path is inside a resolved root. */
 function inside(root: string, path: string): boolean {
-    const rel = relative(root, path);
-    return rel === "" || (!rel.startsWith("..") && !rel.startsWith(`..${sep}`));
+    return pathWithin(root, path);
 }
 
 /**
@@ -106,17 +106,18 @@ export function resolveContained(
 }
 
 /**
- * Read one root-relative regular file without following a symlink at the final
- * component.
+ * Read one root-relative regular file's exact bytes without following a
+ * symlink at the final component.
  * @param root The contained root.
  * @param path The root-relative path.
- * @returns The text, or the refusal.
+ * @param options.beforeOpen Runs after classification and before the open.
+ * @returns The bytes, or the refusal.
  */
-export function readContainedFile(
+export function readContainedBytes(
     root: string,
     path: string,
     options: { beforeOpen?: (realPath: string) => void } = {},
-): ContainedText {
+): { ok: true; bytes: Buffer } | { ok: false; problem: string } {
     const resolved = resolveContained(root, path);
     if (!resolved.ok) return resolved;
     let fd: number | null = null;
@@ -141,7 +142,7 @@ export function readContainedFile(
                 problem: `${path} is not a regular file`,
             };
         }
-        return { ok: true, text: readFileSync(fd, "utf8") };
+        return { ok: true, bytes: readFileSync(fd) };
     } catch (error) {
         return {
             ok: false,
@@ -150,6 +151,24 @@ export function readContainedFile(
     } finally {
         if (fd !== null) closeSync(fd);
     }
+}
+
+/**
+ * Read one root-relative regular file without following a symlink at the final
+ * component.
+ * @param root The contained root.
+ * @param path The root-relative path.
+ * @returns The text, or the refusal.
+ */
+export function readContainedFile(
+    root: string,
+    path: string,
+    options: { beforeOpen?: (realPath: string) => void } = {},
+): ContainedText {
+    const read = readContainedBytes(root, path, options);
+    return read.ok
+        ? { ok: true, text: read.bytes.toString("utf8") }
+        : read;
 }
 
 /** A snapshot of one directory's regular files, refused on any unsafe object. */

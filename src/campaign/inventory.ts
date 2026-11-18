@@ -15,6 +15,7 @@ import {
     copyFileSync,
 } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
+import { pathWithin } from "../evidence/paths.ts";
 
 /** One file identity in an immutable inventory. */
 export interface InventoryEntry {
@@ -31,10 +32,16 @@ export interface InventoryEntry {
 /** A deterministic inventory of a directory tree. */
 export type Inventory = InventoryEntry[];
 
-/** Whether a path is inside a root after resolution. */
+/**
+ * Whether a path is inside a root. Containment is compared by path
+ * components, so a child named `..cache` stays contained and a sibling named
+ * `root-archive` is never mistaken for `root`.
+ * @param root The containing root.
+ * @param path The candidate path.
+ * @returns True when the path is the root or sits beneath it.
+ */
 export function isContained(root: string, path: string): boolean {
-    const rel = relative(root, path);
-    return rel === "" || (!rel.startsWith("..") && !rel.startsWith(`..${sep}`));
+    return pathWithin(root, path);
 }
 
 /**
