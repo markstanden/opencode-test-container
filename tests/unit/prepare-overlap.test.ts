@@ -121,3 +121,56 @@ describe("staging overlap and retriable preparation", () => {
         }
     });
 });
+
+describe("root creation", () => {
+    it("creates a fresh nested path whose parents do not exist", () => {
+        // Arrange
+        const { dir, campaignPath } = workspace();
+        try {
+            const root = join(dir, "one", "two", "three", "run");
+
+            // Act
+            const prepared = prepareCampaign(campaignPath, root);
+
+            // Assert
+            assert.equal(
+                prepared.ok,
+                true,
+                prepared.ok ? "" : prepared.problems.join("; "),
+            );
+            assert.equal(
+                existsSync(join(root, "prepare", "manifest.json")),
+                true,
+            );
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
+    it("lets exactly one of two competing prepares claim the root", () => {
+        // Arrange
+        const { dir, campaignPath } = workspace();
+        try {
+            const root = join(dir, "nested", "run");
+
+            // Act
+            const results = [
+                prepareCampaign(campaignPath, root),
+                prepareCampaign(campaignPath, root),
+            ];
+
+            // Assert
+            assert.equal(results.filter((entry) => entry.ok).length, 1);
+            assert.match(
+                results.find((entry) => !entry.ok)?.ok === false
+                    ? (results.find((entry) => !entry.ok) as {
+                          problems: string[];
+                      }).problems.join("; ")
+                    : "",
+                /already exists/,
+            );
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+});

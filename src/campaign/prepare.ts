@@ -688,6 +688,19 @@ export function prepareCampaign(
             problems: [`${root} already exists; prepare needs a fresh root`],
         };
     }
+    // Create missing parents first, then claim the final directory
+    // exclusively: recursive creation of the leaf would not be a claim, and a
+    // claim over missing parents would fail with ENOENT.
+    try {
+        mkdirSync(dirname(resolve(root)), { recursive: true });
+    } catch (error) {
+        return {
+            ok: false,
+            problems: [
+                `${root} could not be created: ${error instanceof Error ? error.message : String(error)}`,
+            ],
+        };
+    }
     try {
         mkdirSync(root, { recursive: false });
     } catch (error) {
