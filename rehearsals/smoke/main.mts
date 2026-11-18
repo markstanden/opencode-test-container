@@ -1390,8 +1390,64 @@ async function exampleProvider(
     };
 }
 
+/** One slot's expected checked assessment from the shipped example suite. */
+async function expectExampleSlot(
+    root: string,
+    slotId: string,
+    observed: string,
+): Promise<void> {
+    const assessment = readJson<{
+        observed: string;
+        outcome: string;
+        validity: string;
+    }>(join(root, "evidence", "assessments", `${slotId}.json`));
+    expect(
+        assessment.validity === "valid",
+        `${slotId} validity was ${assessment.validity}`,
+    );
+    expect(
+        assessment.observed === observed,
+        `${slotId} observed ${assessment.observed}, expected ${observed}`,
+    );
+    expect(
+        assessment.outcome === "pass",
+        `${slotId} outcome was ${assessment.outcome}`,
+    );
+}
+
+/** The last non-null finish reason from one streamed provider response. */
+async function streamedFinish(port: number, prompt: string): Promise<string> {
+    const response = await fetch(
+        `http://127.0.0.1:${port}/v1/chat/completions`,
+        {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+                model: "probe",
+                stream: true,
+                messages: [{ role: "user", content: prompt }],
+            }),
+        },
+    );
+    const text = await response.text();
+    const reasons = [...text.matchAll(/"finish_reason":"([a-z_]+)"/g)].map(
+        (match) => match[1] ?? "",
+    );
+    return reasons.at(-1) ?? "none";
+}
+
+/** The five-slot repetition schedule used by the first S13 campaign. */
+const s13Slots = [
+    ["pos-r0", "positive-instrument", "r0"],
+    ["pos-r1", "positive-instrument", "r1"],
+    ["pos-r2", "positive-instrument", "r2"],
+    ["unrelated-r0", "negative-unrelated", "r0"],
+    ["near-r0", "negative-near-miss", "r0"],
+] as const;
+
 async function s13(): Promise<string> {
-    const examples = join(work, "s13", "examples");
+    const base = join(work, "s13");
+    const examples = join(base, "examples");
     cpSync(
         join(
             consumer,
@@ -1406,6 +1462,8 @@ async function s13(): Promise<string> {
     const skills = join(examples, "skills");
     const campaignPath = join(skills, "campaign.json");
     const campaign = readJson<{
+        schedule: { slots: Array<Record<string, string>> };
+        budgets: { trials: number; judgeAttempts: number };
         runtime: {
             image: string;
             provider: {
@@ -1425,54 +1483,122 @@ async function s13(): Promise<string> {
         port,
         join(skills, "provider-plan.json"),
     );
+    const neutral = join(base, "consumer-cwd");
+    mkdirSync(neutral, { recursive: true });
     try {
+        // Streamed turns must close with the reason the client expects: a tool
+        // call is not a finished text answer.
+        expect(
+            (await streamedFinish(
+                port,
+                "Instrument the checkout service with OpenTelemetry spans.",
+            )) === "tool_calls",
+            "a streamed tool turn did not finish with tool_calls",
+        );
+        expect(
+            (await streamedFinish(
+                port,
+                "Rename the local variable total to subtotal.",
+            )) === "stop",
+            "a streamed text turn did not finish with stop",
+        );
+
         campaign.runtime.image = imageTag;
         campaign.runtime.provider.overlay.providers[
             "zai-coding-plan"
         ]!.settings.baseURL = `http://127.0.0.1:${port}/v1`;
+        campaign.schedule.slots = s13Slots.map(
+            ([slotId, caseId, repetitionId]) => ({
+                slotId,
+                caseId,
+                armId: "skill-only",
+                repetitionId,
+            }),
+        );
+        campaign.budgets.trials = s13Slots.length;
         writeFileSync(
             campaignPath,
             `${JSON.stringify(campaign, null, 2)}\n`,
             "utf8",
         );
-        const root = join(work, "s13", "root");
+
+        const root = join(base, "root");
         await otcMust(
             env,
             binary,
             ["prepare", "--campaign", campaignPath, "--root", root],
-            skills,
+            neutral,
         );
-        await otcMust(env, binary, ["freeze", "--root", root], skills);
-        await otcMust(env, binary, ["run", "--root", root], skills);
-        await otcMust(env, binary, ["assess", "--root", root], skills);
-        const expected = {
-            s1: "target-activation",
-            s2: "no-invocation",
-            s3: "no-invocation",
-        } as const;
-        for (const [slotId, observed] of Object.entries(expected)) {
-            const assessment = readJson<{
-                observed: string;
-                outcome: string;
-                validity: string;
-            }>(join(root, "evidence", "assessments", `${slotId}.json`));
-            expect(
-                assessment.validity === "valid",
-                `${slotId} validity was ${assessment.validity}`,
-            );
-            expect(
-                assessment.observed === observed,
-                `${slotId} observed ${assessment.observed}, expected ${observed}`,
-            );
-            expect(
-                assessment.outcome === "pass",
-                `${slotId} outcome was ${assessment.outcome}`,
+        await otcMust(env, binary, ["freeze", "--root", root], neutral);
+        const beforeFirst = await live.chatRequests();
+        await otcMust(env, binary, ["run", "--root", root], neutral);
+        const afterFirst = await live.chatRequests();
+        await otcMust(env, binary, ["assess", "--root", root], neutral);
+
+        for (const [slotId, caseId] of s13Slots) {
+            await expectExampleSlot(
+                root,
+                slotId,
+                caseId === "positive-instrument"
+                    ? "target-activation"
+                    : "no-invocation",
             );
         }
-        const count = await live.chatRequests();
-        expect(count > 0, "the shipped examples provider served no request");
-        providerUsed += count;
-        return `shipped examples provider served ${count} chat request(s); s1 activation, s2/s3 restraint, all pass`;
+        const fixture = readFileSync(
+            join(
+                root,
+                "evidence",
+                "trials",
+                "pos-r0",
+                "workspace",
+                "package.json",
+            ),
+            "utf8",
+        );
+        expect(
+            fixture.includes("checkout-service"),
+            "the suite-relative fixture did not reach the trial workspace",
+        );
+
+        // Every positive slot is an independent conversation: the second and
+        // third identical prompts must still start with a skill call.
+        const expectedFirst = 3 * 2 + 2;
+        const firstDelta = afterFirst - beforeFirst;
+        expect(
+            firstDelta === expectedFirst,
+            `first campaign made ${String(firstDelta)} chat requests, expected ${String(expectedFirst)}`,
+        );
+
+        // A fresh campaign against the same running provider must not inherit
+        // the first campaign's progression.
+        const secondRoot = join(base, "root-second");
+        await otcMust(
+            env,
+            binary,
+            ["prepare", "--campaign", campaignPath, "--root", secondRoot],
+            neutral,
+        );
+        await otcMust(env, binary, ["freeze", "--root", secondRoot], neutral);
+        const beforeSecond = await live.chatRequests();
+        await otcMust(
+            env,
+            binary,
+            ["run", "--root", secondRoot, "--slot", "pos-r0,unrelated-r0"],
+            neutral,
+        );
+        const afterSecond = await live.chatRequests();
+        await otcMust(env, binary, ["assess", "--root", secondRoot], neutral);
+        await expectExampleSlot(secondRoot, "pos-r0", "target-activation");
+        await expectExampleSlot(secondRoot, "unrelated-r0", "no-invocation");
+        const secondDelta = afterSecond - beforeSecond;
+        expect(
+            secondDelta === 3,
+            `second campaign made ${String(secondDelta)} chat requests, expected 3`,
+        );
+
+        const total = firstDelta + secondDelta;
+        providerUsed += total;
+        return `shipped provider served ${String(total)} chat request(s) across two campaigns: three identical positives each activated, negatives restrained, all assessed valid and passing`;
     } finally {
         await live.close();
     }
