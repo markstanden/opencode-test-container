@@ -66,6 +66,55 @@ export interface CliOptions {
     allowLegacyUnbound: boolean;
     /** The help value. */
     help: boolean;
+    /** The flags the caller supplied explicitly, so intent can be checked. */
+    provided: string[];
+}
+
+/** The flags each command accepts. `--help` is accepted everywhere. */
+const COMMAND_FLAGS: Partial<Record<Command, readonly string[]>> = {
+    validate: ["--campaign", "--json"],
+    prepare: ["--campaign", "--root"],
+    "delivery-check": ["--root"],
+    freeze: ["--root"],
+    run: ["--root", "--slot", "--passthrough", "--dry-run", "--json"],
+    judge: ["--root", "--slot", "--dry-run", "--json"],
+    assess: ["--root", "--slot", "--json"],
+    close: ["--root"],
+    analyse: ["--root", "--out"],
+    status: ["--root", "--json"],
+    replay: [
+        "--manifest",
+        "--evidence-root",
+        "--out",
+        "--rerender",
+        "--allow-legacy-unbound",
+    ],
+    help: [],
+    version: [],
+};
+
+/**
+ * Refuse a flag the command does not define, and a selector that names no
+ * usable slot. Both are input errors, not operational ones, and are decided
+ * before any command handler reads state, claims spend or mutates evidence.
+ * @param options The parsed options.
+ * @returns Nothing; an unsupported flag or selector throws a usage error.
+ */
+export function assertCommandIntent(options: CliOptions): void {
+    const allowed = COMMAND_FLAGS[options.command] ?? [];
+    for (const flag of options.provided) {
+        if (flag === "--help") continue;
+        if (!allowed.includes(flag)) {
+            throw new UsageError(
+                `${options.command} does not accept ${flag}`,
+            );
+        }
+    }
+    if (options.provided.includes("--slot") && options.slots.length === 0) {
+        throw new UsageError(
+            "--slot needs at least one non-empty slot id (omit it to select the schedule)",
+        );
+    }
 }
 
 /** Usage text, kept identical to the documented command list. */
@@ -89,18 +138,22 @@ Commands:
   version         Print the package version
 
 Options:
-  --campaign <file>   Campaign JSON (default: $OTC_CAMPAIGN)
+  --campaign <file>   Campaign JSON (default: $OTC_CAMPAIGN; validate, prepare)
   --root <dir>        Campaign root (default: $OTC_ROOT)
-  --out <dir>         Fresh report directory (analyse)
-  --slot <id>         Select a slot; repeat or comma-separate
-  --passthrough <name> Pass one named environment variable into the trial
+  --out <dir>         Fresh report directory (analyse, replay)
+  --slot <id>         Select a slot; repeat or comma-separate (run, judge, assess)
+  --passthrough <name> Pass one named environment variable into the trial (run)
   --manifest <file>   Recorded docs campaign manifest (replay)
   --evidence-root <dir> Recorded evidence root (replay)
   --rerender          Replace an existing analysis output (replay)
   --allow-legacy-unbound Allow unbound legacy answers (replay)
-  --dry-run           Plan a trial without dispatching it
-  --json              Machine-readable output (status, validate, assess)
+  --dry-run           Plan without dispatching or claiming (run, judge)
+  --json              Machine-readable output (validate, run, judge, assess, status)
   --help              This text
+
+A flag a command does not define is refused as a usage error before it reads
+state, claims spend or writes evidence. Omitting --slot selects the schedule;
+an explicit empty, blank or malformed selector is refused.
 
 Examples:
   otc validate --campaign examples/skills/campaign.json
@@ -126,6 +179,28 @@ function optionValue(name: string, args: string[]): string {
     return next;
 }
 
+/**
+ * Split one comma-separated slot selector. Every slot is required: an empty
+ * or whitespace-only slot, an empty segment, and a duplicate are input errors,
+ * never an invitation to fall back to the whole schedule.
+ * @param name The flag that supplied the value.
+ * @param raw The raw selector value.
+ * @returns The selected slot ids in order.
+ */
+function slotSelector(name: string, raw: string): string[] {
+    const parts = raw.split(",").map((entry) => entry.trim());
+    if (parts.some((entry) => entry === "")) {
+        throw new UsageError(
+            `${name} needs comma-separated slot ids with no empty entry`,
+        );
+    }
+    const unique = new Set(parts);
+    if (unique.size !== parts.length) {
+        throw new UsageError(`${name} names the same slot more than once`);
+    }
+    return parts;
+}
+
 /** Apply one value-bearing option; false when the argument is unknown. */
 function applyOption(
     options: CliOptions,
@@ -143,12 +218,7 @@ function applyOption(
             options.out = optionValue(arg, args);
             return true;
         case "--slot":
-            options.slots.push(
-                ...optionValue(arg, args)
-                    .split(",")
-                    .map((entry) => entry.trim())
-                    .filter((entry) => entry !== ""),
-            );
+            options.slots.push(...slotSelector(arg, optionValue(arg, args)));
             return true;
         case "--passthrough":
             options.passthrough.push(optionValue(arg, args));
@@ -177,14 +247,25 @@ function parseOptionLoop(options: CliOptions, args: string[]): void {
     while (args.length > 0) {
         const arg = args.shift();
         if (arg === undefined) break;
-        if (arg === "--help" || arg === "-h") options.help = true;
-        else if (arg === "--json") options.json = true;
-        else if (arg === "--dry-run") options.dryRun = true;
-        else if (arg === "--rerender") options.rerender = true;
-        else if (arg === "--allow-legacy-unbound") {
+        if (arg === "--help" || arg === "-h") {
+            options.help = true;
+            options.provided.push("--help");
+        } else if (arg === "--json") {
+            options.json = true;
+            options.provided.push(arg);
+        } else if (arg === "--dry-run") {
+            options.dryRun = true;
+            options.provided.push(arg);
+        } else if (arg === "--rerender") {
+            options.rerender = true;
+            options.provided.push(arg);
+        } else if (arg === "--allow-legacy-unbound") {
             options.allowLegacyUnbound = true;
+            options.provided.push(arg);
         } else if (!applyOption(options, arg, args)) {
             throw new UsageError(`unknown option ${arg}`);
+        } else {
+            options.provided.push(arg);
         }
     }
 }
@@ -209,6 +290,7 @@ export function parseArgs(argv: readonly string[]): CliOptions {
         rerender: false,
         allowLegacyUnbound: false,
         help: false,
+        provided: [],
     };
     const args = [...argv];
     const first = args.shift();
@@ -221,6 +303,7 @@ export function parseArgs(argv: readonly string[]): CliOptions {
     }
     options.command = commandOf(first);
     parseOptionLoop(options, args);
+    assertCommandIntent(options);
     return options;
 }
 
