@@ -94,7 +94,8 @@ That overlap is expected; the merge reconciles it.
 # Shard A: one repetition of each case (three slots).
 otc prepare --campaign campaign-repetitions.json --root /tmp/otc-rate-a
 otc freeze  --root /tmp/otc-rate-a
-otc run     --root /tmp/otc-rate-a --slot pos-r0 --slot neg-r0 --slot near-r0
+otc run     --root /tmp/otc-rate-a \
+  --slot pos-r0 --slot unrelated-r0 --slot near-r0
 otc assess  --root /tmp/otc-rate-a
 otc close   --root /tmp/otc-rate-a
 otc analyse --root /tmp/otc-rate-a --out /tmp/otc-rate-a-report
@@ -103,7 +104,7 @@ otc analyse --root /tmp/otc-rate-a --out /tmp/otc-rate-a-report
 otc prepare --campaign campaign-repetitions.json --root /tmp/otc-rate-b
 otc freeze  --root /tmp/otc-rate-b
 otc run     --root /tmp/otc-rate-b \
-  --slot pos-r1,pos-r2,neg-r1,neg-r2,near-r1,near-r2
+  --slot pos-r1,pos-r2,unrelated-r1,unrelated-r2,near-r1,near-r2
 otc assess  --root /tmp/otc-rate-b
 otc close   --root /tmp/otc-rate-b
 otc analyse --root /tmp/otc-rate-b --out /tmp/otc-rate-b-report
