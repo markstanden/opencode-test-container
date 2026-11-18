@@ -42,14 +42,14 @@ A `skill-trigger` case has no primary check: the validator rejects
 Relative paths resolve against different documents by field; there is no
 single "campaign-relative" rule.
 
-| Field                                                              | Resolves against                     |
-| ------------------------------------------------------------------ | ------------------------------------ |
-| `suite.path`                                                       | the campaign document                |
-| subject `skills[].path`, `plugins[].path`, `instructions[].path`   | the campaign document                |
-| case `fixture`                                                     | the suite document                   |
-| `primaryCheck.directory`                                           | the suite document                   |
-| case `files` keys                                                  | the trial workspace root             |
-| instruction `as`                                                   | a destination inside the trial workspace |
+| Field                                                            | Resolves against                         |
+| ---------------------------------------------------------------- | ---------------------------------------- |
+| `suite.path`                                                     | the campaign document                    |
+| subject `skills[].path`, `plugins[].path`, `instructions[].path` | the campaign document                    |
+| case `fixture`                                                   | the suite document                       |
+| `primaryCheck.directory`                                         | the suite document                       |
+| case `files` keys                                                | the trial workspace root                 |
+| instruction `as`                                                 | a destination inside the trial workspace |
 
 Trial workspace construction order is fixture, then inline `files`, then arm
 instructions. Instructions are copied last and a target that already exists is

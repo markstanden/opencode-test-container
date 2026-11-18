@@ -1,0 +1,28 @@
+{
+    "entries": [
+        {
+            "match": "Instrument the checkout service",
+            "responses": [
+                {
+                    "tool": "skill",
+                    "args": { "id": "otel-helper" },
+                    "id": "call_otel_helper"
+                },
+                {
+                    "text": "Instrumented the checkout service with OpenTelemetry spans."
+                }
+            ]
+        },
+        {
+            "match": "Rename the local variable",
+            "responses": [{ "text": "Renamed `total` to `subtotal`." }]
+        },
+        {
+            "match": "Add a console log around the payment call",
+            "responses": [
+                { "text": "Added a console log around the payment call." }
+            ]
+        }
+    ],
+    "fallback": { "text": "No scripted response matched this prompt." }
+}
