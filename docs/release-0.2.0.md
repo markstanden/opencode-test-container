@@ -147,7 +147,7 @@ These facts describe the candidate tarball built from the PR head. They are
 A hash cannot be written here: this file ships inside the tarball, so adding
 the hash would change the artefact it describes.
 
-Local gates on the candidate head: `npm ci`, `npm test` (816 tests),
+Local gates on the candidate head: `npm ci`, `npm test` (820 tests),
 `npm run typecheck`, `npm run test:coverage`, `defined comply` (compliant, no
 repairs on a clean clone), installed-tarball rehearsal, real rootless Podman
 smoke (13/13 cases, 34 scripted requests, image `sha256:e7dfd7dd57a6…`),
