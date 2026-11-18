@@ -67,13 +67,33 @@ mount; the signing key lives beside the trial evidence, never in the workspace.
 }
 ```
 
-- `expectedDocs.kind: "none"` is the restraint case: the write must be refused,
-  and a refused write retains zero recording credit.
-- `criterion.minVerifiedCalls: 0` is a legitimate restraint expectation; it is
-  not "any call will do".
+- `expectedDocs.kind: "none"` means **no credited write**, not "an attempted
+  write that was refused". With `criterion.minVerifiedCalls: 0` and a valid
+  capture that made no docs call, the assessment passes: the run did not record
+  a write through the credited path. That is legitimate restraint, and it is all
+  it proves.
+- To exercise a refusal path, require an attributed verified call:
+  `criterion: { "minVerifiedCalls": 1, "verbs": ["add"] }`. A verified refused
+  attempt then passes with `attemptedWrites: 1` and `creditedWrites: 0`; read the
+  operation evidence for what the plugin actually did. Do not infer a specific
+  refusal mechanism from zero credited writes alone.
 - `guardrails` checks the final workspace (`unchanged`, `absent`).
+- A missing or unusable journal, a truncated capture, or a tampered journal line
+  is not passing restraint, whatever the counts say.
 - `fixture` resolves against the suite document and supplies the workspace lake
   at `lakeRoot` (default `docs`).
+
+Keep these four states apart:
+
+| State                        | Evidence                                                               | Assessment                          |
+| ---------------------------- | ---------------------------------------------------------------------- | ----------------------------------- |
+| Non-write observation        | valid capture, no docs call, `none`, `minVerifiedCalls: 0`             | valid/pass, 0 attempted, 0 credited |
+| Verified attempt refused     | attributed call, no write metadata, `none`, `minVerifiedCalls: 1`, add | valid/pass, 1 attempted, 0 credited |
+| Credited unwanted write      | a credited record carrying write metadata                              | fail                                |
+| Missing or unusable evidence | absent/invalid/tampered journal, truncated capture                     | never a passing restraint           |
+
+The evidence is the credited operations plus any guardrails you declared. Neither
+is a general detector of every possible filesystem write.
 
 ## Primary check
 
@@ -126,9 +146,12 @@ calls itself.
 - One deterministic assessment per slot binding the capture, metadata, journal
   and key hashes.
 
-A useful write should pass; a restraint case passes only when the write was
-refused. A write that was refused but reported as recorded is a failure, not a
-partial credit.
+A useful write should pass. A restraint case passes when no write is credited and
+any calls you explicitly required were verified — a zero-call observation counts,
+and so does a verified refused attempt when `minVerifiedCalls` requires one. A
+write that was refused but reported as recorded is a failure, not partial credit.
+Zero credited writes on their own do not prove a specific refusal happened; read
+the operation evidence.
 
 ## What it does not prove
 

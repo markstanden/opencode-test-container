@@ -152,6 +152,39 @@ function writeRecord(
     };
 }
 
+/** Build a completed trial that made no docs call and left no journal. */
+function quietTrial(
+    options: {
+        captureValid?: boolean;
+        captureProblems?: string[];
+    } = {},
+): string {
+    const directory = mkdtempSync(join(tmpdir(), "otc-docs-"));
+    mkdirSync(join(directory, "workspace"), { recursive: true });
+    writeFileSync(
+        join(directory, "events.jsonl"),
+        `${JSON.stringify({
+            type: "text",
+            sessionID: "ses_1",
+            messageID: "msg_2",
+            part: { type: "text", text: "Nothing needed recording." },
+        })}\n`,
+        "utf8",
+    );
+    writeFileSync(join(directory, "tools.jsonl"), "", "utf8");
+    writeFileSync(
+        join(directory, "meta.json"),
+        `${JSON.stringify({
+            captureValid: options.captureValid ?? true,
+            captureProblems: options.captureProblems ?? [],
+            exit: 0,
+            timedOut: false,
+        })}\n`,
+        "utf8",
+    );
+    return directory;
+}
+
 /** Assess one synthetic docs trial. */
 function assess(directory: string, docsCase = testCase()) {
     return assessDocsTrial({
@@ -225,6 +258,63 @@ describe("docs recording assessment", () => {
                 reason.includes("expects refusal"),
             ),
         );
+        rmSync(directory, { recursive: true, force: true });
+    });
+
+    it("passes a valid zero-call restraint when no call is required", () => {
+        const directory = quietTrial();
+        const assessment = assess(
+            directory,
+            testCase({
+                expectedDocs: { kind: "none" },
+                criterion: { minVerifiedCalls: 0 },
+            }),
+        );
+
+        assert.equal(assessment.validity, "valid");
+        assert.equal(assessment.outcome, "pass");
+        assert.equal(assessment.counts.creditedCalls, 0);
+        assert.equal(assessment.counts.creditedWrites, 0);
+        assert.equal(assessment.counts.attemptedWrites, 0);
+        rmSync(directory, { recursive: true, force: true });
+    });
+
+    it("does not pass a zero-call run when a verified add is required", () => {
+        const directory = quietTrial();
+        const assessment = assess(
+            directory,
+            testCase({
+                expectedDocs: { kind: "none" },
+                criterion: { minVerifiedCalls: 1, verbs: ["add"] },
+            }),
+        );
+
+        assert.equal(assessment.validity, "invalid");
+        assert.equal(assessment.outcome, "unknown");
+        assert.ok(
+            assessment.reasons.some((reason) =>
+                reason.includes("journal is absent"),
+            ),
+            assessment.reasons.join("; "),
+        );
+        rmSync(directory, { recursive: true, force: true });
+    });
+
+    it("does not treat a truncated capture as passing restraint", () => {
+        const directory = quietTrial({
+            captureValid: false,
+            captureProblems: ["the stream ended before the assistant finished"],
+        });
+        const assessment = assess(
+            directory,
+            testCase({
+                expectedDocs: { kind: "none" },
+                criterion: { minVerifiedCalls: 0 },
+            }),
+        );
+
+        assert.notEqual(assessment.validity, "valid");
+        assert.notEqual(assessment.outcome, "pass");
         rmSync(directory, { recursive: true, force: true });
     });
 
