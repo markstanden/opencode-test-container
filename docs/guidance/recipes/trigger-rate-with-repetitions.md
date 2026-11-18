@@ -86,7 +86,9 @@ otc analyse  --root /tmp/otc-rate --out /tmp/otc-rate-report
 The proved method is **separate roots with a disjoint `--slot` selection, then
 one checked merge before any rate is calculated**. Every shard is prepared and
 frozen from the same campaign document, so each root carries the same frozen
-schedule and only its selected slots dispatch.
+schedule and only its selected slots dispatch. Each root's `report.json`
+therefore lists **all nine slots**: the six it did not run are `unrun` rows.
+That overlap is expected; the merge reconciles it.
 
 ```sh
 # Shard A: one repetition of each case (three slots).
@@ -116,9 +118,11 @@ is what the shipped tooling proves.
 
 ### Merge before you calculate
 
-Pass every shard report to the shipped summariser. It refuses a duplicate slot
-id and reports a campaign/suite mismatch, so a slot cannot be counted twice and
-two different campaigns cannot be pooled by accident:
+Pass every shard report to the shipped summariser. It reconciles each slot id
+across roots: a slot executed in exactly one shard takes that shard's row, an
+all-unrun slot is preserved once, and a slot executed in two shards is refused
+with `slot <id> was executed in more than one shard`. A campaign/suite mismatch
+is refused too, so two campaigns cannot be pooled by accident:
 
 ```sh
 node examples/reporting/rates.mjs \
@@ -152,16 +156,16 @@ summariser prints one row per case and arm; this suite has one arm.
 
 Missing and duplicate slots have different answers:
 
-- **Missing.** A slot absent from every shard is not evidence. It cannot appear
-  in a `report.json` at all, so the merged denominator shrinks to what was
-  actually scheduled and analysed. Say so in the write-up: the denominator is
-  the merged report's `scheduled` count, never the nine-slot plan. If a root
-  was prepared but a slot never ran, the report carries it as `unrun` and it is
-  excluded from the rate while staying visible in the table.
-- **Duplicate.** A slot present in two shards is a contradiction. The
-  summariser refuses the merge with `duplicate slot <id> across shards`; fix
-  the selection (the shards must be disjoint) and re-analyse. Never add the two
-  counts by hand.
+- **Missing.** A slot neither shard ran is still part of the frozen schedule,
+  so both reports carry it as an `unrun` row and the merge preserves it once.
+  It stays visible in the table and is excluded from the rate; the denominator
+  remains the nine-slot schedule (9/9 scheduled, 8/9 valid in that case). Do
+  not delete the row: an `unrun` slot is "not evidence", not "not scheduled".
+- **Duplicate.** Two roots that both executed the same slot are a
+  contradiction. The merge refuses with `slot <id> was executed in more than
+  one shard (valid and valid)`; fix the selection (the shards must be disjoint)
+  and re-analyse. Two shards of the same root are refused the same way. Never
+  add the two counts by hand.
 
 Re-run `otc status --root <shard>` before analysing. It lists `unrun` slots
 (pending dispatch), `assess` before judging, and `close` only when every

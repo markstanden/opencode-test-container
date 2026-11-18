@@ -120,11 +120,18 @@ export function summariseRates(report, options = {}) {
 /**
  * Merge reports from separate campaign roots into one checked document.
  *
- * Shards of the same campaign must agree on `campaignId` and `suiteId`. A slot
- * id may appear once; a duplicate is a contradiction between roots, never a
- * silently counted extra sample.
+ * Every root is prepared from the same campaign, so every report lists the
+ * whole frozen schedule: slots a shard did not run appear as `unrun` rows.
+ * The merge therefore reconciles by slot id rather than concatenating:
+ *
+ * - a slot executed in exactly one shard takes that shard's row;
+ * - a slot unrun in every shard is preserved once as an unrun row;
+ * - a slot executed in more than one shard is a contradiction and is refused,
+ *   because two roots disagree about the same frozen slot.
+ *
+ * Reports must name the same campaign and suite.
  * @param reports One or more parsed `report.json` documents.
- * @returns The merged report.
+ * @returns The merged report with one row per scheduled slot.
  */
 export function mergeReports(reports) {
     if (reports.length === 0) throw new Error("no reports to merge");
@@ -138,21 +145,28 @@ export function mergeReports(reports) {
             `reports name different campaigns: ${[...new Set(identity)].join(", ")}`,
         );
     }
-    const seen = new Set();
-    const slots = [];
+    const merged = new Map();
     for (const report of reports) {
         for (const slot of report?.slots ?? []) {
             const slotId = String(slot.slotId);
-            if (seen.has(slotId)) {
+            const executed = String(slot.validity) !== "unrun";
+            const existing = merged.get(slotId);
+            if (existing === undefined) {
+                merged.set(slotId, { row: slot, executed });
+                continue;
+            }
+            if (existing.executed && executed) {
                 throw new Error(
-                    `duplicate slot ${slotId} across shards; split the schedule disjointly`,
+                    `slot ${slotId} was executed in more than one shard (${String(existing.row.validity)} and ${String(slot.validity)}); shards must be disjoint`,
                 );
             }
-            seen.add(slotId);
-            slots.push(slot);
+            if (executed) merged.set(slotId, { row: slot, executed });
         }
     }
-    return { ...reports[0], slots };
+    return {
+        ...reports[0],
+        slots: [...merged.values()].map((entry) => entry.row),
+    };
 }
 
 /** One rate as `count/denominator` or `unavailable`. */

@@ -59,9 +59,11 @@ export interface ReportLike {
 }
 
 /**
- * Merge disjoint shard reports into one checked document.
+ * Reconcile shard reports into one checked document. Each report lists the
+ * whole frozen schedule, so unrun rows repeat; a slot executed in exactly one
+ * shard wins, an all-unrun slot is kept once and two executions throw.
  * @param reports Parsed `report.json` documents from separate roots.
- * @returns The merged report; duplicate slots or different campaigns throw.
+ * @returns The merged report; duplicate executions or different campaigns throw.
  */
 export function mergeReports(reports: readonly ReportLike[]): ReportLike;
 
