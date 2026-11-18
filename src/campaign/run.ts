@@ -51,6 +51,7 @@ import { appendLedgerEvent, readLedger, startedSlots } from "./ledger.ts";
 import {
     advanceClaim,
     claimBudget,
+    readClaims,
     releaseClaim,
     type BudgetClaim,
 } from "./budget.ts";
@@ -146,6 +147,22 @@ export interface RunSummary {
     refused: string[];
     /** The problems value. */
     problems: string[];
+    /**
+     * A dry run's per-slot admission preview, in schedule order: whether the
+     * slot would be admitted and why not when it would not. Absent on a real
+     * run.
+     */
+    preview?: PreviewSlot[];
+}
+
+/** One dry-run slot's read-only admission decision. */
+export interface PreviewSlot {
+    /** The slot id. */
+    slotId: string;
+    /** Whether the slot would be dispatched at this snapshot. */
+    admissible: boolean;
+    /** The reason, naming staging validity or budget availability. */
+    reason: string;
 }
 
 /** Dependencies the runner accepts, so ordinary tests need no Podman. */
@@ -805,6 +822,10 @@ interface SlotOutcome {
     refused: boolean;
     problems: string[];
     stop: boolean;
+    /** Present only in a dry run. */
+    admissible?: boolean;
+    /** The dry-run reason, naming staging validity or budget availability. */
+    reason?: string;
 }
 
 /** Why a slot may not be dispatched now, or null. */
@@ -843,6 +864,8 @@ async function dispatchSlot(options: {
     slot: Slot;
     already: ReadonlySet<string>;
     dryRun: boolean;
+    /** Trial budget left at this point in a dry-run preview. */
+    budgetRemaining?: number;
     passthrough: readonly string[] | undefined;
     signal: AbortSignal | undefined;
     execute: (plan: ContainerPlan) => Promise<CommandResult>;
@@ -851,7 +874,15 @@ async function dispatchSlot(options: {
     const { root, manifest, frozen, slot, already, dryRun, execute, now } =
         options;
     const precondition = slotPrecondition(root, manifest, slot, already);
-    if (precondition !== null) return precondition;
+    if (precondition !== null) {
+        return dryRun
+            ? {
+                  ...precondition,
+                  admissible: false,
+                  reason: `not admissible: ${precondition.problems.join("; ")}`,
+              }
+            : precondition;
+    }
     const testCase = manifest.suite.cases.find(
         (entry) => entry.caseId === slot.caseId,
     );
@@ -862,11 +893,37 @@ async function dispatchSlot(options: {
             refused: false,
             problems: [`slot ${slot.slotId} has no staged case or arm`],
             stop: false,
+            ...(dryRun
+                ? {
+                      admissible: false,
+                      reason: `staging: slot ${slot.slotId} has no staged case or arm`,
+                  }
+                : {}),
         };
     }
     const trialDir = trialDirectory(root, slot.slotId);
     if (dryRun) {
-        return dryRunPlan({ ...options, testCase, arm });
+        if (options.budgetRemaining !== undefined && options.budgetRemaining <= 0) {
+            return {
+                ran: false,
+                refused: true,
+                problems: [],
+                stop: false,
+                admissible: false,
+                reason: "budget: no trial budget remains at this snapshot",
+            };
+        }
+        const planned = dryRunPlan({ ...options, testCase, arm });
+        return planned.ran
+            ? { ...planned, admissible: true, reason: "admissible" }
+            : {
+                  ...planned,
+                  admissible: false,
+                  reason: `staging: ${planned.problems.join("; ")}`,
+              };
+    }
+    if (isAborted(options.signal)) {
+        return cancelledOutcome(slot.slotId);
     }
     const claimed = claimTrial(root, manifest, slot);
     if (!claimed.ok) return claimed.outcome;
@@ -878,6 +935,13 @@ async function dispatchSlot(options: {
         claim: claimed.claim,
     });
     if (!planned.ok) return planned.outcome;
+    // Cancellation between planning and launch: nothing was dispatched, so the
+    // claim is released and this invocation's provisional tree is removed.
+    if (isAborted(options.signal)) {
+        releaseClaim(claimed.claim);
+        rmSync(trialDir, { recursive: true, force: true });
+        return cancelledOutcome(slot.slotId);
+    }
     if (options.signal !== undefined)
         planned.planned.plan.signal = options.signal;
     advanceClaim(claimed.claim, "spawned", {
@@ -911,6 +975,23 @@ async function dispatchSlot(options: {
             exit: meta.meta.exit,
             primaryStatus: meta.primaryStatus,
         }),
+    };
+}
+
+/** Whether a cancellation signal is already aborted, without narrowing it. */
+function isAborted(signal: AbortSignal | undefined): boolean {
+    return signal !== undefined && signal.aborted;
+}
+
+/** The refusal recorded when cancellation stops a slot that never dispatched. */
+function cancelledOutcome(slotId: string): SlotOutcome {
+    return {
+        ran: false,
+        refused: true,
+        problems: [
+            `slot ${slotId} was cancelled before dispatch; nothing was dispatched`,
+        ],
+        stop: true,
     };
 }
 
@@ -1153,6 +1234,14 @@ export async function runCampaign(
     // caller always gets an input error rather than a misleading operational
     // one, and nothing has been written.
     refuseUnknownSelectors(root, options.slotIds);
+    if (isAborted(options.signal)) {
+        return {
+            ok: false,
+            ran: [],
+            refused: [],
+            problems: ["run cancelled before any dispatch"],
+        };
+    }
     const state = runState(root, deps.tool);
     if (!state.ok) {
         return { ok: false, ran: [], refused: [], problems: state.problems };
@@ -1162,28 +1251,67 @@ export async function runCampaign(
     const already = new Set(startedSlots(state.ledger.events));
     const now = deps.now ?? (() => new Date().toISOString());
     const execute = deps.runContainer ?? runContainer;
+    const dryRun = options.dryRun === true;
     const ran: string[] = [];
     const refused: string[] = [];
     const problems: string[] = [];
+    const preview: PreviewSlot[] = [];
+    // A dry run accounts for spend already claimed on disk and decrements a
+    // local snapshot for each admissible slot; it creates no claim.
+    let budgetRemaining = dryRun
+        ? manifest.campaign.budgets.trials -
+          readClaims(join(root, "evidence"), "trial").length
+        : 0;
+    const previewSeen = new Set<string>();
     for (const slot of selected) {
+        if (isAborted(options.signal)) {
+            problems.push(
+                `run cancelled before slot ${slot.slotId}; nothing was dispatched`,
+            );
+            break;
+        }
+        if (dryRun && previewSeen.has(slot.slotId)) {
+            preview.push({
+                slotId: slot.slotId,
+                admissible: false,
+                reason: "not admissible: the slot is selected more than once",
+            });
+            continue;
+        }
+        previewSeen.add(slot.slotId);
         const outcome = await dispatchSlot({
             root,
             manifest,
             frozen: state.frozen,
             slot,
             already,
-            dryRun: options.dryRun === true,
+            dryRun,
+            ...(dryRun ? { budgetRemaining } : {}),
             passthrough: options.passthrough,
             signal: options.signal,
             execute,
             now,
         });
+        if (dryRun) {
+            preview.push({
+                slotId: slot.slotId,
+                admissible: outcome.admissible === true,
+                reason: outcome.reason ?? "not admissible",
+            });
+            if (outcome.admissible === true) budgetRemaining -= 1;
+        }
         if (outcome.ran) ran.push(slot.slotId);
         if (outcome.refused) refused.push(slot.slotId);
         problems.push(...outcome.problems);
         if (outcome.stop) break;
     }
-    return { ok: problems.length === 0, ran, refused, problems };
+    return {
+        ok: problems.length === 0,
+        ran,
+        refused,
+        problems,
+        ...(dryRun ? { preview } : {}),
+    };
 }
 
 /** The canonical identity of a trial's immutable launch receipt. */

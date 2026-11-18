@@ -469,6 +469,11 @@ async function run(options: CliOptions): Promise<number> {
         for (const slotId of summary.ran) {
             console.log(`${options.dryRun ? "planned" : "ran"} ${slotId}`);
         }
+        for (const entry of summary.preview ?? []) {
+            console.log(
+                `${entry.admissible ? "admissible" : "refused"} ${entry.slotId}: ${entry.reason}`,
+            );
+        }
         for (const problem of summary.problems) {
             console.error(`otc: ${problem}`);
         }
