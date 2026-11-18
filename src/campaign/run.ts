@@ -131,6 +131,11 @@ export interface TrialMeta {
     promptSha256: string;
     /** The answer sha256 value. */
     answerSha256: string;
+    /**
+     * SHA-256 of the exact usage sidecar bytes. Absent on historical captures,
+     * which cannot bind their usage and are reported as unverified.
+     */
+    usageSha256?: string;
     /** The image id value. */
     imageId: string;
     /** The completed at value. */
@@ -657,6 +662,7 @@ async function executeSlot(options: {
         );
         if (!placed.ok) integrity.push(placed.problem);
     }
+    const usageText = `${JSON.stringify(trail.usage, null, 2)}\n`;
     const meta: TrialMeta = {
         schemaVersion: 1,
         campaignId: manifest.campaignId,
@@ -678,6 +684,7 @@ async function executeSlot(options: {
         events: trail.events,
         promptSha256: launch.promptSha256,
         answerSha256: sha256Bytes(trail.text),
+        usageSha256: sha256Bytes(usageText),
         imageId: frozen.imageId,
         completedAt,
     };

@@ -9,7 +9,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
-import { sha256Of } from "../contracts/canonical.ts";
+import { sha256Bytes, sha256Of } from "../contracts/canonical.ts";
 import { canonicalPath, pathWithin } from "../evidence/paths.ts";
 import { isRecord } from "../contracts/validate.ts";
 import {
@@ -68,6 +68,8 @@ export interface Report {
         reasons: string[];
         counts: Record<string, number>;
         usage: Record<string, unknown> | null;
+        /** Why the usage record is not trusted, when it is not. */
+        usageProblems: string[];
         judgement: {
             selectedAttemptId: string;
             attempts: number;
@@ -84,15 +86,65 @@ export type ReportResult =
     | { ok: true; report: Report; markdown: string; outDir: string }
     | { ok: false; problems: string[] };
 
-/** Read a trial's usage record, or null. */
+/**
+ * Read a trial's usage record against the identity bound into its capture
+ * metadata. Cost and tokens are accepted figures only when the sidecar still
+ * hashes to what the trial recorded; a changed or lost sidecar becomes an
+ * explicit unknown, never a quietly different number. A historical capture
+ * with no bound identity keeps its unknown/partial usage but is labelled
+ * unverified.
+ */
 function readUsage(
     root: string,
     slotId: string,
-): Record<string, unknown> | null {
-    const path = join(trialDirectory(root, slotId), "usage.json");
-    if (!existsSync(path)) return null;
+): { usage: Record<string, unknown> | null; problems: string[] } {
+    const trialDir = trialDirectory(root, slotId);
+    const path = join(trialDir, "usage.json");
+    const metaPath = join(trialDir, "meta.json");
+    let meta: Record<string, unknown> | null = null;
+    if (existsSync(metaPath)) {
+        try {
+            const value: unknown = JSON.parse(readFileSync(metaPath, "utf8"));
+            meta = isRecord(value) ? value : null;
+        } catch {
+            meta = null;
+        }
+    }
+    const bound =
+        meta !== null && typeof meta.usageSha256 === "string"
+            ? meta.usageSha256
+            : null;
+    if (!existsSync(path)) {
+        return {
+            usage: null,
+            problems:
+                bound === null
+                    ? []
+                    : ["the bound usage record is missing"],
+        };
+    }
+    const bytes = readFileSync(path);
+    if (bound === null) {
+        return {
+            usage: parseUsage(bytes),
+            problems: [
+                "historical capture has no bound usage identity; the figures are unverified",
+            ],
+        };
+    }
+    if (sha256Bytes(bytes) !== bound) {
+        return {
+            usage: null,
+            problems: ["the usage record does not match its bound identity"],
+        };
+    }
+    return { usage: parseUsage(bytes), problems: [] };
+}
+
+/** Parse one usage sidecar without trusting its shape. */
+function parseUsage(bytes: Buffer): Record<string, unknown> | null {
     try {
-        const value: unknown = JSON.parse(readFileSync(path, "utf8"));
+        const value: unknown = JSON.parse(bytes.toString("utf8"));
         return isRecord(value) ? value : null;
     } catch {
         return null;
@@ -188,14 +240,18 @@ function judgeIntegritySection(report: Report): string[] {
     ];
 }
 
-/** The per-run usage section. */
+/** The per-run usage section, with any unverified record named. */
 function usageSection(report: Report): string[] {
     return report.slots.flatMap((slot) => {
         const usage = slot.usage;
+        const note =
+            slot.usageProblems.length === 0
+                ? ""
+                : ` [${slot.usageProblems.join("; ")}]`;
         if (usage === null)
-            return [`- ${slot.slotId}: unknown (no usage record)`];
+            return [`- ${slot.slotId}: unknown (no accepted usage record)${note}`];
         return [
-            `- ${slot.slotId}: input ${String(usage.inputTokens ?? "unknown")}, output ${String(usage.outputTokens ?? "unknown")}, cache read ${String(usage.cacheReadTokens ?? "unknown")}, reported ${String(usage.reported ?? false)}`,
+            `- ${slot.slotId}: input ${String(usage.inputTokens ?? "unknown")}, output ${String(usage.outputTokens ?? "unknown")}, cache read ${String(usage.cacheReadTokens ?? "unknown")}, reported ${String(usage.reported ?? false)}${note}`,
         ];
     });
 }
@@ -248,6 +304,7 @@ function slotRecords(
             armId: slot.armId,
             repetitionId: slot.repetitionId,
         };
+        const usage = readUsage(root, slot.slotId);
         if (assessment === undefined) {
             return {
                 ...identity,
@@ -257,7 +314,8 @@ function slotRecords(
                 outcome: "unknown",
                 reasons: ["no assessment was recorded"],
                 counts: {},
-                usage: readUsage(root, slot.slotId),
+                usage: usage.usage,
+                usageProblems: usage.problems,
                 judgement,
                 judgeProblems,
             };
@@ -268,7 +326,8 @@ function slotRecords(
             validity: assessment.validity,
             outcome: assessment.outcome,
             reasons: assessment.reasons,
-            usage: readUsage(root, slot.slotId),
+            usage: usage.usage,
+            usageProblems: usage.problems,
             judgement,
             judgeProblems,
         };

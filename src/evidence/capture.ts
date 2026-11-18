@@ -116,6 +116,19 @@ function answerProblems(
         : ["the answer record does not match the raw capture"];
 }
 
+/** Compare the saved usage sidecar with its bound identity, when recorded. */
+function usageProblems(
+    trialDir: string,
+    meta: Record<string, unknown>,
+): string[] {
+    if (typeof meta.usageSha256 !== "string") return [];
+    const path = join(trialDir, "usage.json");
+    if (!existsSync(path)) return ["the bound usage record is missing"];
+    return sha256Bytes(readFileSync(path)) === meta.usageSha256
+        ? []
+        : ["the usage record does not match its bound identity"];
+}
+
 /** Problems with the validity claim and its recorded problem list. */
 function validityProblems(meta: Record<string, unknown>): string[] {
     if (meta.captureValid !== true) {
@@ -178,6 +191,7 @@ function artifactProblems(options: {
         return ["the raw event stream is missing", ...problems];
     problems.push(
         ...answerProblems(options.trialDir, options.trail, options.meta ?? {}),
+        ...usageProblems(options.trialDir, options.meta ?? {}),
     );
     if (options.meta !== null) {
         problems.push(...counterProblems(options.meta, options.trail));
