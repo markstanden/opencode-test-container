@@ -126,6 +126,7 @@ mkdir otc-quickstart && cd otc-quickstart
 npm init -y >/dev/null
 npm install /path/to/markstanden-opencode-test-container-0.2.0.tgz
 PKG="$(npm root)/@markstanden/opencode-test-container"
+OTC="$PWD/node_modules/.bin/otc"   # a local install, not a global one
 ROOT="$(mktemp -d)/run"
 
 # Locate the shipped assets.
@@ -145,15 +146,15 @@ node "$PKG/examples/provider/server.mjs" --port 8799 \
 curl --fail http://127.0.0.1:8799/health
 
 export ZAI_API_KEY=not-a-real-key
-otc validate --campaign "$PKG/examples/skills/campaign.json"
-otc prepare  --campaign "$PKG/examples/skills/campaign.json" --root "$ROOT"
-otc freeze   --root "$ROOT"
-otc run      --root "$ROOT" --dry-run
-otc run      --root "$ROOT"
-otc assess   --root "$ROOT"
-otc status   --root "$ROOT" --json
-otc close    --root "$ROOT"
-otc analyse  --root "$ROOT" --out "$ROOT/report"
+"$OTC" validate --campaign "$PKG/examples/skills/campaign.json"
+"$OTC" prepare  --campaign "$PKG/examples/skills/campaign.json" --root "$ROOT"
+"$OTC" freeze   --root "$ROOT"
+"$OTC" run      --root "$ROOT" --dry-run
+"$OTC" run      --root "$ROOT"
+"$OTC" assess   --root "$ROOT"
+"$OTC" status   --root "$ROOT" --json
+"$OTC" close    --root "$ROOT"
+"$OTC" analyse  --root "$ROOT" --out "$ROOT/report"
 
 ls "$ROOT/evidence/trials"          # one directory per dispatched slot
 ls "$ROOT/evidence/assessments"     # deterministic records

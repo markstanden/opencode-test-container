@@ -124,13 +124,31 @@ and evidence-path guidance, and the corrected sharding recipe became available
 in the **0.2.0** package. They describe 0.2.0 behaviour: 0.1.1 readers must use
 the 0.1.1 README shipped with that version.
 
-## Planned verification
+## Candidate build evidence (local, before publication)
 
-Planned gates for the candidate head: `npm ci`, `npm test`, `npm run
-typecheck`, `npm run test:coverage`, `defined comply`, the installed-package
-rehearsal, the real rootless Podman smoke suite and the fresh-docs rehearsal
-with a large blind packet. This section is a plan until the PR records the
-exact-head results.
+These facts describe the candidate tarball built from the PR head. They are
+**not** registry evidence.
+
+| Fact                | Value                                                                |
+| ------------------- | -------------------------------------------------------------------- |
+| `npm pack` filename | `markstanden-opencode-test-container-0.2.0.tgz`                      |
+| Package version     | `0.2.0`, `engines.node: ">=26"`                                       |
+| Shipped assets      | `dist/`, `container/`, `examples/`, `docs/`, `README.md`, `LICENSE`  |
+| Tarball identity    | recorded in the PR handback and recomputed from the final PR head    |
+
+A hash cannot be written here: this file ships inside the tarball, so adding
+the hash would change the artefact it describes.
+
+Local gates on the candidate head: `npm ci`, `npm test` (816 tests),
+`npm run typecheck`, `npm run test:coverage` (all OTC 92.1/82.2/93.6; new
+lifecycle 90.4/79.3/92.4; migrated analysis 95.5/90.1/95.7), `defined comply`
+(compliant, no repairs on a clean clone), installed-tarball rehearsal,
+real rootless Podman smoke (13/13 cases, 34 scripted requests, image
+`sha256:e7dfd7dd57a6…`), fresh-docs rehearsal with a >128 KiB blind packet
+delivered on stdin, and the skills/docs offline rehearsal.
+
+The exact head, PR and CI links are recorded in the PR handback. Nothing here
+asserts a published artefact.
 
 ## After publication
 
