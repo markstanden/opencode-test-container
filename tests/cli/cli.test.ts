@@ -331,6 +331,41 @@ describe("packaged consumer", () => {
                 );
                 assert.equal(readFileSync(probeLedger, "utf8"), probeBytes);
             }
+            // The supported checked reader is importable from the package root
+            // as ESM, and reads a real prepared root.
+            const script = join(consumer, "check-assessments.mjs");
+            writeFileSync(
+                script,
+                [
+                    'import { checkedAssessments, loadPreparedManifest, readLedger, readAssessments } from "@markstanden/opencode-test-container";',
+                    "const root = process.argv[2];",
+                    "const prepared = loadPreparedManifest(root);",
+                    "const checked = checkedAssessments({ root, manifest: prepared.manifest, ledger: readLedger(root) });",
+                    "process.stdout.write(JSON.stringify({ ok: prepared.ok, records: checked.records.map((entry) => entry.state), supported: typeof checkedAssessments, deprecated: typeof readAssessments }));",
+                ].join("\n"),
+                "utf8",
+            );
+            const checkedImport = spawnSync(
+                process.execPath,
+                [script, root],
+                { cwd: consumer, encoding: "utf8" },
+            );
+            assert.equal(checkedImport.status, 0, checkedImport.stderr);
+            const checkedJson = JSON.parse(checkedImport.stdout) as {
+                ok: boolean;
+                records: string[];
+                supported: string;
+                deprecated: string;
+            };
+            assert.equal(checkedJson.ok, true);
+            assert.deepEqual(checkedJson.records, [
+                "missing",
+                "missing",
+                "missing",
+            ]);
+            assert.equal(checkedJson.supported, "function");
+            assert.equal(checkedJson.deprecated, "function");
+
             const report = join(consumer, "installed-report");
             const replay = spawnSync(
                 binary,

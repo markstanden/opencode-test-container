@@ -59,24 +59,24 @@ import {
     type SelectionRecord,
 } from "../evaluators/docs/analysis/recovery.ts";
 import {
-    buildAcPrompt,
     documentationScore,
-    judgeFailureClass,
-    parseAcJudgement,
     validateAcJudgement,
     type DocState,
     type DocumentationOutcome,
     type JudgeFailureClass,
 } from "../evaluators/docs/scoring.ts";
-import { docChanges, type LakeDocument } from "../evaluators/docs/campaign.ts";
-import { creditedOperationLines } from "../evaluators/docs/assess.ts";
+import {
+    buildPacket,
+    blindingProblems,
+    docStateFor,
+} from "../evaluators/docs/packet.ts";
+import {
+    classifyAttempt,
+    type AttemptOutcome,
+    type JudgeAttemptStatus,
+} from "../evaluators/docs/verdict.ts";
 import { claimAttemptDir } from "./evidence-guard.ts";
 import { deliveryCheck, loadFrozen, type FrozenRecord } from "./freeze.ts";
-import { changedInventoryPaths, inventory } from "./inventory.ts";
-import {
-    readContainedDocuments,
-    readContainedFile,
-} from "../evidence/containment.ts";
 import { randomBytes } from "node:crypto";
 import { appendLedgerEvent, readLedger } from "./ledger.ts";
 import { judgeStateOf, type JudgeStateCode } from "./eligibility.ts";
@@ -91,8 +91,7 @@ import {
 import { readPrimaryCheck } from "./primary.ts";
 import { trialDirectory } from "./run.ts";
 
-/** The terminal state of one judge attempt. */
-export type JudgeAttemptStatus = "judged" | "invalid-verdict" | "judge-error";
+export type { JudgeAttemptStatus } from "../evaluators/docs/verdict.ts";
 
 /** A judge attempt's recorded state, including an unfinished dispatch. */
 export type JudgeMetaStatus = JudgeAttemptStatus | "started";
@@ -288,166 +287,6 @@ function recordedAttempts(
     return { attempts, problems };
 }
 
-/** Read every Markdown document under one contained workspace lake. */
-function lakeDocuments(
-    workspace: string,
-    lakeRoot: string,
-): { ok: true; documents: LakeDocument[] } | { ok: false; problem: string } {
-    const read = readContainedDocuments(workspace, lakeRoot, (name) =>
-        name.endsWith(".md"),
-    );
-    if (!read.ok) return read;
-    const prefix = lakeRoot === "" ? "" : `${lakeRoot}/`;
-    return {
-        ok: true,
-        documents: read.documents.map((document) => ({
-            path: document.path.slice(prefix.length),
-            contents: document.contents,
-        })),
-    };
-}
-
-/** The changed, created and removed files between the pristine and live trees. */
-function changedPaths(
-    pristine: string,
-    live: string,
-): { ok: true; paths: string[] } | { ok: false; problems: string[] } {
-    const before = inventory(pristine);
-    const after = inventory(live);
-    if (!before.ok || !after.ok) {
-        return {
-            ok: false,
-            problems: [
-                ...(before.ok ? [] : [`pristine workspace: ${before.problem}`]),
-                ...(after.ok ? [] : [`live workspace: ${after.problem}`]),
-            ],
-        };
-    }
-    return {
-        ok: true,
-        paths: changedInventoryPaths(before.entries, after.entries, [
-            "answer.md",
-        ]),
-    };
-}
-
-/** The text of one file, or an empty string. */
-function textOf(path: string): string {
-    return existsSync(path) ? readFileSync(path, "utf8") : "";
-}
-
-/** The primary evidence a judge sees. */
-function primaryEvidence(trialDir: string): {
-    status: string;
-    exit: number | null;
-    stdout: string;
-    stderr: string;
-} {
-    const record = readPrimaryCheck(trialDir);
-    return {
-        status: record?.status ?? "missing",
-        exit: record?.exit ?? null,
-        stdout: (record?.stdout ?? "").slice(0, 8000),
-        stderr: (record?.stderr ?? "").slice(0, 4000),
-    };
-}
-
-/** The documentation mutation state for one slot. */
-function docStateFor(
-    root: string,
-    slot: Slot,
-    testCase: DocsTaskCase,
-): { ok: true; state: DocState } | { ok: false; problems: string[] } {
-    const lakeRoot = testCase.lakeRoot ?? "docs";
-    const beforeDocs = lakeDocuments(
-        join(root, "prepare", "workspaces", testCase.caseId),
-        lakeRoot,
-    );
-    const afterDocs = lakeDocuments(
-        join(trialDirectory(root, slot.slotId), "workspace"),
-        lakeRoot,
-    );
-    if (!beforeDocs.ok) {
-        return {
-            ok: false,
-            problems: [`pristine lake ${lakeRoot}: ${beforeDocs.problem}`],
-        };
-    }
-    if (!afterDocs.ok) {
-        return {
-            ok: false,
-            problems: [`live lake ${lakeRoot}: ${afterDocs.problem}`],
-        };
-    }
-    const change = docChanges(beforeDocs.documents, afterDocs.documents);
-    return {
-        ok: true,
-        state: {
-            documentsChanged: change.documentsChanged,
-            createdPaths: change.createdPaths,
-            modifiedPaths: change.modifiedPaths,
-        },
-    };
-}
-
-/** The packet and mutation state for one slot. */
-function buildPacket(options: {
-    root: string;
-    slot: Slot;
-    testCase: DocsTaskCase;
-}):
-    | { ok: true; packet: string; state: DocState }
-    | { ok: false; problems: string[] } {
-    const { root, slot, testCase } = options;
-    const trialDir = trialDirectory(root, slot.slotId);
-    const lakeRoot = testCase.lakeRoot ?? "docs";
-    const beforeDocs = lakeDocuments(
-        join(root, "prepare", "workspaces", testCase.caseId),
-        lakeRoot,
-    );
-    const afterDocs = lakeDocuments(join(trialDir, "workspace"), lakeRoot);
-    if (!beforeDocs.ok) {
-        return {
-            ok: false,
-            problems: [`pristine lake ${lakeRoot}: ${beforeDocs.problem}`],
-        };
-    }
-    if (!afterDocs.ok) {
-        return {
-            ok: false,
-            problems: [`live lake ${lakeRoot}: ${afterDocs.problem}`],
-        };
-    }
-    const changed = changedPaths(
-        join(root, "prepare", "workspaces", testCase.caseId),
-        join(trialDir, "workspace"),
-    );
-    if (!changed.ok) return changed;
-    const state = docStateFor(root, slot, testCase);
-    if (!state.ok) return state;
-    const answer = readContainedFile(trialDir, "answer.md");
-    if (!answer.ok) {
-        return { ok: false, problems: [`trial answer: ${answer.problem}`] };
-    }
-    const operations = creditedOperationLines(trialDir);
-    const packet = buildAcPrompt({
-        taskPrompt: textOf(
-            join(root, "prepare", "prompts", `${testCase.caseId}.txt`),
-        ),
-        standingPermission: textOf(
-            join(root, "prepare", "workspaces", testCase.caseId, "AGENTS.md"),
-        ),
-        scenarioTruth: testCase.truth ?? "",
-        beforeDocs: beforeDocs.documents,
-        afterDocs: afterDocs.documents,
-        changedPaths: changed.paths,
-        primary: primaryEvidence(trialDir),
-        docsOperations: operations.lines,
-        answer: answer.text,
-    });
-    return { ok: true, packet, state: state.state };
-}
-
 /** The judge's immutable packet, writing it once or refusing a change. */
 function packetFor(
     root: string,
@@ -525,151 +364,15 @@ function writeJudgeEnvironment(
     return { ok: true, envFile, names };
 }
 
-/** The outcome of one judge dispatch, before storage. */
-interface AttemptOutcome {
-    status: JudgeAttemptStatus;
-    failureClass: JudgeFailureClass | null;
-    complete: boolean;
-    captureProblems: string[];
-    judgement: StoredJudgement["value"];
-    problems: string[];
-    usage: Usage;
-}
-
-/** The capture problems a judge stream shows. */
-function judgeCapture(trail: ReturnType<typeof decodeTrail>): string[] {
-    const problems: string[] = [];
-    if (trail.events === 0) problems.push("the judge emitted no events");
-    if (trail.parseFailures > 0) {
-        problems.push(
-            `${trail.parseFailures} judge event line(s) were not readable JSON`,
-        );
-    }
-    if (trail.textParts === 0) {
-        problems.push("the judge emitted no answer text");
-    }
-    if (trail.lastPartKind !== "text") {
-        problems.push("the judge stream did not end on an answer");
-    }
-    return problems;
-}
-
-/** One attempt outcome, assembled once so each path stays small. */
-function attemptOutcome(options: {
-    status: JudgeAttemptStatus;
-    failureClass: JudgeFailureClass | null;
-    complete: boolean;
-    captureProblems: string[];
-    judgement: StoredJudgement["value"];
-    problems: string[];
-    usage: Usage;
-}): AttemptOutcome {
-    return options;
-}
-
-/** The transport or process failure outcome. */
-function processOutcome(
-    result: CommandResult,
-    trail: ReturnType<typeof decodeTrail>,
-    captureProblems: string[],
-    complete: boolean,
-): AttemptOutcome {
-    return attemptOutcome({
-        status: "judge-error",
-        failureClass: "transport-or-process",
-        complete,
-        captureProblems: [
-            ...captureProblems,
-            `judge process not ok (exit ${String(result.status)}${result.timedOut ? ", timed out" : ""}${result.error === null ? "" : `, ${result.error}`})`,
-        ],
-        judgement: null,
-        problems: [],
-        usage: trail.usage,
-    });
-}
-
-/** Classify a complete captured answer against its recorded mutation state. */
-function verdictOutcome(
-    trail: ReturnType<typeof decodeTrail>,
-    state: DocState,
-    captureProblems: string[],
-): AttemptOutcome {
-    const parsed = parseAcJudgement(trail.text);
-    const complete = true;
-    if (parsed.value === undefined) {
-        return attemptOutcome({
-            status: "invalid-verdict",
-            failureClass: judgeFailureClass({
-                complete,
-                problems: parsed.problems,
-            }),
-            complete,
-            captureProblems,
-            judgement: null,
-            problems: parsed.problems,
-            usage: trail.usage,
-        });
-    }
-    const problems = validateAcJudgement(parsed.value, state);
-    return problems.length > 0
-        ? attemptOutcome({
-              status: "invalid-verdict",
-              failureClass: judgeFailureClass({
-                  complete,
-                  value: parsed.value,
-                  problems,
-              }),
-              complete,
-              captureProblems,
-              judgement: parsed.value,
-              problems,
-              usage: trail.usage,
-          })
-        : attemptOutcome({
-              status: "judged",
-              failureClass: null,
-              complete,
-              captureProblems,
-              judgement: parsed.value,
-              problems: [],
-              usage: trail.usage,
-          });
-}
-
-/** Classify one completed judge process. */
-function classifyAttempt(
-    result: CommandResult,
-    state: DocState,
-): AttemptOutcome {
-    const trail = decodeTrail(result.stdout);
-    const captureProblems = judgeCapture(trail);
-    const complete = captureProblems.length === 0 && trail.text.trim() !== "";
-    const processFailed =
-        result.timedOut ||
-        result.error !== null ||
-        result.signal !== null ||
-        result.status !== 0;
-    if (processFailed) {
-        return processOutcome(result, trail, captureProblems, complete);
-    }
-    return complete
-        ? verdictOutcome(trail, state, captureProblems)
-        : attemptOutcome({
-              status: "judge-error",
-              failureClass: "empty-or-truncated",
-              complete: false,
-              captureProblems,
-              judgement: null,
-              problems: [],
-              usage: trail.usage,
-          });
-}
-
-/** The planned dispatch for one attempt. */
+/** The validated shape of one attempt plan. */
 interface AttemptPlan {
+    /** The plan could be built. */
     ok: true;
+    /** The container plan. */
     plan: ContainerPlan;
+    /** The attempt directory the plan writes into. */
     attemptDir: string;
+    /** The registered packet identity. */
     packetSha256: string;
 }
 
@@ -1706,52 +1409,6 @@ function settleExisting(options: {
         : { status: "refused", problems: recorded.problems };
 }
 
-/** Escape one identifier for a literal regular expression. */
-function literal(text: string): string {
-    return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-/**
- * Experiment identifiers that must not appear in a judge packet, derived from
- * the declared campaign rather than historical arm letters or fixture words.
- * @param packet The rendered packet.
- * @param manifest The prepared manifest.
- * @param root The campaign root.
- * @returns Problems; empty means the packet is ar-blind.
- */
-function campaignLeaks(
-    packet: string,
-    manifest: PreparedManifest,
-    root: string,
-): string[] {
-    const campaign = manifest.campaign;
-    const identifiers = [
-        campaign.campaignId,
-        ...campaign.subjects.map((arm) => arm.armId),
-        ...campaign.schedule.slots.map((slot) => slot.slotId),
-        ...manifest.suite.cases.map((testCase) => testCase.caseId),
-    ];
-    const problems = identifiers.flatMap((identifier) => {
-        if (identifier === "") return [];
-        const escaped = literal(identifier);
-        // A distinctive identifier (with a digit or hyphen) is a leak wherever
-        // it appears as a token. A plain-word identifier is only a leak in a
-        // structural position (path segment, quoted value, assignment), so
-        // legitimate task prose such as "the candidate must" is preserved.
-        const pattern = /[0-9-]/.test(identifier)
-            ? new RegExp(`(^|[^A-Za-z0-9_-])${escaped}([^A-Za-z0-9_-]|$)`, "i")
-            : new RegExp(
-                  `(?:[/\\\\]${escaped}(?:[/\\\\]|$)|"${escaped}"|${escaped}=)`,
-              );
-        return pattern.test(packet)
-            ? [`the packet names campaign identifier ${identifier}`]
-            : [];
-    });
-    if (packet.includes(root))
-        problems.push("the packet names the evidence root");
-    return [...new Set(problems)];
-}
-
 /** Build and leak-check the judge packet for a ready slot. */
 function buildReady(options: {
     root: string;
@@ -1777,7 +1434,16 @@ function buildReady(options: {
             problem: `judge packet for ${options.slot.slotId} is unavailable: ${built.problems.join("; ")}`,
         };
     }
-    const leaks = campaignLeaks(built.packet, options.manifest, options.root);
+    const campaign = options.manifest.campaign;
+    const leaks = blindingProblems(built.packet, {
+        root: options.root,
+        campaignId: campaign.campaignId,
+        armIds: campaign.subjects.map((arm) => arm.armId),
+        slotIds: campaign.schedule.slots.map((slot) => slot.slotId),
+        caseIds: options.manifest.suite.cases.map(
+            (testCase) => testCase.caseId,
+        ),
+    });
     return leaks.length > 0
         ? {
               problem: `judge packet for ${options.slot.slotId} is not arm-blind: ${leaks.join(", ")}`,
