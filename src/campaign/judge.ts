@@ -1026,18 +1026,28 @@ async function dispatchAttempt(options: {
             problem: `refusing to overwrite judge attempt ${options.attemptId}: ${claimDir.reason}`,
         };
     }
-    const planned = planAttempt({
-        root: options.root,
-        campaign: options.manifest.campaign,
-        slot: options.slot,
-        attemptId: options.attemptId,
-        packet: options.packet,
-        packetSha256: options.packetSha256,
-        packetFile: packetPath(options.root, options.slot.slotId),
-        judgeModel: options.judgeModel,
-    });
+    let planned: ReturnType<typeof planAttempt>;
+    try {
+        planned = planAttempt({
+            root: options.root,
+            campaign: options.manifest.campaign,
+            slot: options.slot,
+            attemptId: options.attemptId,
+            packet: options.packet,
+            packetSha256: options.packetSha256,
+            packetFile: packetPath(options.root, options.slot.slotId),
+            judgeModel: options.judgeModel,
+        });
+    } catch (error) {
+        releaseClaims(options.claims);
+        rmSync(attemptDir, { recursive: true, force: true });
+        throw error;
+    }
     if (!planned.ok) {
         releaseClaims(options.claims);
+        // Nothing was dispatched. Remove only this invocation's provisional
+        // attempt directory so a corrected retry can claim the same identity.
+        rmSync(attemptDir, { recursive: true, force: true });
         return {
             ok: false,
             problem: `judge environment is not valid: ${planned.problems.join("; ")}`,

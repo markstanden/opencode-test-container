@@ -37,10 +37,16 @@ function prepared(): { dir: string; root: string } {
     return { dir, root };
 }
 
+/** One version 1 inventory of a staged directory. */
+function historicalInventory(path: string) {
+    const observed = inventory(path);
+    if (!observed.ok) throw new Error(observed.problem);
+    return observed.entries;
+}
+
 /** The current prepared manifest, asserting readability. */
 function manifestOf(root: string) {
     const loaded = loadPreparedManifest(root);
-    assert.equal(loaded.ok, true, loaded.ok ? "" : loaded.problem);
     if (!loaded.ok) throw new Error(loaded.problem);
     return loaded.manifest;
 }
@@ -120,24 +126,15 @@ describe("frozen inventory execution identity", () => {
                 ...manifest,
                 subjects: manifest.subjects.map((arm) => ({
                     ...arm,
-                    inventory: inventory(
+                    inventory: historicalInventory(
                         join(root, "prepare", "subjects", arm.armId),
-                    ).ok
-                        ? inventory(
-                              join(root, "prepare", "subjects", arm.armId),
-                          ).entries
-                        : [],
+                    ),
                 })),
                 cases: manifest.cases.map((testCase) => ({
                     ...testCase,
-                    workspace: inventory(
-                        join(
-                            root,
-                            "prepare",
-                            "workspaces",
-                            testCase.caseId,
-                        ),
-                    ).entries,
+                    workspace: historicalInventory(
+                        join(root, "prepare", "workspaces", testCase.caseId),
+                    ),
                 })),
             };
             delete historical.inventoryVersion;

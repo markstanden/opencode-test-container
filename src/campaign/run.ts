@@ -998,11 +998,16 @@ function planClaimed(
                 : { passthrough: options.passthrough }),
         });
     } catch (error) {
+        // A throwing planner before dispatch leaves nothing worth keeping.
+        rmSync(options.trialDir, { recursive: true, force: true });
         releaseClaim(options.claim);
         throw error;
     }
     if (planned.ok) return { ok: true, planned };
+    // The claim provably never dispatched, so release it and remove only this
+    // invocation's provisional trial tree. A corrected retry owns the path.
     releaseClaim(options.claim);
+    rmSync(options.trialDir, { recursive: true, force: true });
     return {
         ok: false,
         outcome: {

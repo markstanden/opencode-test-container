@@ -3,6 +3,7 @@ import {
     lstatSync,
     mkdirSync,
     readFileSync,
+    rmSync,
     writeFileSync,
     copyFileSync,
 } from "node:fs";
@@ -33,6 +34,7 @@ import {
     type Inventory,
 } from "./inventory.ts";
 import { toolIdentity, type ToolIdentity } from "../contracts/version.ts";
+import { canonicalPath, pathWithin } from "../evidence/paths.ts";
 
 /** Resolve a declared local subject source. */
 function sourcePath(
@@ -513,8 +515,73 @@ function stageCase(
 }
 
 /**
+ * Every existing input path preparation will stage, resolved to its real
+ * location. Overlap is decided before anything is created.
+ * @param bundle The validated campaign bundle.
+ * @returns Real input paths.
+ */
+function stagedInputs(bundle: CampaignBundle): string[] {
+    const campaignDir = dirname(bundle.campaignPath);
+    const suiteDir = dirname(bundle.suitePath);
+    const candidates: string[] = [bundle.campaignPath, bundle.suitePath];
+    for (const arm of bundle.campaign.subjects) {
+        for (const subject of [...(arm.skills ?? []), ...(arm.plugins ?? [])]) {
+            candidates.push(resolve(campaignDir, subject.path));
+        }
+        for (const instruction of arm.instructions ?? []) {
+            candidates.push(resolve(campaignDir, instruction.path));
+        }
+    }
+    for (const testCase of bundle.suite.cases) {
+        if (testCase.fixture !== undefined) {
+            candidates.push(resolve(suiteDir, testCase.fixture));
+        }
+        if (
+            testCase.kind === "docs-task" &&
+            testCase.primaryCheck !== undefined
+        ) {
+            candidates.push(resolve(suiteDir, testCase.primaryCheck.directory));
+        }
+    }
+    return candidates.flatMap((path) => {
+        if (!existsSync(path)) return [];
+        try {
+            return [realpathSync(path)];
+        } catch {
+            return [];
+        }
+    });
+}
+
+/**
+ * Refuse a proposed root that overlaps a staged input: a root inside a fixture
+ * would be staged into itself, and a root containing an input would destroy or
+ * absorb it.
+ * @param root The proposed campaign root.
+ * @param inputs The real input paths.
+ * @returns Problems; empty means the root is independent.
+ */
+function overlapProblems(root: string, inputs: readonly string[]): string[] {
+    const destination = canonicalPath(root);
+    return inputs.flatMap((input) => {
+        if (pathWithin(input, destination)) {
+            return [`${root} is inside staged input ${input}`];
+        }
+        if (pathWithin(destination, input)) {
+            return [`${root} contains staged input ${input}`];
+        }
+        return [];
+    });
+}
+
+/**
  * Validate a campaign, then stage an immutable root: suite, prompts, pristine
  * workspaces and subject payloads. Truth never enters a workspace.
+ *
+ * The root is claimed with an atomic `mkdir`; a pre-existing root is never
+ * removed. A refusal after this call created the root removes only this
+ * invocation's provisional tree, so a corrected invocation can retry at the
+ * same path.
  * @param campaignPath The campaign document.
  * @param root The fresh campaign root.
  * @returns The prepared manifest, or actionable problems.
@@ -526,82 +593,125 @@ export function prepareCampaign(
     const loaded = loadCampaignBundle(campaignPath);
     if (!loaded.ok) return { ok: false, problems: loaded.problems };
     const bundle = loaded.value;
+    const overlap = overlapProblems(root, stagedInputs(bundle));
+    if (overlap.length > 0) {
+        return {
+            ok: false,
+            problems: [...overlap, "choose a root outside every staged input"],
+        };
+    }
     if (existsSync(root)) {
         return {
             ok: false,
             problems: [`${root} already exists; prepare needs a fresh root`],
         };
     }
-    mkdirSync(root, { recursive: true });
+    try {
+        mkdirSync(root, { recursive: false });
+    } catch (error) {
+        return {
+            ok: false,
+            problems: [
+                (error as NodeJS.ErrnoException).code === "EEXIST"
+                    ? `${root} already exists; prepare needs a fresh root`
+                    : `${root} could not be created: ${error instanceof Error ? error.message : String(error)}`,
+            ],
+        };
+    }
     const problems: string[] = [];
-    const suiteDir = dirname(bundle.suitePath);
-    write(
-        join(root, "prepare", "suite.json"),
-        `${JSON.stringify(bundle.suite, null, 2)}\n`,
-    );
-    write(
-        join(root, "prepare", "campaign.json"),
-        readFileSync(bundle.campaignPath, "utf8"),
-    );
-    const subjects: StagedArm[] = [];
-    for (const arm of bundle.campaign.subjects) {
-        const staged = stageArm(
-            arm,
-            dirname(bundle.campaignPath),
-            root,
-            problems,
+    try {
+        const suiteDir = dirname(bundle.suitePath);
+        write(
+            join(root, "prepare", "suite.json"),
+            `${JSON.stringify(bundle.suite, null, 2)}\n`,
         );
-        if (staged !== null) subjects.push(staged);
+        write(
+            join(root, "prepare", "campaign.json"),
+            readFileSync(bundle.campaignPath, "utf8"),
+        );
+        const subjects: StagedArm[] = [];
+        for (const arm of bundle.campaign.subjects) {
+            const staged = stageArm(
+                arm,
+                dirname(bundle.campaignPath),
+                root,
+                problems,
+            );
+            if (staged !== null) subjects.push(staged);
+        }
+        const cases: PreparedCase[] = [];
+        for (const testCase of bundle.suite.cases) {
+            const staged = stageCase(testCase, suiteDir, root, problems);
+            if (staged !== null) cases.push(staged);
+        }
+        if (problems.length === 0) {
+            const campaign = normaliseCampaign(bundle);
+            const subjectsSha256 = sha256Of(
+                Object.fromEntries(
+                    subjects.map((arm) => [arm.armId, arm.inventory]),
+                ),
+            );
+            const workspacesSha256 = sha256Of(
+                Object.fromEntries(
+                    cases.map((testCase) => [
+                        testCase.caseId,
+                        testCase.workspace,
+                    ]),
+                ),
+            );
+            const promptsSha256 = sha256Of(
+                Object.fromEntries(
+                    cases.map((testCase) => [
+                        testCase.caseId,
+                        testCase.promptSha256,
+                    ]),
+                ),
+            );
+            const primaryCheckEntries = cases.flatMap((testCase) =>
+                testCase.primaryCheck === undefined
+                    ? []
+                    : [
+                          [
+                              testCase.caseId,
+                              testCase.primaryCheck.inventory,
+                          ] as const,
+                      ],
+            );
+            const manifest: PreparedManifest = {
+                schemaVersion: 1,
+                inventoryVersion: 2,
+                campaignId: bundle.campaign.campaignId,
+                suiteId: bundle.suite.suiteId,
+                campaignSha256: sha256Bytes(
+                    readFileSync(bundle.campaignPath),
+                ),
+                suiteSha256: sha256Bytes(readFileSync(bundle.suitePath)),
+                suiteCanonicalSha256: sha256Of(bundle.suite),
+                scheduleSha256: sha256Of(bundle.campaign.schedule.slots),
+                subjectsSha256,
+                workspacesSha256,
+                promptsSha256,
+                primaryChecksSha256: sha256Of(
+                    Object.fromEntries(primaryCheckEntries),
+                ),
+                tool: toolIdentity(),
+                suite: bundle.suite,
+                campaign,
+                subjects,
+                cases,
+            };
+            write(
+                join(root, "prepare", "manifest.json"),
+                `${JSON.stringify(manifest, null, 2)}\n`,
+            );
+            return { ok: true, root, manifest };
+        }
+    } catch (error) {
+        rmSync(root, { recursive: true, force: true });
+        throw error;
     }
-    const cases: PreparedCase[] = [];
-    for (const testCase of bundle.suite.cases) {
-        const staged = stageCase(testCase, suiteDir, root, problems);
-        if (staged !== null) cases.push(staged);
-    }
-    if (problems.length > 0) return { ok: false, problems };
-    const campaign = normaliseCampaign(bundle);
-    const subjectsSha256 = sha256Of(
-        Object.fromEntries(subjects.map((arm) => [arm.armId, arm.inventory])),
-    );
-    const workspacesSha256 = sha256Of(
-        Object.fromEntries(
-            cases.map((testCase) => [testCase.caseId, testCase.workspace]),
-        ),
-    );
-    const promptsSha256 = sha256Of(
-        Object.fromEntries(
-            cases.map((testCase) => [testCase.caseId, testCase.promptSha256]),
-        ),
-    );
-    const primaryCheckEntries = cases.flatMap((testCase) =>
-        testCase.primaryCheck === undefined
-            ? []
-            : [[testCase.caseId, testCase.primaryCheck.inventory] as const],
-    );
-    const manifest: PreparedManifest = {
-        schemaVersion: 1,
-        inventoryVersion: 2,
-        campaignId: bundle.campaign.campaignId,
-        suiteId: bundle.suite.suiteId,
-        campaignSha256: sha256Bytes(readFileSync(bundle.campaignPath)),
-        suiteSha256: sha256Bytes(readFileSync(bundle.suitePath)),
-        suiteCanonicalSha256: sha256Of(bundle.suite),
-        scheduleSha256: sha256Of(bundle.campaign.schedule.slots),
-        subjectsSha256,
-        workspacesSha256,
-        promptsSha256,
-        primaryChecksSha256: sha256Of(Object.fromEntries(primaryCheckEntries)),
-        tool: toolIdentity(),
-        suite: bundle.suite,
-        campaign,
-        subjects,
-        cases,
-    };
-    write(
-        join(root, "prepare", "manifest.json"),
-        `${JSON.stringify(manifest, null, 2)}\n`,
-    );
-    return { ok: true, root, manifest };
+    rmSync(root, { recursive: true, force: true });
+    return { ok: false, problems };
 }
 
 /** The hash of a prepared manifest's canonical content. */

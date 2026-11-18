@@ -7,10 +7,10 @@ import {
     rmSync,
     writeFileSync,
 } from "node:fs";
-import { dirname, join, resolve, sep } from "node:path";
+import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { sha256Of } from "../contracts/canonical.ts";
-import { pathWithin } from "../evidence/paths.ts";
+import { canonicalPath, pathWithin } from "../evidence/paths.ts";
 import { isRecord } from "../contracts/validate.ts";
 import {
     loadPreparedManifest,
@@ -432,20 +432,6 @@ export function analyseCampaign(
     return { ok: true, report, markdown, outDir };
 }
 
-/** Resolve a destination through its existing ancestors. */
-function canonicalDestination(path: string): string {
-    let ancestor = resolve(path);
-    const tail: string[] = [];
-    while (!existsSync(ancestor)) {
-        tail.unshift(ancestor.split(sep).at(-1) ?? "");
-        const parent = dirname(ancestor);
-        if (parent === ancestor) break;
-        ancestor = parent;
-    }
-    const resolved = realpathSync(ancestor);
-    return join(resolved, ...tail);
-}
-
 /** Protected trees a report may never be written into. */
 function protectedTrees(root: string): string[] {
     return [join(root, "evidence"), join(root, "prepare")]
@@ -460,7 +446,7 @@ function protectedTrees(root: string): string[] {
  * path components, never by a string prefix.
  */
 function unsafeOutputProblems(root: string, outDir: string): string[] {
-    const target = canonicalDestination(outDir);
+    const target = canonicalPath(outDir);
     return protectedTrees(root).flatMap((protectedRoot) =>
         pathWithin(protectedRoot, target)
             ? [`report destination ${outDir} is inside protected evidence`]

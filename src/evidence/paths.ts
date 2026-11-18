@@ -7,7 +7,8 @@
  * a child literally named `..cache` is still a child and `evidence` never
  * matches `evidence-archive`.
  */
-import { isAbsolute, join, relative, sep } from "node:path";
+import { existsSync, realpathSync } from "node:fs";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 /**
  * Whether `child` is `parent` itself or sits beneath it.
@@ -20,6 +21,30 @@ export function pathWithin(parent: string, child: string): boolean {
     if (rel === "") return true;
     if (isAbsolute(rel)) return false;
     return !rel.split(sep).includes("..");
+}
+
+/**
+ * Resolve a path through its existing ancestors, so a destination that does
+ * not exist yet still has its symlinked parents resolved.
+ * @param path The proposed path.
+ * @returns The canonical path.
+ */
+export function canonicalPath(path: string): string {
+    let ancestor = resolve(path);
+    const tail: string[] = [];
+    while (!existsSync(ancestor)) {
+        tail.unshift(ancestor.split(sep).at(-1) ?? "");
+        const parent = dirname(ancestor);
+        if (parent === ancestor) break;
+        ancestor = parent;
+    }
+    let resolved: string;
+    try {
+        resolved = realpathSync(ancestor);
+    } catch {
+        resolved = ancestor;
+    }
+    return join(resolved, ...tail);
 }
 
 /** The evidence directory for one campaign root. */
