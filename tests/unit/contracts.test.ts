@@ -157,6 +157,75 @@ describe("suite validation", () => {
         );
         assert.equal(parsed.ok, false);
     });
+
+    it("rejects a primaryCheck on a skill-trigger case", () => {
+        const parsed = validateSuite(
+            suite({
+                cases: [
+                    {
+                        caseId: "positive",
+                        kind: "skill-trigger",
+                        targetSkillId: "otel",
+                        expected: "activation",
+                        prompt: "Instrument it.",
+                        primaryCheck: {
+                            id: "installer",
+                            directory: "check",
+                            script: "check.mjs",
+                        },
+                    },
+                ],
+            }),
+        );
+        assert.equal(parsed.ok, false);
+        assert.match(
+            parsed.ok ? "" : parsed.problems.join("\n"),
+            /unexpected field "primaryCheck"/,
+        );
+    });
+
+    it("rejects an unknown field on a skill-trigger case", () => {
+        const parsed = validateSuite(
+            suite({
+                cases: [
+                    {
+                        caseId: "positive",
+                        kind: "skill-trigger",
+                        targetSkillId: "otel",
+                        expected: "activation",
+                        prompt: "Instrument it.",
+                        expectedDocs: { kind: "none" },
+                    },
+                ],
+            }),
+        );
+        assert.equal(parsed.ok, false);
+        assert.match(
+            parsed.ok ? "" : parsed.problems.join("\n"),
+            /unexpected field "expectedDocs"/,
+        );
+    });
+
+    it("rejects an unknown field on a docs-task case", () => {
+        const parsed = validateSuite(
+            docsSuite({
+                cases: [
+                    {
+                        caseId: "write",
+                        kind: "docs-task",
+                        prompt: "Record it.",
+                        expectedDocs: { kind: "none" },
+                        targetSkillId: "otel",
+                    },
+                ],
+            }),
+        );
+        assert.equal(parsed.ok, false);
+        assert.match(
+            parsed.ok ? "" : parsed.problems.join("\n"),
+            /unexpected field "targetSkillId"/,
+        );
+    });
 });
 
 describe("campaign validation", () => {
