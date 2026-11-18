@@ -1,4 +1,11 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import {
+    existsSync,
+    linkSync,
+    readFileSync,
+    rmSync,
+    writeFileSync,
+} from "node:fs";
+import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import { sha256Bytes, sha256Of } from "../contracts/canonical.ts";
 import { isRecord, readJson } from "../contracts/validate.ts";
@@ -275,6 +282,54 @@ function existingFreeze(
 }
 
 /**
+ * Publish a complete freeze receipt with create-if-absent semantics.
+ *
+ * The receipt is written to a sibling temporary file and hard-linked into
+ * place, so a reader never observes a partial receipt and exactly one writer
+ * can create it. `link` failing with `EEXIST` is the arbitration point, not an
+ * error: the caller re-reads the durable receipt and converges or refuses.
+ * @param root The prepared campaign root.
+ * @param record The complete receipt to publish.
+ * @returns Whether this caller published it, or another receipt was already there.
+ */
+function publishFrozen(
+    root: string,
+    record: FrozenRecord,
+):
+    | { kind: "published" }
+    | { kind: "exists" }
+    | { kind: "refused"; problem: string } {
+    const target = frozenPath(root);
+    const temporary = `${target}.tmp-${process.pid}-${randomBytes(6).toString("hex")}`;
+    try {
+        writeFileSync(temporary, `${JSON.stringify(record, null, 2)}\n`, {
+            encoding: "utf8",
+            mode: 0o600,
+        });
+    } catch (error) {
+        rmSync(temporary, { force: true });
+        return {
+            kind: "refused",
+            problem: `the freeze receipt could not be staged: ${error instanceof Error ? error.message : String(error)}`,
+        };
+    }
+    try {
+        linkSync(temporary, target);
+        return { kind: "published" };
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+            return { kind: "exists" };
+        }
+        return {
+            kind: "refused",
+            problem: `the freeze receipt could not be published: ${error instanceof Error ? error.message : String(error)}`,
+        };
+    } finally {
+        rmSync(temporary, { force: true });
+    }
+}
+
+/**
  * Freeze a prepared campaign: resolve the image to its immutable identity,
  * verify the CLI version it contains, and record all input identities.
  * @param root The prepared campaign root.
@@ -358,12 +413,38 @@ export async function freezeCampaign(
         freezeSha256: freezeIdentity(identity),
         frozenAt: new Date().toISOString(),
     };
-    writeFileSync(
-        frozenPath(root),
-        `${JSON.stringify(record, null, 2)}\n`,
-        "utf8",
-    );
-    return { ok: true, record, alreadyFrozen: false };
+    const published = publishFrozen(root, record);
+    if (published.kind === "refused") {
+        return { ok: false, problems: [published.problem] };
+    }
+    if (published.kind === "published") {
+        return { ok: true, record, alreadyFrozen: false };
+    }
+    // Another caller won the publish. Only a receipt with the same resolved
+    // identity is acceptable; a different image can never both succeed.
+    const winner = loadFrozen(root);
+    if (!winner.ok) {
+        return {
+            ok: false,
+            problems: [
+                "another freeze published a receipt that is not readable",
+                winner.problem,
+            ],
+        };
+    }
+    if (
+        freezeIdentity(identityOf(winner.record)) !== record.freezeSha256
+    ) {
+        return {
+            ok: false,
+            problems: [
+                "another freeze already published a different receipt",
+                `observed image ${winner.record.imageId}, this caller resolved ${image.imageId}`,
+                ...freezeDifferences(manifest, winner.record, current),
+            ],
+        };
+    }
+    return { ok: true, record: winner.record, alreadyFrozen: true };
 }
 
 /**
