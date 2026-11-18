@@ -53,9 +53,13 @@ single "campaign-relative" rule.
 
 Trial workspace construction order is fixture, then inline `files`, then arm
 instructions. Instructions are copied last and a target that already exists is
-refused with `instruction <id> collides with <as>`. A fixture that ships
-`AGENTS.md` cannot be overridden by an instruction targeting `AGENTS.md`; make
-the workspace copy a `files` entry or leave it out of the fixture.
+refused with `instruction <id> collides with <as>`. Inline `files` are written
+before the instructions, so a `files` entry cannot supersede a colliding arm
+instruction. For an arm-specific `AGENTS.md`, leave the destination out of both
+the fixture and `files` and let the instruction supply it; a fixture or inline
+`AGENTS.md` is valid only when no arm instruction targets it. A different
+filename avoids the collision but is not automatically loaded by OpenCode as
+project context.
 
 A campaign `assessment` may carry `judge: { model, timeoutMs? }` and
 `recovery` (the narrow registration in `analysis/recovery.ts`). Judge and

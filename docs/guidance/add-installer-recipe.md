@@ -27,6 +27,11 @@ The control is not a trigger test. It confirms the bundle, id and staging are
 sound, so a red campaign can distinguish "the description never fires" from
 "the skill was never reachable". Never count it in a trigger rate.
 
+These five shapes are a starter design, not a statistical standard: they are a
+useful spread of prompts, not proof that every skill needs these exact words.
+`add-installer` is a stand-in name, and "Homebrew" below is an illustration —
+substitute the bootstrap system your users actually have.
+
 Worked prompts for `add-installer`:
 
 ```jsonc
@@ -78,10 +83,11 @@ Use the fixture to supply the real signals a model reads: a `package.json` with
 a `bin` entry, a README whose install section is `TODO`, and any project
 conventions. Keep it small; the fixture is copied for every repetition.
 
-If the fixture already ships `AGENTS.md`, an arm `instructions` entry targeting
-`AGENTS.md` is refused — see
-[`staging-and-visibility.md`](staging-and-visibility.md). Supersede it with a
-`files` entry or leave it out of the fixture.
+If the fixture ships `AGENTS.md` and an arm supplies an `AGENTS.md`
+instruction, the trial refuses to stage: inline `files` cannot resolve it
+because they are written before the instructions. Keep `AGENTS.md` out of both
+the fixture and `files` when the arm's instruction is the treatment; see
+[`staging-and-visibility.md`](staging-and-visibility.md).
 
 ## Repetitions
 
@@ -124,11 +130,13 @@ Rules that follow:
   Model behaviour is nondeterministic; one trial is an anecdote.
 - `budgets.trials` must cover the slots you intend to run and may not exceed the
   scheduled slot count. A lower budget leaves slots legitimately `unrun`.
-- A **trigger rate** is passing repetitions ÷ run repetitions for one case.
-  OTC records a pass or fail per slot in `evidence/assessments/<slotId>.json`
-  and a slot table in the report; it does not compute the rate for you. Treat a
-  positive as passing above 0.5 and a negative below 0.5, then read every
-  near-threshold case before changing the description.
+- A **trigger rate** is not one number. **Activation rate** is valid slots that
+  observed target activation ÷ valid slots; a positive usually wants it high and
+  a negative wants it low. **Criterion pass rate** is valid slots scored `pass` ÷
+  valid slots; high is good for both, because a correct negative passes without
+  activating. OTC records the per-slot values and the report; the shipped
+  `examples/reporting/rates.mjs` summarises them per case and arm. Any threshold
+  is a decision rule you choose before the run, not a built-in OTC rule.
 - A scripted provider answers the same way every time. Repetition costs nothing
   there, but it proves wiring and scoring, not model choice.
 

@@ -42,9 +42,21 @@ between arms instead of the instruction path.
                 "repetitionId": "r0"
             },
             {
+                "slotId": "after-pos-r0",
+                "caseId": "positive-brew-install",
+                "armId": "after",
+                "repetitionId": "r0"
+            },
+            {
                 "slotId": "before-pos-r1",
                 "caseId": "positive-brew-install",
                 "armId": "before",
+                "repetitionId": "r1"
+            },
+            {
+                "slotId": "after-pos-r1",
+                "caseId": "positive-brew-install",
+                "armId": "after",
                 "repetitionId": "r1"
             },
             {
@@ -52,18 +64,6 @@ between arms instead of the instruction path.
                 "caseId": "positive-brew-install",
                 "armId": "before",
                 "repetitionId": "r2"
-            },
-            {
-                "slotId": "after-pos-r0",
-                "caseId": "positive-brew-install",
-                "armId": "after",
-                "repetitionId": "r0"
-            },
-            {
-                "slotId": "after-pos-r1",
-                "caseId": "positive-brew-install",
-                "armId": "after",
-                "repetitionId": "r1"
             },
             {
                 "slotId": "after-pos-r2",
@@ -79,9 +79,10 @@ between arms instead of the instruction path.
 
 Each arm's instructions are copied into its trial workspace as `AGENTS.md`
 (the default `as`). They resolve against the campaign document. Nothing is
-merged: if the case fixture already ships `AGENTS.md`, either remove it from the
-fixture or supersede it with a `case.files` entry, because an instruction
-targeting an existing path is refused. See
+merged: an instruction targeting a path that the fixture or `case.files`
+already created is refused, and an inline file cannot supersede it because
+`files` are written before the instructions. Keep `AGENTS.md` out of both the
+fixture and `files` when each arm's instruction is the treatment. See
 [`staging-and-visibility.md`](../staging-and-visibility.md).
 
 Keep the skill bundle identical in both arms when the treatment is the
@@ -123,10 +124,22 @@ verify by reading your own `~/.config`.
 
 ## Reading the comparison
 
-Group report rows by `armId` and `caseId`; compare pass rates per case, not
-campaign totals. A campaign total hides a regression in one case behind a gain
-in another. Run the before arm first and record that order, or it becomes an
-unmeasured variable.
+Group report rows by `armId` and `caseId`; compare activation and pass rates per
+case, not campaign totals. A campaign total hides a regression in one case
+behind a gain in another. Use the shipped
+`examples/reporting/rates.mjs` summariser and report each case's sample size and
+exclusions beside its rates.
+
+The schedule above is **interleaved** — `before`, `after` alternating within
+each repetition — because slot order is itself a variable: provider latency,
+warm caches and time of day drift between the first and last trial. Running the
+whole before arm first does not remove that confounding, it only records it. A
+counterbalanced order (for example ABBA over repetitions) spreads it further,
+but no ordering removes it, and none of it makes the comparison causal.
+
+Keep `caseId` + `repetitionId` as the pairing identity across arms. With three
+repetitions per case per arm, report direction and absence of regression, not
+significance.
 
 Watch validity before behaviour: `unknown`/`invalid` trials are not evidence
 that the guidance did nothing. A crash, timeout or failed target load is
@@ -137,7 +150,8 @@ non-evidence, and an invalid capture must not be counted as a refusal.
 - One valid workspace instruction per slot, byte-identical to its arm.
 - Per-slot assessments and report rows distinguishing `armId` and
   `repetitionId`.
-- A before/after pass-rate delta per case with the sample size beside it.
+- Activation and pass rates per case and arm, each with its valid denominator
+  and excluded slots.
 
 Measured throughput for a 132-trial, 22-case × 3 × 2 campaign was about 17
 minutes wall-clock across six roots, average 41.5 s per trial, with one invalid

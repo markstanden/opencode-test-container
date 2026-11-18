@@ -25,9 +25,13 @@ One case workspace is built once during `prepare`, then copied for each trial:
     ```
 
     The refusal happens while the trial is staged, before any container is
-    dispatched. A fixture that ships `AGENTS.md` therefore cannot be overridden
-    by an instruction targeting `AGENTS.md`: supersede it in `case.files`, or
-    leave it out of the fixture.
+    dispatched. Inline `files` cannot resolve it: they are written before the
+    instructions. For an arm-specific `AGENTS.md` comparison, keep that
+    destination out of **both** the fixture and `case.files` and let each arm's
+    instruction supply it. A common fixed `AGENTS.md` may live in the fixture or
+    in `files` only when no arm instruction targets the same destination. A
+    different filename avoids the filesystem collision, but OpenCode loads the
+    project-context file it knows — do not assume an arbitrary name is read.
 
 The prepared workspace is the pristine copy. Each trial gets its own writable
 copy; edits made during a trial never leak into a later trial or into
@@ -95,19 +99,37 @@ the caller's environment into a `0600` trial env file. The campaign declares
 
 ## Pre-dispatch sanity check
 
-Before spending a trial:
+Four locations are easy to confuse. Inspect each one where it actually exists:
 
-1. `otc prepare` succeeds and the case workspace under
-   `<root>/prepare/workspaces/<caseId>/` contains the fixture files you expect.
-2. Every instruction path exists in the workspace and no collision was
-   reported.
-3. `otc run --dry-run` builds each selected slot's plan and lists the slots it
-   would dispatch; it prints no mounts or argv, so confirm those against
+| Stage                   | Path                                         | What it holds                                                  |
+| ----------------------- | -------------------------------------------- | -------------------------------------------------------------- |
+| Prepared case workspace | `<root>/prepare/workspaces/<caseId>/`        | fixture and inline `files`, shared by every repetition         |
+| Staged arm subject      | `<root>/prepare/subjects/<arm>/`             | skills, plugins and instruction payloads                       |
+| Dry-run payload         | a temporary directory                        | one plan's trial copy, removed as soon as the plan is built    |
+| Trial workspace         | `<root>/evidence/trials/<slotId>/workspace/` | a fresh copy of the case workspace plus the arm's instructions |
+
+The order that matches those preconditions:
+
+1. `otc prepare` succeeds. Open the case workspace and confirm the fixture files
+   you expect; inline `files` have already been applied over them.
+2. Read each arm's instruction bytes under
+   `<root>/prepare/subjects/<arm>/instructions/<id>/<as>`.
+3. `otc freeze` records the image and CLI identity. Dry-run needs it.
+4. `otc run --dry-run` stages each selected slot in a disposable directory and
+   reports any `instruction <id> collides with <as>`; it consumes no trial
+   budget, starts no container and makes no provider request. It prints no
+   mounts or argv and keeps no directory, so confirm those against
    [`docs/schema.md`](../schema.md) and the campaign.
+5. Dispatch, then inspect `<root>/evidence/trials/<slotId>/workspace/` to see
+   what the trial really received.
 
 If the answer to a prompt depends on a file, verify the file is on a writable
 or read-only mount the trial actually has. "The agent ignored it" is usually
 "it was never there".
+
+If a check fails, change the source documents and prepare a fresh root. Never
+edit a prepared, frozen or evidence tree to repair an experiment — that tree is
+the record of what ran.
 
 ## Next
 
