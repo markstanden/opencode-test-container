@@ -878,7 +878,7 @@ async function dispatchSlot(options: {
     execute: (plan: ContainerPlan) => Promise<CommandResult>;
     now: () => string;
 }): Promise<SlotOutcome> {
-    const { root, manifest, frozen, slot, already, dryRun } = options;
+    const { root, manifest, slot, already, dryRun } = options;
     const precondition = slotPrecondition(root, manifest, slot, already);
     if (precondition !== null) {
         return dryRun
