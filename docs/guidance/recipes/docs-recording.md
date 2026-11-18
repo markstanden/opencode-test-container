@@ -78,19 +78,24 @@ mount; the signing key lives beside the trial evidence, never in the workspace.
   operation evidence for what the plugin actually did. Do not infer a specific
   refusal mechanism from zero credited writes alone.
 - `guardrails` checks the final workspace (`unchanged`, `absent`).
-- A missing or unusable journal, a truncated capture, or a tampered journal line
-  is not passing restraint, whatever the counts say.
+- A **missing journal blocks assessment** when operations were required or
+  observed — `criterion.minVerifiedCalls` above zero, a declared non-`none`
+  expectation, or a docs call visible in the host trail. That trial is then
+  invalid, not a passing restraint. The valid zero-call observation above is the
+  exception: `expectedDocs.kind: "none"` with `minVerifiedCalls: 0` and no docs
+  call makes no journal and may pass. An invalid or tampered journal, or a
+  truncated capture, still never passes restraint whatever the counts say.
 - `fixture` resolves against the suite document and supplies the workspace lake
   at `lakeRoot` (default `docs`).
 
 Keep these four states apart:
 
-| State                        | Evidence                                                               | Assessment                          |
-| ---------------------------- | ---------------------------------------------------------------------- | ----------------------------------- |
-| Non-write observation        | valid capture, no docs call, `none`, `minVerifiedCalls: 0`             | valid/pass, 0 attempted, 0 credited |
-| Verified attempt refused     | attributed call, no write metadata, `none`, `minVerifiedCalls: 1`, add | valid/pass, 1 attempted, 0 credited |
-| Credited unwanted write      | a credited record carrying write metadata                              | fail                                |
-| Missing or unusable evidence | absent/invalid/tampered journal, truncated capture                     | never a passing restraint           |
+| State                        | Evidence                                                                                         | Assessment                                                                                                          |
+| ---------------------------- | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
+| Non-write observation        | valid capture, no docs call, `none`, `minVerifiedCalls: 0`                                       | valid/pass, 0 attempted, 0 credited                                                                                 |
+| Verified attempt refused     | attributed call, no write metadata, `none`, `minVerifiedCalls: 1`, add                           | valid/pass, 1 attempted, 0 credited                                                                                 |
+| Credited unwanted write      | a credited record carrying write metadata                                                        | fail                                                                                                                |
+| Missing or unusable evidence | absent journal when calls were required or observed; invalid/tampered journal; truncated capture | invalid; never a passing restraint. Only the no-call `none` + `minVerifiedCalls: 0` case may pass without a journal |
 
 The evidence is the credited operations plus any guardrails you declared. Neither
 is a general detector of every possible filesystem write.
