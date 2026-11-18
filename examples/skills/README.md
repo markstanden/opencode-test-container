@@ -3,7 +3,13 @@
 A minimal, self-contained skill bundle and suite. It needs no docs plugin and
 no judge: three trials check that a scripted model which loads `otel-helper`
 for the instrumenting prompt, and only that prompt, is scored as three passing
-cases.
+cases. The positive case carries `fixtures/checkout`, a small realistic
+workspace resolved against the suite document (not the campaign), so the
+example also proves fixture staging from a consumer working directory.
+
+`campaign-repetitions.json` is the same suite scheduled three times per case
+(nine slots, `budgets.trials: 9`). It is the starting point for
+[`docs/guidance/recipes/trigger-rate-with-repetitions.md`](../../docs/guidance/recipes/trigger-rate-with-repetitions.md).
 
 The campaign expects:
 
@@ -34,6 +40,10 @@ otc analyse  --root /tmp/otc-run --out /tmp/otc-report
 and `s3` observed `no-invocation`. Each trial's capture, metadata and workspace
 are under `/tmp/otc-run/evidence/trials/<slotId>/`; the deterministic
 assessment is `/tmp/otc-run/evidence/assessments/<slotId>.json`.
+
+The provider is stateless: each request is answered from its own message
+history, so repeated identical prompts each start with the skill call. See
+[`examples/provider/README.md`](../provider/README.md).
 
 What this does not prove: a scripted plan stands in for the model, so the run
 exercises OTC's wiring and scoring, not real model behaviour. Activation on a
