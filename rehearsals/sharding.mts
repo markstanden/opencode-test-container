@@ -126,7 +126,10 @@ function writeCampaign(
             imageId?: string;
             provider: {
                 overlay: {
-                    providers: Record<string, { settings: { baseURL: string } }>;
+                    providers: Record<
+                        string,
+                        { settings: { baseURL: string } }
+                    >;
                 };
             };
         };
@@ -135,7 +138,10 @@ function writeCampaign(
     const providerId = Object.keys(
         campaign.runtime.provider.overlay.providers,
     )[0];
-    expect(providerId !== undefined, "the campaign declares no provider overlay");
+    expect(
+        providerId !== undefined,
+        "the campaign declares no provider overlay",
+    );
     campaign.runtime.provider.overlay.providers[providerId] = {
         settings: { baseURL: `http://127.0.0.1:${port}/v1` },
     };
@@ -144,9 +150,7 @@ function writeCampaign(
 }
 
 /** Start the shipped scripted provider and wait for readiness. */
-async function startProvider(
-    port: number,
-): Promise<{
+async function startProvider(port: number): Promise<{
     close: () => void;
     chatRequests: () => Promise<number>;
 }> {
@@ -193,9 +197,10 @@ async function startProvider(
 /** Analyse one root and return its report. */
 function analyse(root: string, out: string): Record<string, unknown> {
     step("analyse", ["analyse", "--root", root, "--out", out]);
-    return JSON.parse(
-        readFileSync(join(out, "report.json"), "utf8"),
-    ) as Record<string, unknown>;
+    return JSON.parse(readFileSync(join(out, "report.json"), "utf8")) as Record<
+        string,
+        unknown
+    >;
 }
 
 /** Run one shard: prepare, freeze, run its slots, assess, close, analyse. */
@@ -244,32 +249,22 @@ async function main(): Promise<void> {
             "shard B did not list the whole schedule",
         );
         expect(
-            slotsOf(first.report).filter(
-                (slot) => slot.validity !== "unrun",
-            ).length === SHARD_A.length,
+            slotsOf(first.report).filter((slot) => slot.validity !== "unrun")
+                .length === SHARD_A.length,
             "shard A executed the wrong number of slots",
         );
         expect(
-            slotsOf(second.report).filter(
-                (slot) => slot.validity !== "unrun",
-            ).length === SHARD_B.length,
+            slotsOf(second.report).filter((slot) => slot.validity !== "unrun")
+                .length === SHARD_B.length,
             "shard B executed the wrong number of slots",
         );
 
-        const rates = join(
-            PKG,
-            "examples",
-            "reporting",
-            "rates.mjs",
-        );
-        const merged = run(
-            process.execPath,
-            [
-                rates,
-                join(work, "shard-a", "report", "report.json"),
-                join(work, "shard-b", "report", "report.json"),
-            ],
-        );
+        const rates = join(PKG, "examples", "reporting", "rates.mjs");
+        const merged = run(process.execPath, [
+            rates,
+            join(work, "shard-a", "report", "report.json"),
+            join(work, "shard-b", "report", "report.json"),
+        ]);
         expect(
             merged.status === 0,
             `merged rates failed: ${merged.stderr || merged.stdout}`,
@@ -306,10 +301,7 @@ async function main(): Promise<void> {
             `duplicate shards were not refused: ${duplicate.stderr}`,
         );
         const chatRequests = await provider.chatRequests();
-        expect(
-            chatRequests > 0,
-            "the scripted provider served no request",
-        );
+        expect(chatRequests > 0, "the scripted provider served no request");
 
         const receipt = {
             schemaVersion: 1,

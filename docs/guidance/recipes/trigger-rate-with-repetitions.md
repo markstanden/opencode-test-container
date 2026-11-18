@@ -163,7 +163,7 @@ Missing and duplicate slots have different answers:
   not delete the row: an `unrun` slot is "not evidence", not "not scheduled".
 - **Duplicate.** Two roots that both executed the same slot are a
   contradiction. The merge refuses with `slot <id> was executed in more than
-  one shard (valid and valid)`; fix the selection (the shards must be disjoint)
+one shard (valid and valid)`; fix the selection (the shards must be disjoint)
   and re-analyse. Two shards of the same root are refused the same way. Never
   add the two counts by hand.
 

@@ -163,9 +163,11 @@ describe("root creation", () => {
             assert.equal(results.filter((entry) => entry.ok).length, 1);
             assert.match(
                 results.find((entry) => !entry.ok)?.ok === false
-                    ? (results.find((entry) => !entry.ok) as {
-                          problems: string[];
-                      }).problems.join("; ")
+                    ? (
+                          results.find((entry) => !entry.ok) as {
+                              problems: string[];
+                          }
+                      ).problems.join("; ")
                     : "",
                 /already exists/,
             );

@@ -272,10 +272,7 @@ describe("sharded report merge", () => {
         assert.equal(first.slots.length, 9);
         assert.equal(second.slots.length, 9);
         assert.equal(merged.slots?.length, 9);
-        assert.equal(
-            new Set(merged.slots?.map((slot) => slot.slotId)).size,
-            9,
-        );
+        assert.equal(new Set(merged.slots?.map((slot) => slot.slotId)).size, 9);
         assert.equal(
             summary.rows.reduce((sum, row) => sum + row.scheduled, 0),
             9,
@@ -307,9 +304,7 @@ describe("sharded report merge", () => {
         const merged = mergeReports([first, second]);
 
         // Assert
-        const orphan = merged.slots?.filter(
-            (slot) => slot.slotId === "pos-r0",
-        );
+        const orphan = merged.slots?.filter((slot) => slot.slotId === "pos-r0");
         assert.equal(orphan?.length, 1);
         assert.equal(orphan?.[0]?.validity, "unrun");
     });

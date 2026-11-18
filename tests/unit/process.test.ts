@@ -193,5 +193,4 @@ describe("pre-launch cancellation", () => {
         assert.equal(result.signal, null);
         assert.equal(result.timedOut, false);
     });
-
 });
