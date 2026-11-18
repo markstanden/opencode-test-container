@@ -148,25 +148,34 @@ export function mergeReports(reports) {
     const merged = new Map();
     for (const report of reports) {
         for (const slot of report?.slots ?? []) {
-            const slotId = String(slot.slotId);
-            const executed = String(slot.validity) !== "unrun";
-            const existing = merged.get(slotId);
-            if (existing === undefined) {
-                merged.set(slotId, { row: slot, executed });
-                continue;
-            }
-            if (existing.executed && executed) {
-                throw new Error(
-                    `slot ${slotId} was executed in more than one shard (${String(existing.row.validity)} and ${String(slot.validity)}); shards must be disjoint`,
-                );
-            }
-            if (executed) merged.set(slotId, { row: slot, executed });
+            reconcile(merged, slot);
         }
     }
     return {
         ...reports[0],
         slots: [...merged.values()].map((entry) => entry.row),
     };
+}
+
+/**
+ * Fold one report row into the merged slot map.
+ * @param merged Slot id to its chosen row and execution state.
+ * @param slot One report slot row.
+ */
+function reconcile(merged, slot) {
+    const slotId = String(slot.slotId);
+    const executed = String(slot.validity) !== "unrun";
+    const existing = merged.get(slotId);
+    if (existing === undefined) {
+        merged.set(slotId, { row: slot, executed });
+        return;
+    }
+    if (existing.executed && executed) {
+        throw new Error(
+            `slot ${slotId} was executed in more than one shard (${String(existing.row.validity)} and ${String(slot.validity)}); shards must be disjoint`,
+        );
+    }
+    if (executed) merged.set(slotId, { row: slot, executed });
 }
 
 /** One rate as `count/denominator` or `unavailable`. */

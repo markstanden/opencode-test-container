@@ -650,6 +650,30 @@ function manifestFor(
     };
 }
 
+/**
+ * Create missing parents, then claim the final root directory exclusively.
+ * @param root The proposed campaign root.
+ * @returns A refusal, or null when this invocation now owns a fresh root.
+ */
+function claimRoot(root: string): string | null {
+    if (existsSync(root)) {
+        return `${root} already exists; prepare needs a fresh root`;
+    }
+    try {
+        mkdirSync(dirname(resolve(root)), { recursive: true });
+    } catch (error) {
+        return `${root} could not be created: ${error instanceof Error ? error.message : String(error)}`;
+    }
+    try {
+        mkdirSync(root, { recursive: false });
+        return null;
+    } catch (error) {
+        return (error as NodeJS.ErrnoException).code === "EEXIST"
+            ? `${root} already exists; prepare needs a fresh root`
+            : `${root} could not be created: ${error instanceof Error ? error.message : String(error)}`;
+    }
+}
+
 /** Remove only a root this invocation created, then report the refusal. */
 function refuseCreated(root: string, problems: string[]): PrepareResult {
     rmSync(root, { recursive: true, force: true });
@@ -682,37 +706,8 @@ export function prepareCampaign(
             problems: [...overlap, "choose a root outside every staged input"],
         };
     }
-    if (existsSync(root)) {
-        return {
-            ok: false,
-            problems: [`${root} already exists; prepare needs a fresh root`],
-        };
-    }
-    // Create missing parents first, then claim the final directory
-    // exclusively: recursive creation of the leaf would not be a claim, and a
-    // claim over missing parents would fail with ENOENT.
-    try {
-        mkdirSync(dirname(resolve(root)), { recursive: true });
-    } catch (error) {
-        return {
-            ok: false,
-            problems: [
-                `${root} could not be created: ${error instanceof Error ? error.message : String(error)}`,
-            ],
-        };
-    }
-    try {
-        mkdirSync(root, { recursive: false });
-    } catch (error) {
-        return {
-            ok: false,
-            problems: [
-                (error as NodeJS.ErrnoException).code === "EEXIST"
-                    ? `${root} already exists; prepare needs a fresh root`
-                    : `${root} could not be created: ${error instanceof Error ? error.message : String(error)}`,
-            ],
-        };
-    }
+    const claim = claimRoot(root);
+    if (claim !== null) return { ok: false, problems: [claim] };
     try {
         write(
             join(root, "prepare", "suite.json"),

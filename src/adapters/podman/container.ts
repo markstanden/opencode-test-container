@@ -185,16 +185,28 @@ export async function runContainer(
     // Killing the Podman client is not proof the container stopped. A timeout,
     // error or signal triggers a bounded stop/remove of this owned name only;
     // an unrelated container is never enumerated or touched.
-    if (
-        plan.name !== undefined &&
-        (result.timedOut ||
-            result.error !== null ||
-            result.signal !== null ||
-            result.status !== 0)
-    ) {
-        await cleanupContainer(plan.name, run);
-    }
+    const owned = ownedContainerToClean(plan, result);
+    if (owned !== null) await cleanupContainer(owned, run);
     return result;
+}
+
+/**
+ * The owned container name to clean after one finished dispatch, if any.
+ * @param plan The executed plan.
+ * @param result The bounded process result.
+ * @returns The owned name only when a timeout, error, signal or non-zero exit
+ *   may have left that container behind.
+ */
+function ownedContainerToClean(
+    plan: ContainerPlan,
+    result: CommandResult,
+): string | null {
+    const failed =
+        result.timedOut ||
+        result.error !== null ||
+        result.signal !== null ||
+        result.status !== 0;
+    return plan.name !== undefined && failed ? plan.name : null;
 }
 
 /**
