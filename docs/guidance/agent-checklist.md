@@ -39,8 +39,9 @@ is a result whose claim matches its evidence.
    CLI identity. Dry-run and dispatch both require this receipt.
 10. **Dry-run the plan.** `otc run --root <root> --dry-run` stages each selected
     slot in a disposable directory, reports an instruction collision if one
-    exists, and lists the slots it would dispatch. No container starts, no
-    provider request is made and no trial budget is consumed. It prints no
+    exists, and prints one `admissible` or `refused` line per slot with a
+    `budget:` or `staging:` reason. No container starts, no provider request is
+    made, no trial budget is consumed and no claim is written. It prints no
     mounts or argv and keeps no directory, so check those against
     [`docs/schema.md`](../schema.md) and the campaign instead.
 11. **Dispatch.** `otc run --root <root>`, then inspect the materialised trial

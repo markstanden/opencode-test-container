@@ -48,6 +48,25 @@ export interface RateSummary {
     controls: RateRow[];
 }
 
+/** The report fields the merge and summary read. */
+export interface ReportLike {
+    /** Campaign identity, when present. */
+    campaignId?: unknown;
+    /** Suite identity, when present. */
+    suiteId?: unknown;
+    /** Slot rows. */
+    slots?: readonly Record<string, unknown>[];
+}
+
+/**
+ * Reconcile shard reports into one checked document. Each report lists the
+ * whole frozen schedule, so unrun rows repeat; a slot executed in exactly one
+ * shard wins, an all-unrun slot is kept once and two executions throw.
+ * @param reports Parsed `report.json` documents from separate roots.
+ * @returns The merged report; duplicate executions or different campaigns throw.
+ */
+export function mergeReports(reports: readonly ReportLike[]): ReportLike;
+
 /** Summarise a report into one row per case and arm. */
 export function summariseRates(
     report: unknown,

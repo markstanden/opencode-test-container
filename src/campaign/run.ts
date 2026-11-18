@@ -1,9 +1,12 @@
 import { randomBytes } from "node:crypto";
 import {
+    closeSync,
+    constants,
     copyFileSync,
     existsSync,
     mkdirSync,
     mkdtempSync,
+    openSync,
     readFileSync,
     rmSync,
     writeFileSync,
@@ -40,6 +43,7 @@ import {
 import type { CommandResult } from "../adapters/process.ts";
 import { deliveryCheck, loadFrozen, type FrozenRecord } from "./freeze.ts";
 import { stageTree } from "./inventory.ts";
+import { containedEntry } from "../evidence/containment.ts";
 import { executePrimaryCheck, type PrimaryCheckRecord } from "./primary.ts";
 import { runShouldStop } from "./stop-policy.ts";
 import { withAdmission } from "./admission.ts";
@@ -47,6 +51,7 @@ import { appendLedgerEvent, readLedger, startedSlots } from "./ledger.ts";
 import {
     advanceClaim,
     claimBudget,
+    readClaims,
     releaseClaim,
     type BudgetClaim,
 } from "./budget.ts";
@@ -126,6 +131,11 @@ export interface TrialMeta {
     promptSha256: string;
     /** The answer sha256 value. */
     answerSha256: string;
+    /**
+     * SHA-256 of the exact usage sidecar bytes. Absent on historical captures,
+     * which cannot bind their usage and are reported as unverified.
+     */
+    usageSha256?: string;
     /** The image id value. */
     imageId: string;
     /** The completed at value. */
@@ -142,6 +152,22 @@ export interface RunSummary {
     refused: string[];
     /** The problems value. */
     problems: string[];
+    /**
+     * A dry run's per-slot admission preview, in schedule order: whether the
+     * slot would be admitted and why not when it would not. Absent on a real
+     * run.
+     */
+    preview?: PreviewSlot[];
+}
+
+/** One dry-run slot's read-only admission decision. */
+export interface PreviewSlot {
+    /** The slot id. */
+    slotId: string;
+    /** Whether the slot would be dispatched at this snapshot. */
+    admissible: boolean;
+    /** The reason, naming staging validity or budget availability. */
+    reason: string;
 }
 
 /** Dependencies the runner accepts, so ordinary tests need no Podman. */
@@ -468,22 +494,75 @@ function captureIntegrity(
     return integrity;
 }
 
+/**
+ * Place the answer where a docs primary checker expects it, without ever
+ * overwriting or following a subject-controlled destination.
+ *
+ * The canonical answer stays in host-owned trial evidence. This copy exists
+ * only because the checker's contract reads `/workspace/answer.md`. Exclusive
+ * creation means a subject-written answer survives untouched; an existing
+ * symlink, FIFO or directory is reported as a problem rather than followed,
+ * so the copy can never write outside the workspace.
+ * @param workspace The trial workspace.
+ * @param text The captured answer.
+ * @returns Whether a copy was written, or the refusal.
+ */
+function placeWorkspaceAnswer(
+    workspace: string,
+    text: string,
+): { ok: true; written: boolean } | { ok: false; problem: string } {
+    const target = join(workspace, "answer.md");
+    let fd: number;
+    try {
+        fd = openSync(
+            target,
+            constants.O_WRONLY |
+                constants.O_CREAT |
+                constants.O_EXCL |
+                constants.O_NOFOLLOW,
+            0o600,
+        );
+    } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code === "EEXIST" || code === "ELOOP") {
+            // Occupied: keep what the subject wrote, but only when it is a
+            // regular file. Classifying without following refuses a symlink,
+            // FIFO, directory or escaping object explicitly.
+            const entry = containedEntry(workspace, "answer.md");
+            if (!entry.ok) {
+                return {
+                    ok: false,
+                    problem: `workspace answer.md is unsafe: ${entry.problem}`,
+                };
+            }
+            if (entry.kind === "file") return { ok: true, written: false };
+            return {
+                ok: false,
+                problem: `workspace answer.md is a ${entry.kind}; refusing to replace it`,
+            };
+        }
+        return {
+            ok: false,
+            problem: `workspace answer.md could not be created: ${error instanceof Error ? error.message : String(error)}`,
+        };
+    }
+    try {
+        writeFileSync(fd, text, "utf8");
+    } finally {
+        closeSync(fd);
+    }
+    return { ok: true, written: true };
+}
+
 /** Write all evidence for one completed trial. */
 function writeTrialEvidence(
     trialDir: string,
     result: CommandResult,
     trail: DecodedTrail,
     meta: TrialMeta,
-    answerInWorkspace: boolean,
 ): void {
     writeFileSync(join(trialDir, "events.jsonl"), result.stdout, "utf8");
     writeFileSync(join(trialDir, "answer.md"), trail.text, "utf8");
-    if (answerInWorkspace) {
-        const answerPath = join(trialDir, "workspace", "answer.md");
-        if (!existsSync(answerPath)) {
-            writeFileSync(answerPath, trail.text, "utf8");
-        }
-    }
     writeFileSync(
         join(trialDir, "tools.jsonl"),
         trail.calls.length === 0
@@ -576,6 +655,14 @@ async function executeSlot(options: {
     const completedAt = now();
     const trail = decodeTrail(result.stdout);
     const integrity = captureIntegrity(result, trail);
+    if (options.testCase.kind === "docs-task") {
+        const placed = placeWorkspaceAnswer(
+            join(trialDir, "workspace"),
+            trail.text,
+        );
+        if (!placed.ok) integrity.push(placed.problem);
+    }
+    const usageText = `${JSON.stringify(trail.usage, null, 2)}\n`;
     const meta: TrialMeta = {
         schemaVersion: 1,
         campaignId: manifest.campaignId,
@@ -597,16 +684,11 @@ async function executeSlot(options: {
         events: trail.events,
         promptSha256: launch.promptSha256,
         answerSha256: sha256Bytes(trail.text),
+        usageSha256: sha256Bytes(usageText),
         imageId: frozen.imageId,
         completedAt,
     };
-    writeTrialEvidence(
-        trialDir,
-        result,
-        trail,
-        meta,
-        options.testCase.kind === "docs-task",
-    );
+    writeTrialEvidence(trialDir, result, trail, meta);
     appendLedgerEvent(
         root,
         {
@@ -747,6 +829,10 @@ interface SlotOutcome {
     refused: boolean;
     problems: string[];
     stop: boolean;
+    /** Present only in a dry run. */
+    admissible?: boolean;
+    /** The dry-run reason, naming staging validity or budget availability. */
+    reason?: string;
 }
 
 /** Why a slot may not be dispatched now, or null. */
@@ -785,15 +871,24 @@ async function dispatchSlot(options: {
     slot: Slot;
     already: ReadonlySet<string>;
     dryRun: boolean;
+    /** Trial budget left at this point in a dry-run preview. */
+    budgetRemaining?: number;
     passthrough: readonly string[] | undefined;
     signal: AbortSignal | undefined;
     execute: (plan: ContainerPlan) => Promise<CommandResult>;
     now: () => string;
 }): Promise<SlotOutcome> {
-    const { root, manifest, frozen, slot, already, dryRun, execute, now } =
-        options;
+    const { root, manifest, slot, already, dryRun } = options;
     const precondition = slotPrecondition(root, manifest, slot, already);
-    if (precondition !== null) return precondition;
+    if (precondition !== null) {
+        return dryRun
+            ? {
+                  ...precondition,
+                  admissible: false,
+                  reason: `not admissible: ${precondition.problems.join("; ")}`,
+              }
+            : precondition;
+    }
     const testCase = manifest.suite.cases.find(
         (entry) => entry.caseId === slot.caseId,
     );
@@ -804,22 +899,60 @@ async function dispatchSlot(options: {
             refused: false,
             problems: [`slot ${slot.slotId} has no staged case or arm`],
             stop: false,
+            ...(dryRun
+                ? {
+                      admissible: false,
+                      reason: `staging: slot ${slot.slotId} has no staged case or arm`,
+                  }
+                : {}),
         };
     }
-    const trialDir = trialDirectory(root, slot.slotId);
     if (dryRun) {
-        return dryRunPlan({ ...options, testCase, arm });
+        return dryRunOutcome(options, testCase, arm);
+    }
+    return liveSlot({ ...options, testCase, arm });
+}
+
+/** Claim, plan, dispatch and record one live slot. */
+async function liveSlot(options: {
+    root: string;
+    manifest: PreparedManifest;
+    frozen: FrozenRecord;
+    slot: Slot;
+    testCase: SuiteCase;
+    arm: StagedArm;
+    passthrough: readonly string[] | undefined;
+    signal: AbortSignal | undefined;
+    execute: (plan: ContainerPlan) => Promise<CommandResult>;
+    now: () => string;
+}): Promise<SlotOutcome> {
+    const { root, manifest, frozen, slot, testCase, arm, execute, now } =
+        options;
+    const trialDir = trialDirectory(root, slot.slotId);
+    if (isAborted(options.signal)) {
+        return cancelledOutcome(slot.slotId);
     }
     const claimed = claimTrial(root, manifest, slot);
     if (!claimed.ok) return claimed.outcome;
     const planned = planClaimed({
-        ...options,
+        root,
+        manifest,
+        frozen,
+        slot,
         testCase,
         arm,
         trialDir,
         claim: claimed.claim,
+        passthrough: options.passthrough,
     });
     if (!planned.ok) return planned.outcome;
+    // Cancellation between planning and launch: nothing was dispatched, so the
+    // claim is released and this invocation's provisional tree is removed.
+    if (isAborted(options.signal)) {
+        releaseClaim(claimed.claim);
+        rmSync(trialDir, { recursive: true, force: true });
+        return cancelledOutcome(slot.slotId);
+    }
     if (options.signal !== undefined)
         planned.planned.plan.signal = options.signal;
     advanceClaim(claimed.claim, "spawned", {
@@ -853,6 +986,56 @@ async function dispatchSlot(options: {
             exit: meta.meta.exit,
             primaryStatus: meta.primaryStatus,
         }),
+    };
+}
+
+/** Whether a cancellation signal is already aborted, without narrowing it. */
+function isAborted(signal: AbortSignal | undefined): boolean {
+    return signal !== undefined && signal.aborted;
+}
+
+/** One slot's read-only admission decision for a dry run. */
+function dryRunOutcome(
+    options: {
+        root: string;
+        manifest: PreparedManifest;
+        frozen: FrozenRecord;
+        slot: Slot;
+        budgetRemaining?: number;
+        passthrough: readonly string[] | undefined;
+    },
+    testCase: SuiteCase,
+    arm: StagedArm,
+): SlotOutcome {
+    if (options.budgetRemaining !== undefined && options.budgetRemaining <= 0) {
+        return {
+            ran: false,
+            refused: true,
+            problems: [],
+            stop: false,
+            admissible: false,
+            reason: "budget: no trial budget remains at this snapshot",
+        };
+    }
+    const planned = dryRunPlan({ ...options, testCase, arm });
+    return planned.ran
+        ? { ...planned, admissible: true, reason: "admissible" }
+        : {
+              ...planned,
+              admissible: false,
+              reason: `staging: ${planned.problems.join("; ")}`,
+          };
+}
+
+/** The refusal recorded when cancellation stops a slot that never dispatched. */
+function cancelledOutcome(slotId: string): SlotOutcome {
+    return {
+        ran: false,
+        refused: true,
+        problems: [
+            `slot ${slotId} was cancelled before dispatch; nothing was dispatched`,
+        ],
+        stop: true,
     };
 }
 
@@ -998,11 +1181,16 @@ function planClaimed(
                 : { passthrough: options.passthrough }),
         });
     } catch (error) {
+        // A throwing planner before dispatch leaves nothing worth keeping.
+        rmSync(options.trialDir, { recursive: true, force: true });
         releaseClaim(options.claim);
         throw error;
     }
     if (planned.ok) return { ok: true, planned };
+    // The claim provably never dispatched, so release it and remove only this
+    // invocation's provisional trial tree. A corrected retry owns the path.
     releaseClaim(options.claim);
+    rmSync(options.trialDir, { recursive: true, force: true });
     return {
         ok: false,
         outcome: {
@@ -1063,6 +1251,80 @@ function runState(
     };
 }
 
+/** The inputs shared by a run's preview and live loops. */
+interface RunInputs {
+    root: string;
+    manifest: PreparedManifest;
+    frozen: FrozenRecord;
+    selected: readonly Slot[];
+    already: ReadonlySet<string>;
+    execute: (plan: ContainerPlan) => Promise<CommandResult>;
+    now: () => string;
+    signal: AbortSignal | undefined;
+    passthrough: readonly string[] | undefined;
+}
+
+/** A dry run: read-only admission for every selected slot. */
+async function previewRun(
+    inputs: RunInputs,
+    budget: number,
+): Promise<RunSummary> {
+    const ran: string[] = [];
+    const refused: string[] = [];
+    const problems: string[] = [];
+    const preview: PreviewSlot[] = [];
+    let budgetRemaining = budget;
+    const seen = new Set<string>();
+    for (const slot of inputs.selected) {
+        if (seen.has(slot.slotId)) {
+            preview.push({
+                slotId: slot.slotId,
+                admissible: false,
+                reason: "not admissible: the slot is selected more than once",
+            });
+            continue;
+        }
+        seen.add(slot.slotId);
+        const outcome = await dispatchSlot({
+            ...inputs,
+            slot,
+            dryRun: true,
+            budgetRemaining,
+        });
+        preview.push({
+            slotId: slot.slotId,
+            admissible: outcome.admissible === true,
+            reason: outcome.reason ?? "not admissible",
+        });
+        if (outcome.admissible === true) budgetRemaining -= 1;
+        if (outcome.ran) ran.push(slot.slotId);
+        if (outcome.refused) refused.push(slot.slotId);
+        problems.push(...outcome.problems);
+    }
+    return { ok: problems.length === 0, ran, refused, problems, preview };
+}
+
+/** A live run: dispatch selected slots, stopping on cancellation or policy. */
+async function liveRun(inputs: RunInputs): Promise<RunSummary> {
+    const ran: string[] = [];
+    const refused: string[] = [];
+    const problems: string[] = [];
+    for (const slot of inputs.selected) {
+        if (isAborted(inputs.signal)) {
+            problems.push(
+                `run cancelled before slot ${slot.slotId}; nothing was dispatched`,
+            );
+            break;
+        }
+        const outcome = await dispatchSlot({ ...inputs, slot, dryRun: false });
+        if (outcome.ran) ran.push(slot.slotId);
+        if (outcome.refused) refused.push(slot.slotId);
+        problems.push(...outcome.problems);
+        if (outcome.stop) break;
+    }
+    return { ok: problems.length === 0, ran, refused, problems };
+}
+
 /**
  * Execute one or more scheduled slots. A launch receipt and ledger event are
  * written before the container starts, so an interrupted dispatch remains
@@ -1090,37 +1352,37 @@ export async function runCampaign(
     // caller always gets an input error rather than a misleading operational
     // one, and nothing has been written.
     refuseUnknownSelectors(root, options.slotIds);
+    if (isAborted(options.signal)) {
+        return {
+            ok: false,
+            ran: [],
+            refused: [],
+            problems: ["run cancelled before any dispatch"],
+        };
+    }
     const state = runState(root, deps.tool);
     if (!state.ok) {
         return { ok: false, ran: [], refused: [], problems: state.problems };
     }
-    const manifest = state.manifest;
-    const selected = selectedSlots(manifest.campaign, options.slotIds);
-    const already = new Set(startedSlots(state.ledger.events));
-    const now = deps.now ?? (() => new Date().toISOString());
-    const execute = deps.runContainer ?? runContainer;
-    const ran: string[] = [];
-    const refused: string[] = [];
-    const problems: string[] = [];
-    for (const slot of selected) {
-        const outcome = await dispatchSlot({
-            root,
-            manifest,
-            frozen: state.frozen,
-            slot,
-            already,
-            dryRun: options.dryRun === true,
-            passthrough: options.passthrough,
-            signal: options.signal,
-            execute,
-            now,
-        });
-        if (outcome.ran) ran.push(slot.slotId);
-        if (outcome.refused) refused.push(slot.slotId);
-        problems.push(...outcome.problems);
-        if (outcome.stop) break;
+    const inputs: RunInputs = {
+        root,
+        manifest: state.manifest,
+        frozen: state.frozen,
+        selected: selectedSlots(state.manifest.campaign, options.slotIds),
+        already: new Set(startedSlots(state.ledger.events)),
+        execute: deps.runContainer ?? runContainer,
+        now: deps.now ?? (() => new Date().toISOString()),
+        signal: options.signal,
+        passthrough: options.passthrough,
+    };
+    if (options.dryRun === true) {
+        const used = readClaims(join(root, "evidence"), "trial").length;
+        return previewRun(
+            inputs,
+            state.manifest.campaign.budgets.trials - used,
+        );
     }
-    return { ok: problems.length === 0, ran, refused, problems };
+    return liveRun(inputs);
 }
 
 /** The canonical identity of a trial's immutable launch receipt. */

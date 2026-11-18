@@ -39,7 +39,17 @@ judge. See [`examples/skills`](examples/skills).
 
 ## Quick start
 
-Three lanes, ordered by what they cost.
+Requirements: Node 26 (`engines`) and rootless Podman 5+ for any lane that
+dispatches. The no-dispatch lane needs neither a container runtime nor a
+network.
+
+```sh
+npm install --global @markstanden/opencode-test-container
+otc --version
+```
+
+From a checkout, `dist/` must be built first (`npm ci && npm run build`); set
+`OTC_CLI` to that path if you invoke the rehearsals.
 
 ### Validate and plan — no provider dispatch
 
@@ -51,19 +61,21 @@ otc run      --root /tmp/otc-run --dry-run   # verify the plan, no dispatch
 otc status   --root /tmp/otc-run --json
 ```
 
-`run --dry-run` builds and validates each selected slot's plan and lists the
-slots it would dispatch; nothing is dispatched, so no OpenCode process and no
-provider request exist. Validation success only proves the configuration is
-well formed, not that the experiment measures what you intend — see
-[`docs/guidance/choose-what-youre-measuring.md`](docs/guidance/choose-what-youre-measuring.md).
+`run --dry-run` builds and validates each selected slot's plan and prints one
+`admissible` or `refused` line per slot with a reason: `budget:` when the
+durable budget or an earlier slot in the same preview leaves nothing, and
+`staging:` when the prepared payload cannot produce a plan. It creates no
+claim, so the snapshot is read-only. Validation success only proves the
+configuration is well formed, not that the experiment measures what you intend
+— see [`docs/guidance/choose-what-youre-measuring.md`](docs/guidance/choose-what-youre-measuring.md).
 The guidance entry point is [`docs/guidance/README.md`](docs/guidance/README.md).
 
 ### Scripted execution — real containers, local provider
 
 ```sh
-otc run      --root /tmp/otc-run             # real Podman + OpenCode
-otc judge    --root /tmp/otc-run             # optional blind judge, if declared
-otc assess   --root /tmp/otc-run             # deterministic, zero judge calls
+otc run      --root /tmp/otc-run   # real Podman + OpenCode
+otc assess   --root /tmp/otc-run   # deterministic; required before judging
+otc judge    --root /tmp/otc-run   # optional blind judge, if declared
 otc close    --root /tmp/otc-run
 otc analyse  --root /tmp/otc-run --out /tmp/otc-report
 ```
@@ -73,16 +85,86 @@ loopback server, so no credential is read and no paid request is made. The
 example expects that server at `127.0.0.1:8799`; start it before `run` — see
 [`examples/skills`](examples/skills).
 
+`assess` comes before `judge`. A judge dispatch requires a checked
+deterministic assessment whose capture is valid and whose outcome is pass or
+fail; a missing, invalid or untrusted assessment refuses the whole judge
+invocation before any claim, so it costs zero paid attempts. A valid adverse
+result is eligible. `judge` refuses nothing else silently: `status` names the
+slots still pending and why.
+
+Each trial's evidence is under `/tmp/otc-run/evidence/trials/<slotId>/`; the
+deterministic assessment is `evidence/assessments/<slotId>.json`; a judged
+slot's packet, attempts and `selection.json` are under
+`evidence/judgements/<slotId>/`. The rendered report is the `--out` directory
+(`report.json` and `report.md`).
+
 ### Real-provider execution — potentially paid
 
 Point `runtime.provider.overlay` at your route and name the credential in
 `passthroughEnv`. Each trial can then make several provider requests: budget
 `budgets.trials` and `timeoutMs` from measured cost, not from
-`judgeAttempts`.
+`judgeAttempts`. The judge is one additional, separately budgeted model call
+per selected slot, dispatched only after the deterministic assessment is
+checked.
+
+Neither `network: "host"` nor a judge turn is isolated egress: host networking
+is honest host networking, and a paid route is a real provider call.
 
 `status` is read-only: it does not build images, probe providers, repair files
 or dispatch. Its next actions are derived from the manifest and checked
-evidence, not from baked-in campaign constants.
+evidence, not from baked-in campaign constants, and it distinguishes an unrun
+slot, a pending judgement, a terminal judge failure and an assessment that must
+run first.
+
+### From an empty consumer directory
+
+The candidate tarball is the package this release produces; the same commands
+work for the published package with its version substituted.
+
+```sh
+mkdir otc-quickstart && cd otc-quickstart
+npm init -y >/dev/null
+npm install /path/to/markstanden-opencode-test-container-0.2.0.tgz
+PKG="$(npm root)/@markstanden/opencode-test-container"
+OTC="$PWD/node_modules/.bin/otc"   # a local install, not a global one
+ROOT="$(mktemp -d)/run"
+
+# Locate the shipped assets.
+ls "$PKG/examples/skills" "$PKG/examples/provider" "$PKG/container"
+
+# Build the pinned sandbox image once, then reuse its ID.
+podman build \
+  --build-arg NODE_BASE=docker.io/library/node:26.13.0-slim \
+  --build-arg OPENCODE_VERSION=2.2.6 \
+  --build-arg HOST_UID="$(id -u)" \
+  --build-arg HOST_GID="$(id -g)" \
+  -t localhost/otc-sandbox:2.2.6 "$PKG/container"
+
+# Start the shipped scripted provider on the example's port.
+node "$PKG/examples/provider/server.mjs" --port 8799 \
+  --plan "$PKG/examples/skills/provider-plan.json" &
+curl --fail http://127.0.0.1:8799/health
+
+export ZAI_API_KEY=not-a-real-key
+"$OTC" validate --campaign "$PKG/examples/skills/campaign.json"
+"$OTC" prepare  --campaign "$PKG/examples/skills/campaign.json" --root "$ROOT"
+"$OTC" freeze   --root "$ROOT"
+"$OTC" run      --root "$ROOT" --dry-run
+"$OTC" run      --root "$ROOT"
+"$OTC" assess   --root "$ROOT"
+"$OTC" status   --root "$ROOT" --json
+"$OTC" close    --root "$ROOT"
+"$OTC" analyse  --root "$ROOT" --out "$ROOT/report"
+
+ls "$ROOT/evidence/trials"          # one directory per dispatched slot
+ls "$ROOT/evidence/assessments"     # deterministic records
+ls "$ROOT/report"                   # report.json and report.md
+```
+
+The packaged `examples/skills/campaign.json` names
+`localhost/otc-sandbox:2.2.6`; `container/README.md` carries the full build
+arguments. The rehearsal [`rehearsals/installed.mts`](rehearsals/installed.mts)
+runs this route from an installed tarball in a path containing a space.
 
 ## Suite format
 
@@ -239,15 +321,19 @@ or rubric data.
   task, standing permission, authored truth, before/after lake documents,
   changed paths, primary-check output, verified docs operations and the final
   answer. It contains no arm label, campaign identity, evidence root or prior
-  verdict. The established parser and validator classify a usable judgement or
-  an explicit `json-syntax`, `schema`, `semantic`, `empty-or-truncated` or
-  `transport-or-process` failure. Only `json-syntax` is recoverable, and only
-  once, from identical packet bytes under a registered policy and durable
-  ceilings.
+  verdict. The packet is streamed to the judge on stdin, so no packet byte is
+  in the process argument vector and a packet larger than the host's
+  single-argument limit still arrives intact. The established parser and
+  validator classify a usable judgement or an explicit `json-syntax`, `schema`,
+  `semantic`, `empty-or-truncated` or `transport-or-process` failure. Only
+  `json-syntax` is recoverable, and only once, from identical packet bytes
+  under a registered policy and durable ceilings.
 
 Model judging is not a deterministic pass/fail substitute: the deterministic
 assessment remains the criterion, and the judge records the documentation
-outcome and utility. A campaign that declares a judge is not refused.
+outcome and utility. Declaring a judge on a `skill-activation` campaign is
+rejected by `validate` and `prepare`; docs judging requires a checked
+deterministic assessment first.
 
 A selection is accepted only through one checked reader shared by judge,
 status, closure and reporting: attempt set, packet bytes, policy hash,
@@ -255,11 +341,14 @@ judgement hash, outcome/utility and the judged mutation state are re-derived.
 Slot and attempt packet bytes are hashed and compared with the registered
 identity and with the packet reconstructed from current evidence.
 Judge and recovery claims live under `campaign root/evidence`; a recovery
-settles both, and an interrupted claim stays visible and blocks closure. The
-judge's standing-permission block comes from the pristine prepared workspace,
-never the trial's live `AGENTS.md`. Before dispatch, the executing artifact
-hash is compared with the freeze, derived from the executing module's own
-`src`/`dist` tree, so changed code under the same package version is refused.
+settles both, and an interrupted claim stays visible and blocks closure. A
+terminal publication — attempt evidence, claim closure, ledger event and
+selection — is one admission-locked state, so a concurrent close never sees a
+judged verdict with no selection. The judge's standing-permission block comes
+from the pristine prepared workspace, never the trial's live `AGENTS.md`.
+Before dispatch, the executing artifact hash is compared with the freeze,
+derived from the executing module's own `src`/`dist` tree, so changed code
+under the same package version is refused.
 
 ## Sandbox limits
 
@@ -289,6 +378,35 @@ its original implementation, tests, parity evidence and remaining owner.
 into the new vocabulary without renaming a stamp or scenario id. The old
 campaign roots are not resumed by this engine; use a fresh root and keep the
 original for provenance.
+
+## Stability
+
+One npm package, one binary. Version `0.x` is a pre-1.0 line: a minor release
+may change documented behaviour, and such changes are listed in the release
+notes (`docs/release-<version>.md`) with migration steps.
+
+- **CLI.** Command names, the flags documented by `otc --help`, and exit codes
+  (`0` ok, `1` operational refusal, `2` usage/validation refusal) are the
+  supported surface. A flag a command does not define is a usage error, not an
+  ignored extra. JSON output documents carry their own `schemaVersion`.
+- **JavaScript API.** Named ESM exports from the package root are supported for
+  programmatic use; there is no default export and no implicit singleton. The
+  checked evidence readers (`checkedAssessments`, `checkedSelection`,
+  `judgeStateOf`) are the supported way to read evidence, with their exported
+  types. A deprecated export keeps working for the life of its release line and
+  names its replacement in a `@deprecated` tag; `readAssessments` is deprecated
+  in favour of `checkedAssessments`.
+- **Evaluator analysis.** The docs analysis modules under
+  `src/evaluators/docs/analysis` are exported so recorded evidence can be
+  replayed. Their output follows the recorded schema versions, and historical
+  replay keeps the semantics of the version that recorded it.
+- **Assets.** `examples/`, `container/` and `docs/` ship inside the tarball.
+  Installed consumers should address them through the package directory
+  (`"$(npm root)/@markstanden/opencode-test-container"`), never through a
+  checkout-relative path.
+
+Node 26 is required (`engines`); rootless Podman is required only for lanes
+that dispatch a container.
 
 ## Development
 

@@ -179,6 +179,53 @@ describe("report destination containment", () => {
         assert.equal(existsSync(join(root, "evidence", "descendant")), false);
     });
 
+    it("refuses a dot-prefixed child of protected evidence", async () => {
+        // Arrange
+        const root = await closed();
+        const out = join(root, "evidence", "..cache", "review");
+        const preparedOut = join(root, "prepare", "..cache", "review");
+
+        // Act
+        const one = analyseCampaign(root, out);
+        const two = analyseCampaign(root, preparedOut);
+
+        // Assert
+        assert.equal(one.ok, false);
+        assert.equal(two.ok, false);
+        assert.equal(existsSync(out), false);
+        assert.equal(existsSync(preparedOut), false);
+    });
+
+    it("refuses the protected root itself and leaves it intact", async () => {
+        // Arrange
+        const root = await closed();
+        const before = snapshot(join(root, "evidence"));
+
+        // Act
+        const result = analyseCampaign(root, join(root, "evidence"));
+
+        // Assert
+        assert.equal(result.ok, false);
+        assert.equal(snapshot(join(root, "evidence")), before);
+    });
+
+    it("permits a dot-prefixed sibling of protected evidence", async () => {
+        // Arrange
+        const root = await closed();
+        const out = join(root, ".reports", "evidence-archive", "review");
+
+        // Act
+        const result = analyseCampaign(root, out);
+
+        // Assert
+        assert.equal(
+            result.ok,
+            true,
+            result.ok ? "" : result.problems.join("; "),
+        );
+        assert.equal(existsSync(join(out, "report.json")), true);
+    });
+
     it("writes a legal sibling reports directory, including spaces", async () => {
         // Arrange
         const root = await closed();

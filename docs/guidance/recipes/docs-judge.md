@@ -25,12 +25,18 @@ is only reported when the adapter exposes one. Set it to the number of slots you
 are willing to judge, plus recoveries if declared. A judge attempt is durable:
 a crash keeps the claim rather than refunding it.
 
+A judge is only supported for `docs-recording`. Declaring one beside
+`skill-activation` is rejected by `validate` and `prepare`, not ignored at
+judge time.
+
 ## What the judge sees
 
-The judge runs in a neutral container with the packet read-only, a neutral
-config home, and no arm subjects, campaign manifest or evidence root. The
-packet is arm-blind: it carries the case prompt, the docs outcome and the
-`truth` you declared, never an arm identity.
+The judge runs in a neutral container with a neutral config home and no arm
+subjects, campaign manifest or evidence root. The packet is streamed to the
+judge on stdin — it is never in the process argument vector, so a packet above
+the host's single-argument limit is still delivered intact — and a read-only
+copy stays mounted for traceability. It is arm-blind: it carries the case
+prompt, the docs outcome and the `truth` you declared, never an arm identity.
 
 ```json
 {
@@ -82,14 +88,19 @@ otc close    --root /tmp/otc-judge
 otc analyse  --root /tmp/otc-judge --out /tmp/otc-judge-report
 ```
 
-`judge` selects only checked, deterministic assessments. A pending or unsettled
-judgement blocks closure; `status` reports the counts and next action. A judge
-failure is recorded with its failure class rather than silently becoming a
-pass.
+`judge` requires a checked deterministic assessment for every selected slot: a
+valid capture with a `pass` or `fail` outcome. A missing, corrupt, invalid or
+unknown assessment — or an inconsistent selection — refuses the whole
+invocation before any claim, so it costs zero paid attempts. A valid adverse
+result is eligible. A pending or unsettled judgement blocks closure; `status`
+reports `pending`, `failed`, assessment-before-judge and next actions from the
+same shared eligibility decision. A judge failure is recorded with its failure
+class rather than silently becoming a pass.
 
 ## Expected evidence
 
-- `evidence/judge/<slot>/attempt-*/` — the packet, attempt metadata and verdict.
+- `evidence/judgements/<slot>/attempt-*/` — the packet, attempt metadata and
+  verdict; `evidence/judgements/<slot>/selection.json` is the chosen attempt.
 - A **selection record** per slot naming the chosen attempt, the arm-blind
   packet identity and every attempt fact; a readable file alone is never a
   judgement.

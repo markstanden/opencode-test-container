@@ -100,6 +100,20 @@ export {
     readAssessments,
 } from "./campaign/assess.ts";
 export type { StoredAssessment } from "./campaign/assess.ts";
+export {
+    checkedAssessments,
+    assessmentRecordPath,
+} from "./evidence/assessments.ts";
+export type {
+    CheckedAssessment,
+    CheckedAssessments,
+} from "./evidence/assessments.ts";
+export { judgeStateOf } from "./campaign/eligibility.ts";
+export type {
+    JudgeFacts,
+    JudgeState,
+    JudgeStateCode,
+} from "./campaign/eligibility.ts";
 export { closeCampaign } from "./campaign/close.ts";
 export { statusOf } from "./campaign/status.ts";
 export type { StatusReport } from "./campaign/status.ts";

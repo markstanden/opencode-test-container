@@ -4,6 +4,7 @@ import type { LifecycleState } from "../contracts/types.ts";
 import { loadPreparedManifest } from "./prepare.ts";
 import { deliveryCheck, loadFrozen } from "./freeze.ts";
 import { readLedger, trialStarts } from "./ledger.ts";
+import { judgeStateOf } from "./eligibility.ts";
 import { checkedAssessments } from "../evidence/assessments.ts";
 import { admissionLockStatus } from "./admission.ts";
 import {
@@ -104,55 +105,109 @@ function lifecycleStateOf(options: {
     return options.frozen ? "frozen" : "prepared";
 }
 
+/** One slot's shared eligibility decision and attempt counts. */
+function slotJudgement(options: {
+    root: string;
+    manifest: StatusManifest;
+    slot: StatusManifest["campaign"]["schedule"]["slots"][number];
+    policy: ReturnType<typeof policyOf>;
+    assessment:
+        ReturnType<typeof checkedAssessments>["records"][number] | undefined;
+}): {
+    state: ReturnType<typeof judgeStateOf>;
+    attempts: number;
+    invalid: number;
+} {
+    const recorded = readJudgeAttempts(options.root, options.slot.slotId);
+    const selection = options.policy.ok
+        ? checkedSelection({
+              root: options.root,
+              manifest: options.manifest,
+              slot: options.slot,
+              policy: options.policy.policy,
+          })
+        : { ok: false as const, problems: options.policy.problems };
+    const state = judgeStateOf({
+        manifest: options.manifest,
+        slot: options.slot,
+        trialRecorded: existsSync(
+            join(
+                trialDirectory(options.root, options.slot.slotId),
+                "meta.json",
+            ),
+        ),
+        assessment: options.assessment,
+        selectionPresent: existsSync(
+            selectionPathOf(options.root, options.slot.slotId),
+        ),
+        selection: selection.ok
+            ? { ok: true, problems: [] }
+            : { ok: false, problems: selection.problems },
+        attempts: recorded,
+    });
+    return {
+        state,
+        attempts: recorded.length,
+        invalid: recorded.filter(
+            (attempt) =>
+                attempt.judgementStatus === "invalid-verdict" ||
+                attempt.judgementStatus === "judge-error",
+        ).length,
+    };
+}
+
+/** Fold one slot's state into the report's judgement counts. */
+function countJudgement(
+    counts: {
+        judged: number;
+        pending: number;
+        failed: number;
+        problems: string[];
+    },
+    slotId: string,
+    state: ReturnType<typeof judgeStateOf>,
+): void {
+    if (state.code === "judged") counts.judged += 1;
+    else if (state.code === "terminal-failures") counts.failed += 1;
+    else if (state.code === "pending") counts.pending += 1;
+    else if (
+        state.code === "selection-conflict" ||
+        state.code === "selection-missing" ||
+        state.code === "unsettled"
+    ) {
+        counts.problems.push(`${slotId}: ${state.reason}`);
+    }
+}
+
 /** The judgement counts for every scheduled slot. */
 function judgementOf(
     root: string,
     manifest: StatusManifest,
+    ledger: ReturnType<typeof readLedger>,
+    assessments: ReturnType<typeof checkedAssessments>["records"],
 ): StatusReport["judgement"] {
     if (manifest.campaign.assessment.judge === undefined) return null;
     const policy = policyOf(manifest);
-    const slots = manifest.campaign.schedule.slots;
-    let judged = 0;
-    let pending = 0;
-    let failed = 0;
+    const bySlot = new Map(assessments.map((entry) => [entry.slotId, entry]));
+    const counts = {
+        judged: 0,
+        pending: 0,
+        failed: 0,
+        problems: [] as string[],
+    };
     let attempts = 0;
     let invalid = 0;
-    const problems: string[] = [];
-    for (const slot of slots) {
-        const recorded = readJudgeAttempts(root, slot.slotId);
-        attempts += recorded.length;
-        invalid += recorded.filter(
-            (attempt) =>
-                attempt.judgementStatus === "invalid-verdict" ||
-                attempt.judgementStatus === "judge-error",
-        ).length;
-        const checked = policy.ok
-            ? checkedSelection({
-                  root,
-                  manifest,
-                  slot,
-                  policy: policy.policy,
-              })
-            : { ok: false as const, problems: policy.problems };
-        if (checked.ok) {
-            judged += 1;
-        } else if (existsSync(selectionPathOf(root, slot.slotId))) {
-            problems.push(
-                ...checked.problems.map(
-                    (problem) => `${slot.slotId}: ${problem}`,
-                ),
-            );
-        } else if (
-            existsSync(join(trialDirectory(root, slot.slotId), "meta.json"))
-        ) {
-            const terminal = recorded.some(
-                (attempt) =>
-                    attempt.judgementStatus === "invalid-verdict" ||
-                    attempt.judgementStatus === "judge-error",
-            );
-            if (terminal) failed += 1;
-            else pending += 1;
-        }
+    for (const slot of manifest.campaign.schedule.slots) {
+        const one = slotJudgement({
+            root,
+            manifest,
+            slot,
+            policy,
+            assessment: bySlot.get(slot.slotId),
+        });
+        attempts += one.attempts;
+        invalid += one.invalid;
+        countJudgement(counts, slot.slotId, one.state);
     }
     const unsettled = ["trial", "judge", "recovery"].reduce(
         (sum, kind) =>
@@ -163,21 +218,21 @@ function judgementOf(
             ).filter((claim) => claim.state !== "closed").length,
         0,
     );
-    problems.push(
-        ...slots.flatMap((slot) =>
+    counts.problems.push(
+        ...manifest.campaign.schedule.slots.flatMap((slot) =>
             packetIntegrityProblems(root, manifest, slot).map(
                 (problem) => `${slot.slotId}: ${problem}`,
             ),
         ),
     );
     return {
-        judged,
-        pending,
-        failed,
+        judged: counts.judged,
+        pending: counts.pending,
+        failed: counts.failed,
         attempts,
         invalid,
         unsettled,
-        problems,
+        problems: counts.problems,
     };
 }
 
@@ -430,7 +485,7 @@ export function statusOf(root: string): StatusReport {
     );
     const assessments = assessmentView(root, manifest, ledger);
     const frozen = frozenView(root);
-    const judgement = judgementOf(root, manifest);
+    const judgement = judgementOf(root, manifest, ledger, assessments.records);
     const problems = [
         ...(ledger.state === "malformed" ? ledger.problems : []),
         ...assessments.problems,

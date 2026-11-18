@@ -24,6 +24,11 @@ export interface ContainerPlan {
     network: "host" | "none";
     /** The argv value. */
     argv: string[];
+    /**
+     * Exact text streamed to the container's stdin. Used for content too large
+     * for the host's single-argument limit; the stream is closed immediately.
+     */
+    stdin?: string;
     /** Environment names passed by reference; values never enter argv. */
     envNames: string[];
     /** A 0600 env file read by Podman; values never enter argv. */
@@ -111,6 +116,7 @@ export function containerArgv(plan: ContainerPlan): string[] {
     const args = [
         "run",
         "--rm",
+        ...(plan.stdin === undefined ? [] : ["-i"]),
         ...(plan.name === undefined ? [] : ["--name", plan.name]),
         ...Object.entries(plan.labels ?? {}).flatMap(([key, value]) => [
             "--label",
@@ -148,6 +154,17 @@ export async function runContainer(
     plan: ContainerPlan,
     run: typeof runCommand = runCommand,
 ): Promise<CommandResult> {
+    if (plan.signal?.aborted === true) {
+        // No container exists yet; skip Podman entirely, including cleanup.
+        return {
+            status: null,
+            signal: null,
+            stdout: "",
+            stderr: "",
+            timedOut: false,
+            error: "not started: signal already aborted",
+        };
+    }
     const problems = mountProblems(plan.mounts);
     if (problems.length > 0) {
         return {
@@ -162,21 +179,34 @@ export async function runContainer(
     const result = await run("podman", containerArgv(plan), {
         timeoutMs: plan.timeoutMs,
         maxBuffer: 64 * 1024 * 1024,
+        ...(plan.stdin === undefined ? {} : { stdinText: plan.stdin }),
         ...(plan.signal === undefined ? {} : { signal: plan.signal }),
     });
     // Killing the Podman client is not proof the container stopped. A timeout,
     // error or signal triggers a bounded stop/remove of this owned name only;
     // an unrelated container is never enumerated or touched.
-    if (
-        plan.name !== undefined &&
-        (result.timedOut ||
-            result.error !== null ||
-            result.signal !== null ||
-            result.status !== 0)
-    ) {
-        await cleanupContainer(plan.name, run);
-    }
+    const owned = ownedContainerToClean(plan, result);
+    if (owned !== null) await cleanupContainer(owned, run);
     return result;
+}
+
+/**
+ * The owned container name to clean after one finished dispatch, if any.
+ * @param plan The executed plan.
+ * @param result The bounded process result.
+ * @returns The owned name only when a timeout, error, signal or non-zero exit
+ *   may have left that container behind.
+ */
+function ownedContainerToClean(
+    plan: ContainerPlan,
+    result: CommandResult,
+): string | null {
+    const failed =
+        result.timedOut ||
+        result.error !== null ||
+        result.signal !== null ||
+        result.status !== 0;
+    return plan.name !== undefined && failed ? plan.name : null;
 }
 
 /**

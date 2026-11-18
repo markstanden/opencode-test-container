@@ -14,7 +14,12 @@
  * are reported separately. With no valid slots the rate is unavailable, not
  * zero.
  *
- * Usage: node rates.mjs <report.json> [--control <caseId>]…
+ * Sharded campaigns publish one report per root. Pass every report to merge
+ * them before rates: a duplicate slot id is refused, and every scheduled slot
+ * absent from a shard must still appear as its own unrun row, so the merged
+ * denominator is the frozen schedule rather than whatever arrived.
+ *
+ * Usage: node rates.mjs <report.json> [<report.json>…] [--control <caseId>]…
  */
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
@@ -112,6 +117,67 @@ export function summariseRates(report, options = {}) {
     };
 }
 
+/**
+ * Merge reports from separate campaign roots into one checked document.
+ *
+ * Every root is prepared from the same campaign, so every report lists the
+ * whole frozen schedule: slots a shard did not run appear as `unrun` rows.
+ * The merge therefore reconciles by slot id rather than concatenating:
+ *
+ * - a slot executed in exactly one shard takes that shard's row;
+ * - a slot unrun in every shard is preserved once as an unrun row;
+ * - a slot executed in more than one shard is a contradiction and is refused,
+ *   because two roots disagree about the same frozen slot.
+ *
+ * Reports must name the same campaign and suite.
+ * @param reports One or more parsed `report.json` documents.
+ * @returns The merged report with one row per scheduled slot.
+ */
+export function mergeReports(reports) {
+    if (reports.length === 0) throw new Error("no reports to merge");
+    if (reports.length === 1) return reports[0];
+    const identity = reports.map(
+        (report) =>
+            `${String(report?.campaignId)}\u0000${String(report?.suiteId)}`,
+    );
+    if (new Set(identity).size !== 1) {
+        throw new Error(
+            `reports name different campaigns: ${[...new Set(identity)].join(", ")}`,
+        );
+    }
+    const merged = new Map();
+    for (const report of reports) {
+        for (const slot of report?.slots ?? []) {
+            reconcile(merged, slot);
+        }
+    }
+    return {
+        ...reports[0],
+        slots: [...merged.values()].map((entry) => entry.row),
+    };
+}
+
+/**
+ * Fold one report row into the merged slot map.
+ * @param merged Slot id to its chosen row and execution state.
+ * @param slot One report slot row.
+ */
+function reconcile(merged, slot) {
+    const slotId = String(slot.slotId);
+    const executed = String(slot.validity) !== "unrun";
+    const existing = merged.get(slotId);
+    if (existing === undefined) {
+        merged.set(slotId, { row: slot, executed });
+        return;
+    }
+    if (existing.executed && executed) {
+        throw new Error(
+            `slot ${slotId} was executed in more than one shard (${String(existing.row.validity)} and ${String(slot.validity)}); shards must be disjoint`,
+        );
+    }
+    if (executed) merged.set(slotId, { row: slot, executed });
+}
+
 /** One rate as `count/denominator` or `unavailable`. */
 function cell(count, denominator) {
     return denominator === 0 ? "unavailable" : `${count}/${denominator}`;
@@ -156,10 +222,10 @@ export function renderRates(summary) {
     return sections.join("\n\n");
 }
 
-/** Read the CLI arguments: one report path and zero or more control case ids. */
+/** Read the CLI arguments: report paths and zero or more control case ids. */
 function options(argv) {
     const controls = [];
-    let path = "";
+    const paths = [];
     for (let index = 0; index < argv.length; index += 1) {
         const argument = argv[index];
         if (argument === "--control") {
@@ -167,22 +233,31 @@ function options(argv) {
             if (argv[index] !== undefined) controls.push(argv[index]);
             continue;
         }
-        if (path === "") path = argument;
+        paths.push(argument);
     }
-    return { path, controls };
+    return { paths, controls };
 }
 
 if (
     process.argv[1] !== undefined &&
     import.meta.url === pathToFileURL(process.argv[1]).href
 ) {
-    const { path, controls } = options(process.argv.slice(2));
-    if (path === "") {
+    const { paths, controls } = options(process.argv.slice(2));
+    if (paths.length === 0) {
         console.error(
-            "usage: node rates.mjs <report.json> [--control <caseId>]…",
+            "usage: node rates.mjs <report.json> [<report.json>…] [--control <caseId>]…",
         );
         process.exit(2);
     }
-    const report = JSON.parse(readFileSync(path, "utf8"));
-    console.log(renderRates(summariseRates(report, { controls })));
+    try {
+        const report = mergeReports(
+            paths.map((path) => JSON.parse(readFileSync(path, "utf8"))),
+        );
+        console.log(renderRates(summariseRates(report, { controls })));
+    } catch (error) {
+        console.error(
+            `rates: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        process.exit(2);
+    }
 }

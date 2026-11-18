@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
     containedEntry,
+    readContainedBytes,
     readContainedDocuments,
     readContainedFile,
 } from "../../evidence/containment.ts";
@@ -331,7 +332,15 @@ function absentReasons(workspace: string, testCase: DocsCase): WorkspaceCheck {
     return { reasons, problems };
 }
 
-/** Check paths whose prepared identity must survive unchanged. */
+/**
+ * Check paths whose prepared identity must survive unchanged.
+ *
+ * The prepared identity is a hash of the file's exact bytes, so this compares
+ * raw bytes too: a non-UTF-8 file that was never touched hashes identically,
+ * while a single changed byte fails even when both decodings are identical.
+ * A containment refusal is a problem (untrustworthy evidence), never a
+ * content difference.
+ */
 function unchangedReasons(
     workspace: string,
     testCase: DocsCase,
@@ -354,12 +363,12 @@ function unchangedReasons(
             reasons.push(`guardrail path ${path} was removed`);
             continue;
         }
-        const read = readContainedFile(workspace, path);
+        const read = readContainedBytes(workspace, path);
         if (!read.ok) {
             problems.push(read.problem);
             continue;
         }
-        if (sha256Bytes(read.text) !== expected) {
+        if (sha256Bytes(read.bytes) !== expected) {
             reasons.push(`guardrail path ${path} changed`);
         }
     }

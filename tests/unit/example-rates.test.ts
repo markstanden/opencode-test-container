@@ -1,11 +1,13 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+    mergeReports,
     renderRates,
     summariseRates,
 } from "../../examples/reporting/rates.mjs";
 
 interface SlotInput {
+    slotId?: string;
     caseId?: string;
     armId?: string;
     repetitionId?: string;
@@ -205,5 +207,116 @@ describe("example rate summary", () => {
         );
         assert.equal(summary.controls[0]?.control, true);
         assert.match(renderRates(summary), /control/i);
+    });
+});
+
+describe("sharded report merge", () => {
+    /** The nine-slot shipped schedule with a shard's slice executed. */
+    function shard(
+        executed: ReadonlyMap<string, SlotInput>,
+    ): ReturnType<typeof report> {
+        const ids = [
+            "pos-r0",
+            "pos-r1",
+            "pos-r2",
+            "neg-r0",
+            "neg-r1",
+            "neg-r2",
+            "near-r0",
+            "near-r1",
+            "near-r2",
+        ];
+        return report(
+            ids.map((slotId) =>
+                executed.has(slotId)
+                    ? slot({ slotId, ...executed.get(slotId) })
+                    : slot({
+                          slotId,
+                          validity: "unrun",
+                          observed: "unrun",
+                          outcome: "unknown",
+                      }),
+            ),
+        );
+    }
+
+    const positive = { observed: "target-activation", outcome: "pass" };
+    const negative = { observed: "no-invocation", outcome: "pass" };
+
+    it("reconciles unrun rows across shards into the frozen denominator", () => {
+        // Arrange: the documented 3 + 6 split. Each report still lists all
+        // nine scheduled slots; only one root executed each slot.
+        const first = shard(
+            new Map([
+                ["pos-r0", positive],
+                ["neg-r0", negative],
+                ["near-r0", negative],
+            ]),
+        );
+        const second = shard(
+            new Map([
+                ["pos-r1", positive],
+                ["pos-r2", positive],
+                ["neg-r1", negative],
+                ["neg-r2", negative],
+                ["near-r1", negative],
+                ["near-r2", negative],
+            ]),
+        );
+
+        // Act
+        const merged = mergeReports([first, second]);
+        const summary = summariseRates(merged);
+
+        // Assert
+        assert.equal(first.slots.length, 9);
+        assert.equal(second.slots.length, 9);
+        assert.equal(merged.slots?.length, 9);
+        assert.equal(new Set(merged.slots?.map((slot) => slot.slotId)).size, 9);
+        assert.equal(
+            summary.rows.reduce((sum, row) => sum + row.scheduled, 0),
+            9,
+        );
+        assert.equal(
+            summary.rows.reduce((sum, row) => sum + row.valid, 0),
+            9,
+        );
+    });
+
+    it("refuses two actual executions of the same slot", () => {
+        // Arrange: both roots ran pos-r0.
+        const first = shard(new Map([["pos-r0", positive]]));
+        const second = shard(new Map([["pos-r0", negative]]));
+
+        // Act / Assert
+        assert.throws(
+            () => mergeReports([first, second]),
+            /slot pos-r0 was executed in more than one shard/,
+        );
+    });
+
+    it("preserves a slot that no shard ran", () => {
+        // Arrange: pos-r0 unrun in both reports.
+        const first = shard(new Map());
+        const second = shard(new Map());
+
+        // Act
+        const merged = mergeReports([first, second]);
+
+        // Assert
+        const orphan = merged.slots?.filter((slot) => slot.slotId === "pos-r0");
+        assert.equal(orphan?.length, 1);
+        assert.equal(orphan?.[0]?.validity, "unrun");
+    });
+
+    it("refuses shards from different campaigns", () => {
+        // Arrange
+        const other = { ...report([slot({ slotId: "b" })]), campaignId: "x" };
+
+        // Act / Assert
+        assert.throws(
+            () => mergeReports([report([slot({ slotId: "a" })]), other]),
+            /different campaigns/,
+        );
     });
 });

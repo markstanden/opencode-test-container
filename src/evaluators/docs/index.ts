@@ -37,4 +37,15 @@ export {
     type PreservationState,
 } from "./scoring.ts";
 export { assessDocsTrial } from "./assess.ts";
+export {
+    buildPacket,
+    blindingProblems,
+    docStateFor,
+    type BlindnessIdentity,
+} from "./packet.ts";
+export {
+    classifyAttempt,
+    type AttemptOutcome,
+    type JudgeAttemptStatus,
+} from "./verdict.ts";
 export { verifyOperationsJournal } from "./journal.ts";

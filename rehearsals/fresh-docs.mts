@@ -9,6 +9,7 @@
  * Manual command, separate from `npm test`; zero paid provider calls.
  */
 import { spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
     cpSync,
     existsSync,
@@ -23,7 +24,11 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { startProvider, type ScriptedResponse } from "./provider.mts";
+import {
+    startProvider,
+    type CapturedRequest,
+    type ScriptedResponse,
+} from "./provider.mts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "..");
@@ -183,6 +188,14 @@ const PLAIN: ScriptedResponse[] = [
     },
 ];
 
+/**
+ * A packet marker and padding above the host's ordinary single-argument limit
+ * (128 KiB). The judge packet carries the authored truth, so this proves the
+ * packet reaches the provider through stdin rather than argv.
+ */
+const LARGE_PACKET_MARKER = "OTC-LARGE-PACKET-MARKER-20261118";
+const LARGE_PACKET_PADDING = 200 * 1024;
+
 /** One judge verdict. */
 function verdict(outcome: string): ScriptedResponse {
     return {
@@ -204,6 +217,7 @@ async function withProvider(
     result: ChildResult;
     chatRequests: number;
     otherRequests: number;
+    requests: CapturedRequest[];
 }> {
     const provider = await startProvider(port, plan);
     try {
@@ -211,6 +225,7 @@ async function withProvider(
             result: await run(),
             chatRequests: provider.chatCount(),
             otherRequests: provider.otherCount(),
+            requests: [...provider.requests],
         };
     } finally {
         await provider.close();
@@ -224,6 +239,7 @@ interface SlotObservation {
     trialOther: number;
     judgeChat: number;
     judgeOther: number;
+    judgeRequests: CapturedRequest[];
     assessment: Record<string, unknown> | null;
     selection: Record<string, unknown> | null;
     attempts: Array<Record<string, unknown>>;
@@ -237,6 +253,18 @@ async function runCampaign(
 ): Promise<{ root: string; observations: SlotObservation[] }> {
     const root = join(work, "campaign");
     cpSync(join(HERE, "fixtures", "fresh-docs"), root, { recursive: true });
+    // Pad one authored truth so its blinded packet is above the host's
+    // single-argument limit.
+    const suitePath = join(root, "suite.json");
+    const suite = JSON.parse(readFileSync(suitePath, "utf8")) as {
+        cases: Array<{ caseId: string; truth?: string }>;
+    };
+    for (const testCase of suite.cases) {
+        if (testCase.caseId === "useful-write") {
+            testCase.truth = `${LARGE_PACKET_MARKER}${"x".repeat(LARGE_PACKET_PADDING)}`;
+        }
+    }
+    writeFileSync(suitePath, `${JSON.stringify(suite, null, 2)}\n`, "utf8");
     const port = await freePort();
     writeCampaign(join(root, "campaign.json"), imageId, port);
     const prepared = await otc([
@@ -273,6 +301,7 @@ async function runCampaign(
             trialOther: trial.otherRequests,
             judgeChat: 0,
             judgeOther: 0,
+            judgeRequests: [],
             assessment: null,
             selection: null,
             attempts: [],
@@ -315,6 +344,7 @@ async function runCampaign(
         );
         observation.judgeChat = judged.chatRequests;
         observation.judgeOther = judged.otherRequests;
+        observation.judgeRequests = judged.requests;
         observation.assessment = json(
             join(
                 root,
@@ -421,6 +451,12 @@ async function runExhausted(
     expect(
         run.result.status === 0,
         `exhausted run failed: ${run.result.stderr}`,
+    );
+    // Judging requires the checked deterministic assessment.
+    const assessed = await otc(["assess", "--root", join(root, "root")]);
+    expect(
+        assessed.status === 0,
+        `exhausted assess failed: ${assessed.stderr}`,
     );
     const judged = await withProvider(
         [{ kind: "text", content: "not json" }],
@@ -542,9 +578,36 @@ function assertTraffic(observations: SlotObservation[]): void {
     }
 }
 
+/** SHA-256 of one string's exact UTF-8 bytes. */
+function textSha256(text: string): string {
+    return createHash("sha256").update(text, "utf8").digest("hex");
+}
+
+/** Every user message's text content in one captured request body. */
+function userContents(body: unknown): string[] {
+    if (typeof body !== "object" || body === null) return [];
+    const messages = (body as { messages?: unknown }).messages;
+    if (!Array.isArray(messages)) return [];
+    return messages.flatMap((message) => {
+        if (typeof message !== "object" || message === null) return [];
+        const entry = message as { role?: unknown; content?: unknown };
+        if (entry.role !== "user") return [];
+        if (typeof entry.content === "string") return [entry.content];
+        if (!Array.isArray(entry.content)) return [];
+        return entry.content.flatMap((part) =>
+            typeof part === "object" &&
+            part !== null &&
+            typeof (part as { text?: unknown }).text === "string"
+                ? [(part as { text: string }).text]
+                : [],
+        );
+    });
+}
+
 /** Assert every observed slot's primary, criterion, selection and traffic. */
 function assertObservations(
     observations: SlotObservation[],
+    root: string,
 ): Record<string, SlotObservation> {
     const byId = Object.fromEntries(
         observations.map((observation) => [observation.slotId, observation]),
@@ -552,7 +615,47 @@ function assertObservations(
     assertCriteria(byId);
     assertRecovery(byId);
     assertTraffic(observations);
+    assertPacketTransport(byId, root);
     return byId;
+}
+
+/**
+ * Assert the blinded packet reached the provider byte for byte. The packet is
+ * streamed on stdin, so the exact registered bytes must appear as the user
+ * message of a judge request; a marker search alone would pass a truncated or
+ * reordered packet.
+ */
+function assertPacketTransport(
+    byId: Record<string, SlotObservation>,
+    root: string,
+): void {
+    const useful = byId["useful-write"];
+    expect(useful !== undefined, "no useful-write judge observation");
+    const packetPath = join(
+        root,
+        "evidence",
+        "judgements",
+        "useful-write",
+        "attempt-001",
+        "packet.md",
+    );
+    expect(existsSync(packetPath), `no blinded packet at ${packetPath}`);
+    const expected = readFileSync(packetPath, "utf8");
+    const expectedSha = textSha256(expected);
+    const delivered = useful.judgeRequests
+        .filter((request) => request.path.includes("chat/completions"))
+        .flatMap((request) => userContents(request.body));
+    const matched = delivered.some(
+        (content) => textSha256(content) === expectedSha,
+    );
+    expect(
+        matched,
+        `the provider's user message did not match the blinded packet exactly (expected ${String(expected.length)} bytes, sha256 ${expectedSha}; received byte lengths ${delivered.map((content) => String(content.length)).join(", ")})`,
+    );
+    expect(
+        expected.length > 128 * 1024,
+        "the blinded packet was not above the ordinary single-argument limit",
+    );
 }
 
 /** Close, analyse and prove post-close refusal. */
@@ -667,7 +770,7 @@ async function main(): Promise<void> {
     );
     const { imageId, version } = imageIdentity();
     const { root, observations } = await runCampaign(work, imageId);
-    assertObservations(observations);
+    assertObservations(observations, root);
     await assertClosure(root, work);
     const exhausted = await assertExhausted(work, imageId);
     publishReport({ work, imageId, version, observations, exhausted });

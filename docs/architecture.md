@@ -71,7 +71,10 @@ cli -> campaign lifecycle -> contracts
        |                    |
        +-> adapters (opencode, podman, process)
        +-> evaluators (docs, skills) -> evidence/contracts
+       |     \-> docs/packet  reads prepared evidence
+       |     \-> docs/verdict classifies one process result
        +-> reporting
+evidence/paths <- every lifecycle module (node built-ins only)
 legacy -> contracts only
 ```
 
@@ -139,17 +142,34 @@ campaign/{run,assess,judge,close,status,report}
 - Process capture bounds each stream in bytes, marks overflow explicitly and
   decodes complete UTF-8. Trial and judge environment files are removed on
   every path; owned containers are stopped and removed by their own name.
+- Judge packets are streamed on stdin, never argv; a packet above the host's
+  single-argument limit is delivered intact.
 - `npm test` stays hermetic; `npm run test:smoke` is the real-container proof
   (`docs/smoke.md`). It needs no sibling docs checkout.
 
-## Deferred extraction
+## Judge extraction
 
-`src/campaign/judge.ts` still combines judge execution with docs packet/verdict
-policy. Splitting it safely needs the docs strategy interface to be extracted
-alongside the execution boundary; that work is deliberately deferred rather
-than half-done. The shared admission, budget, stop-policy, evidence and
-containment boundaries above are the prerequisites, and the judge split is the
-next extraction once those boundaries have soaked.
+The judge split is complete. Packet construction and arm-blindness live in
+`src/evaluators/docs/packet.ts`; verdict classification and failure classes live
+in `src/evaluators/docs/verdict.ts`. `src/campaign/judge.ts` keeps admission,
+reservation, dispatch, attempt storage, terminal publication and checked
+selection: it supplies the root, slot, case, campaign identifiers and a
+bounded process result, and consumes the evaluator's packet and outcome.
+
+The seam is deliberately narrow:
+
+- the packet module reads only prepared evidence and the campaign root; the
+  blindness check receives campaign identifiers as data instead of importing a
+  prepared manifest;
+- the verdict module classifies a complete or failed process against the
+  recorded mutation state and knows nothing about claims, budgets or selectors;
+- terminal publication holds the campaign admission lock across attempt
+  evidence, claim closure, the ledger event and the selection, so a concurrent
+  close cannot observe a judged verdict without its selection.
+
+A parity test rebuilds the packet through the evaluator and compares it byte for
+byte with the registered attempt packet; the existing judge suite proves
+classification and selection behaviour is unchanged.
 
 ## Removal condition for the docs bridge
 

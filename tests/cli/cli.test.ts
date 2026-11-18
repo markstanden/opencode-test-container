@@ -183,6 +183,55 @@ describe("installed-shape CLI", () => {
             false,
         );
     });
+    it("refuses per-command flags and bad selectors without touching the ledger", () => {
+        // Arrange: a root whose ledger is a sentinel we can compare byte for byte.
+        const root = join(work, "intent-root");
+        mkdirSync(join(root, "evidence"), { recursive: true });
+        const ledger = join(root, "evidence", "ATTEMPTS.jsonl");
+        const sentinel = '{"event":"sentinel"}\n';
+        writeFileSync(ledger, sentinel, "utf8");
+        const attempts = [
+            ["run", "--root", root, "--slot", ""],
+            ["run", "--root", root, "--slot", "s1,,"],
+            ["judge", "--root", root, "--slot", "  "],
+            ["close", "--root", root, "--dry-run"],
+            ["assess", "--root", root, "--out", join(work, "x")],
+        ];
+
+        // Act / Assert
+        for (const args of attempts) {
+            const result = otc(args, work);
+            assert.equal(
+                result.status,
+                2,
+                `${args.join(" ")} exited ${String(result.status)}: ${result.stderr}`,
+            );
+            assert.equal(
+                readFileSync(ledger, "utf8"),
+                sentinel,
+                `${args.join(" ")} changed the ledger`,
+            );
+            assert.equal(existsSync(join(root, "evidence", "trials")), false);
+        }
+    });
+
+    it("accepts an omitted selector as the whole schedule", () => {
+        // Arrange
+        const root = join(work, "omitted-selector-root");
+        const prepared = otc(
+            ["prepare", "--campaign", campaignPath, "--root", root],
+            work,
+        );
+        assert.equal(prepared.status, 0, prepared.stderr);
+
+        // Act: no freeze, so the run refuses operationally; the point is that
+        // the selector was not rejected as malformed.
+        const result = otc(["run", "--root", root, "--dry-run"], work);
+
+        // Assert
+        assert.doesNotMatch(result.stderr, /--slot/);
+        assert.match(result.stderr, /frozen|freeze/);
+    });
 });
 
 describe("packaged consumer", () => {
@@ -259,6 +308,63 @@ describe("packaged consumer", () => {
             assert.equal(status.status, 0, status.stderr);
             const statusJson = JSON.parse(status.stdout) as { state: string };
             assert.equal(statusJson.state, "prepared");
+            // The installed binary refuses command intent before any read,
+            // claim or mutation, whatever the ledger already holds.
+            const probe = join(consumer, "intent probe");
+            mkdirSync(join(probe, "evidence"), { recursive: true });
+            const probeLedger = join(probe, "evidence", "ATTEMPTS.jsonl");
+            const probeBytes = '{"event":"sentinel"}\n';
+            writeFileSync(probeLedger, probeBytes, "utf8");
+            for (const args of [
+                ["run", "--root", probe, "--slot", ""],
+                ["judge", "--root", probe, "--slot", "s1,,"],
+                ["close", "--root", probe, "--dry-run"],
+            ]) {
+                const refused = spawnSync(binary, args, {
+                    cwd: consumer,
+                    encoding: "utf8",
+                });
+                assert.equal(
+                    refused.status,
+                    2,
+                    `${args.join(" ")}: ${refused.stderr}`,
+                );
+                assert.equal(readFileSync(probeLedger, "utf8"), probeBytes);
+            }
+            // The supported checked reader is importable from the package root
+            // as ESM, and reads a real prepared root.
+            const script = join(consumer, "check-assessments.mjs");
+            writeFileSync(
+                script,
+                [
+                    'import { checkedAssessments, loadPreparedManifest, readLedger, readAssessments } from "@markstanden/opencode-test-container";',
+                    "const root = process.argv[2];",
+                    "const prepared = loadPreparedManifest(root);",
+                    "const checked = checkedAssessments({ root, manifest: prepared.manifest, ledger: readLedger(root) });",
+                    "process.stdout.write(JSON.stringify({ ok: prepared.ok, records: checked.records.map((entry) => entry.state), supported: typeof checkedAssessments, deprecated: typeof readAssessments }));",
+                ].join("\n"),
+                "utf8",
+            );
+            const checkedImport = spawnSync(process.execPath, [script, root], {
+                cwd: consumer,
+                encoding: "utf8",
+            });
+            assert.equal(checkedImport.status, 0, checkedImport.stderr);
+            const checkedJson = JSON.parse(checkedImport.stdout) as {
+                ok: boolean;
+                records: string[];
+                supported: string;
+                deprecated: string;
+            };
+            assert.equal(checkedJson.ok, true);
+            assert.deepEqual(checkedJson.records, [
+                "missing",
+                "missing",
+                "missing",
+            ]);
+            assert.equal(checkedJson.supported, "function");
+            assert.equal(checkedJson.deprecated, "function");
+
             const report = join(consumer, "installed-report");
             const replay = spawnSync(
                 binary,

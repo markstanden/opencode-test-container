@@ -18,18 +18,18 @@ is rendered as `r<N>` only at the adapter boundary.
 
 ## Versioned documents
 
-| Document      | Version | Notes                                                                 |
-| ------------- | ------- | --------------------------------------------------------------------- |
-| suite         | 1       | discriminated `skill-trigger` / `docs-task`; no executable fields     |
-| campaign      | 1       | explicit slots, runtime, budgets, assessment, optional stop policy    |
-| manifest      | 1       | embedded suite and normalised campaign; no source absolute paths      |
-| freeze        | 1       | `kind: "otc-freeze"`, immutable IDs, tool identity and `freezeSha256` |
-| assessment    | 1       | skill or docs shape; evaluator version and source-evidence binding    |
-| primary check | 1       | product checker identity, fixed interpreter and outcome               |
-| judgement     | 1       | arm-blind judge verdict and its failure class                         |
-| selection     | 1       | per-slot chosen attempt and every attempt fact                        |
-| report        | 1       | derived, `reportSha256` over content                                  |
-| ledger event  | 1       | trial, primary-check, assessment, judge and close events              |
+| Document      | Version | Notes                                                                                                                              |
+| ------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| suite         | 1       | discriminated `skill-trigger` / `docs-task`; no executable fields                                                                  |
+| campaign      | 1       | explicit slots, runtime, budgets, assessment, optional stop policy                                                                 |
+| manifest      | 1       | embedded suite and normalised campaign; no source absolute paths; `inventoryVersion: 2` records execute bits and empty directories |
+| freeze        | 1       | `kind: "otc-freeze"`, immutable IDs, tool identity and `freezeSha256`                                                              |
+| assessment    | 1       | skill or docs shape; evaluator version and source-evidence binding                                                                 |
+| primary check | 1       | product checker identity, fixed interpreter and outcome                                                                            |
+| judgement     | 1       | arm-blind judge verdict and its failure class                                                                                      |
+| selection     | 1       | per-slot chosen attempt and every attempt fact                                                                                     |
+| report        | 1       | derived, `reportSha256` over content; per-slot `usageProblems`                                                                     |
+| ledger event  | 1       | trial, primary-check, assessment, judge and close events                                                                           |
 
 `docs-task` cases may also carry `truth` (arm-blind judge context) and `primaryCheck: { id, directory, script, timeoutMs? }`. The checker directory
 is staged under `prepare/primary-checks/<caseId>`; the fixed contract is
@@ -75,10 +75,40 @@ build and installed JavaScript execution each fingerprint the right tree. `run`,
 dispatch; read-only historical replay does not require it.
 
 Trial, judge and recovery claims live only under
-`<root>/evidence/{trial,judge,recovery}`. A recovery settles both of its claims
+`<root>/evidence/{trial,judge,recovery}`. A judge attempt's terminal
+publication — attempt evidence, claim closure, `judge-attempt` ledger event and,
+for a usable verdict, the selection — is one admission-locked critical
+section. A concurrent close therefore sees the open claim or the complete
+terminal state, never a verdict without its selection. A recovery settles both of its claims
 according to the dispatch outcome; an interrupted dispatch keeps the claim
 `spawned` and closure refuses it. Status counts `judged`, `pending`, `failed`,
 `invalid` and `unsettled` from the same checked state.
+
+## Judge eligibility
+
+A docs judge is a paid dispatch, so it has an explicit prerequisite: a checked
+deterministic assessment for the same slot with a valid capture and a `pass` or
+`fail` outcome. The shared decision is `src/campaign/eligibility.ts`; preview,
+status, judge and closure consume the same state and reasons.
+
+| State                               | Meaning                                    | Paid attempt                     |
+| ----------------------------------- | ------------------------------------------ | -------------------------------- |
+| `pending`                           | checked assessment, no attempt             | yes, one claim                   |
+| `terminal-failures`                 | every attempt ended without a verdict      | no (recovery policy decides)     |
+| `judged`                            | checked selection                          | no                               |
+| `selection-missing`                 | usable verdict, no selection               | no; judge repairs, close refuses |
+| `selection-conflict`                | selection present but inconsistent         | no; close refuses                |
+| `unsettled`                         | attempt without a terminal record          | no; closure refuses              |
+| `assessment-missing`                | no deterministic record                    | no                               |
+| `assessment-untrustworthy`          | corrupt, unsupported or conflicting record | no                               |
+| `assessment-invalid`                | invalid or unknown capture                 | no                               |
+| `assessment-unknown`                | valid record with an unknown outcome       | no                               |
+| `unrun`, `not-docs`, `not-declared` | nothing to judge                           | no                               |
+
+A blocking state anywhere in the selection refuses the whole `otc judge`
+invocation before any claim, so it costs zero paid attempts. A valid adverse
+deterministic result is eligible: the judge grades the documentation, not the
+criterion.
 
 ## Checked evidence
 
@@ -91,6 +121,10 @@ and `conflicting`.
   answer hash, exit, timeout, error and byte overflow must agree. A metadata
   flag is a claim, never proof. Invalid or unknown captures are never a passing
   restraint or activation.
+- **Usage** is bound by `meta.json.usageSha256` over the exact `usage.json`
+  bytes. A changed or lost sidecar is conflicting or missing evidence; a
+  historical capture without the field keeps its usage but reports it as
+  unverified. Unknown and partial usage stay distinguishable.
 - **Assessments** must match the scheduled slot, schema and evaluator version,
   the exact source-evidence hashes they recorded, and one authoritative
   `assessment` ledger event with the same SHA-256, outcome and validity. The
@@ -179,6 +213,11 @@ misleading completed report.
 Primary-checker containers use the same ownership as trials and judges: an
 owned name, ownership labels, the attempt's cancellation signal, bounded
 timeout cleanup, and removal of the checker env file on every path.
+
+The judge packet is streamed to the container on stdin (Podman runs with
+`-i`); it is never an argv element. A packet above the host's per-argument limit
+is delivered byte for byte, and a short packet is not visible in the process
+list.
 
 Environment files accept only portable names, reject newline/CR/NUL values, and
 never override OTC-owned `HOME`, `XDG_*`, `OPENCODE_CONFIG_CONTENT` or

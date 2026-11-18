@@ -1,6 +1,6 @@
 {
     "name": "@markstanden/opencode-test-container",
-    "version": "0.1.1",
+    "version": "0.2.0",
     "type": "module",
     "description": "An isolated test sandbox for OpenCode plugins, skills and agent instructions.",
     "repository": {
@@ -28,7 +28,7 @@
         "node": ">=26"
     },
     "scripts": {
-        "build": "rm -rf dist && tsc -p tsconfig.build.json",
+        "build": "rm -rf dist && tsc -p tsconfig.build.json && chmod +x dist/cli/otc.js",
         "prepack": "npm run build",
         "test": "npm run build && node --test 'tests/**/*.test.ts'",
         "test:unit": "node --test 'tests/unit/**/*.test.ts'",
@@ -37,7 +37,8 @@
         "rehearse:offline": "npm run build && node rehearsals/offline.mts",
         "rehearse:fresh-docs": "npm run build && node rehearsals/fresh-docs.mts",
         "rehearse:installed": "npm run build && node rehearsals/installed.mts",
-        "test:smoke": "npm run build && node rehearsals/smoke/main.mts"
+        "test:smoke": "npm run build && node rehearsals/smoke/main.mts",
+        "rehearse:sharding": "npm run build && node rehearsals/sharding.mts"
     },
     "devDependencies": {
         "@types/node": "^26.6.4",

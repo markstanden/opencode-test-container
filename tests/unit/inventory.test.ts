@@ -2,19 +2,23 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
+    chmodSync,
     mkdirSync,
     mkdtempSync,
     rmSync,
+    rmdirSync,
+    statSync,
     symlinkSync,
     writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
     changedInventoryPaths,
     inventory,
     inventoryDifferences,
     inventoryEntryDifferences,
+    stageTree,
 } from "../../src/campaign/inventory.ts";
 
 /** A temporary tree. */
@@ -231,3 +235,130 @@ describe("inventory identity", () => {
         }
     });
 });
+
+describe("versioned inventory identity", () => {
+    it("records execute bits and empty directories in version 2 only", () => {
+        // Arrange
+        const root = tree();
+        try {
+            writeFileSync(join(root, "run.sh"), "#!/bin/sh\nexit 0\n", {
+                mode: 0o755,
+            });
+            writeFileSync(join(root, "read.md"), "text\n", { mode: 0o644 });
+            mkdirSync(join(root, "empty"));
+
+            // Act
+            const current = inventory(root, { version: 2 });
+            const historical = inventory(root);
+
+            // Assert
+            assert.equal(current.ok, true, current.ok ? "" : current.problem);
+            const script = current.ok
+                ? current.entries.find((entry) => entry.path === "run.sh")
+                : undefined;
+            const read = current.ok
+                ? current.entries.find((entry) => entry.path === "read.md")
+                : undefined;
+            assert.equal(script?.executable, true);
+            assert.equal(read?.executable, false);
+            assert.deepEqual(
+                current.ok
+                    ? current.entries.find((entry) => entry.path === "empty")
+                    : undefined,
+                { path: "empty", sha256: "", kind: "directory" },
+            );
+            assert.deepEqual(
+                historical.ok
+                    ? historical.entries.map((entry) => entry.path)
+                    : [],
+                ["read.md", "run.sh"],
+            );
+        } finally {
+            rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    it("detects a removed execute bit and a lost empty directory", () => {
+        // Arrange
+        const root = tree();
+        try {
+            writeFileSync(join(root, "run.sh"), "#!/bin/sh\n", {
+                mode: 0o755,
+            });
+            mkdirSync(join(root, "cache"));
+            const before = entriesV2(root);
+
+            // Act
+            chmodSync(join(root, "run.sh"), 0o644);
+            rmdirSync(join(root, "cache"));
+            const differences = inventoryDifferences(root, before, {
+                version: 2,
+            });
+
+            // Assert
+            assert.deepEqual(differences.sort(), [
+                "changed executable bit run.sh (on -> off)",
+                "missing cache",
+            ]);
+        } finally {
+            rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    it("keeps historical version 1 comparisons to content only", () => {
+        // Arrange
+        const root = tree();
+        try {
+            writeFileSync(join(root, "run.sh"), "#!/bin/sh\n", {
+                mode: 0o644,
+            });
+            const historical = entries(root);
+            chmodSync(join(root, "run.sh"), 0o755);
+            mkdirSync(join(root, "empty"));
+
+            // Act
+            const differences = inventoryDifferences(root, historical);
+
+            // Assert
+            assert.deepEqual(differences, []);
+        } finally {
+            rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    it("preserves the executable bit when staging a tree", () => {
+        // Arrange
+        const source = tree();
+        const destination = join(tree(), "staged");
+        try {
+            writeFileSync(join(source, "run.sh"), "#!/bin/sh\n", {
+                mode: 0o755,
+            });
+            mkdirSync(join(source, "empty"));
+
+            // Act
+            const staged = stageTree(source, destination);
+
+            // Assert
+            assert.equal(staged.ok, true, staged.ok ? "" : staged.problem);
+            assert.equal(
+                statSync(join(destination, "run.sh")).mode & 0o111,
+                0o111,
+            );
+            assert.equal(
+                statSync(join(destination, "empty")).isDirectory(),
+                true,
+            );
+        } finally {
+            rmSync(source, { recursive: true, force: true });
+            rmSync(dirname(destination), { recursive: true, force: true });
+        }
+    });
+});
+
+/** Inventory a tree as version 2, asserting success. */
+function entriesV2(root: string) {
+    const observed = inventory(root, { version: 2 });
+    assert.equal(observed.ok, true, observed.ok ? "" : observed.problem);
+    return observed.ok ? observed.entries : [];
+}

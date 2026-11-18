@@ -42,7 +42,10 @@ evidence of real model quality.
 ## Fresh docs lifecycle (`npm run rehearse:fresh-docs`)
 
 Same image and scripted provider, plus the product primary check, blind judge
-and recovery path:
+and recovery path. Re-recorded 2026-11-18 for the 0.2.0 candidate with
+`OTC_IMAGE=localhost/otc-sandbox:2.2.6` (image ID
+`sha256:361245f24c5a1f168355f15e401e9b2aaf952a245c3a31cf7bc1c899c03d9528`,
+OpenCode 2.2.6):
 
 | Slot            | Primary | Outcome | Selected attempt | Trial chat | Judge chat |
 | --------------- | ------- | ------- | ---------------- | ---------- | ---------- |
@@ -62,14 +65,43 @@ four judgements.
 Totals: 6 trial + 5 judge + 1 exhausted scripted chat requests, 0 readiness
 probes, 0 paid provider calls.
 
+The 0.2.0 run also pads the `useful-write` authored truth so its blinded packet
+exceeds 128 KiB, then extracts the provider's user-message bytes and compares
+their SHA-256 with the registered packet on disk. Exact equality — not a marker
+and not a size threshold — proves the packet travelled on stdin unchanged: with
+the packet as one argv element the container launch would fail before any
+request.
+The exhausted root now runs `otc assess` before judging, as eligibility
+requires, and still refuses the recovery after one judge chat request.
+
+## Installed sharding recipe (`rehearsals/sharding.mts`)
+
+The installed-tarball rehearsal also runs the documented two-root recipe through
+the installed `otc` binary and the shipped scripted provider: the nine-slot
+repetitions campaign is prepared and frozen twice, shard A runs three slots and
+shard B the other six, both are assessed, closed and analysed, and the installed
+`rates.mjs` merges the two reports.
+
+Recorded 2026-11-18 on image `sha256:361245f24c5a…`, installed version `0.2.0`:
+
+- each root's `report.json` lists all **9** slots (3 and 6 executed, the rest
+  `unrun`), which is the overlap a shard naturally produces;
+- the merge reconciles by slot id: **9** merged rows, each executed once;
+- output rows: positive `3/3` valid with `3/3` activation and `3/3` pass;
+  both negatives `3/3` valid with `0/3` activation and `3/3` pass;
+- merging shard A with itself exits 2 with
+  `slot pos-r0 was executed in more than one shard (valid and valid)`;
+- 12 scripted provider requests, 0 paid calls.
+
 ## Installed tarball (`npm run rehearse:installed`)
 
 The checkout is packed, installed into a consumer directory whose path
 contains a space, and the same fresh docs lifecycle runs through
-`node_modules/.bin/otc`. The 2026-11-15 run used image
-`sha256:58505eac…`, OpenCode 2.2.6 and installed version `0.1.0`; it produced
+`node_modules/.bin/otc`. The 2026-11-18 run for the 0.2.0 candidate used image
+`sha256:361245f24c5a…`, OpenCode 2.2.6 and the candidate tarball; it produced
 the same four-slot result, one recovery, one exhausted refusal and zero paid
-calls. The receipt records the tarball filename, SHA-256 and npm integrity;
+calls. The earlier 2026-11-15 run used `sha256:58505eac…` and installed
+`0.1.0`. The receipt records the tarball filename, SHA-256 and npm integrity;
 the exact identity is reported with the handback attestation.
 The development-only provider stays outside the tarball.
 

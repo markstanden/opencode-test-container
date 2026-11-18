@@ -1,4 +1,11 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import {
+    existsSync,
+    linkSync,
+    readFileSync,
+    rmSync,
+    writeFileSync,
+} from "node:fs";
+import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import { sha256Bytes, sha256Of } from "../contracts/canonical.ts";
 import { isRecord, readJson } from "../contracts/validate.ts";
@@ -275,16 +282,59 @@ function existingFreeze(
 }
 
 /**
- * Freeze a prepared campaign: resolve the image to its immutable identity,
- * verify the CLI version it contains, and record all input identities.
+ * Publish a complete freeze receipt with create-if-absent semantics.
+ *
+ * The receipt is written to a sibling temporary file and hard-linked into
+ * place, so a reader never observes a partial receipt and exactly one writer
+ * can create it. `link` failing with `EEXIST` is the arbitration point, not an
+ * error: the caller re-reads the durable receipt and converges or refuses.
  * @param root The prepared campaign root.
- * @param run Process adapter, injected for tests.
- * @returns The receipt, or every refusal.
+ * @param record The complete receipt to publish.
+ * @returns Whether this caller published it, or another receipt was already there.
  */
-export async function freezeCampaign(
+function publishFrozen(
     root: string,
-    run: typeof runCommand = runCommand,
-): Promise<FreezeResult> {
+    record: FrozenRecord,
+):
+    | { kind: "published" }
+    | { kind: "exists" }
+    | { kind: "refused"; problem: string } {
+    const target = frozenPath(root);
+    const temporary = `${target}.tmp-${process.pid}-${randomBytes(6).toString("hex")}`;
+    try {
+        writeFileSync(temporary, `${JSON.stringify(record, null, 2)}\n`, {
+            encoding: "utf8",
+            mode: 0o600,
+        });
+    } catch (error) {
+        rmSync(temporary, { force: true });
+        return {
+            kind: "refused",
+            problem: `the freeze receipt could not be staged: ${error instanceof Error ? error.message : String(error)}`,
+        };
+    }
+    try {
+        linkSync(temporary, target);
+        return { kind: "published" };
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+            return { kind: "exists" };
+        }
+        return {
+            kind: "refused",
+            problem: `the freeze receipt could not be published: ${error instanceof Error ? error.message : String(error)}`,
+        };
+    } finally {
+        rmSync(temporary, { force: true });
+    }
+}
+
+/** The prepared, unchanged payload and the executing tool identity. */
+function freezePreflight(
+    root: string,
+):
+    | { ok: true; manifest: PreparedManifest; current: ToolIdentity }
+    | { ok: false; problems: string[] } {
     const loaded = loadPreparedManifest(root);
     if (!loaded.ok) return { ok: false, problems: [loaded.problem] };
     const manifest = loaded.manifest;
@@ -298,7 +348,6 @@ export async function freezeCampaign(
             ],
         };
     }
-    const current = toolIdentity();
     if (manifest.tool === undefined) {
         return {
             ok: false,
@@ -307,30 +356,25 @@ export async function freezeCampaign(
             ],
         };
     }
+    const current = toolIdentity();
     const toolDrift = toolIdentityProblems(manifest.tool, current);
-    if (toolDrift.length > 0) {
-        return {
-            ok: false,
-            problems: [
-                "prepared payload was produced by a different executing tool",
-                ...toolDrift,
-            ],
-        };
-    }
-    const existing = existingFreeze(root, manifest, current);
-    if (existing.kind === "ok") {
-        return { ok: true, record: existing.record, alreadyFrozen: true };
-    }
-    if (existing.kind === "refuse") {
-        return { ok: false, problems: existing.problems };
-    }
-    const resolved = await resolveImage(
-        manifest.campaign.runtime.imageId ?? manifest.campaign.runtime.image,
-        manifest.campaign.runtime.opencodeVersion,
-        run,
-    );
-    if (!resolved.ok) return { ok: false, problems: [resolved.problem] };
-    const image: ResolvedImage = resolved.image;
+    return toolDrift.length > 0
+        ? {
+              ok: false,
+              problems: [
+                  "prepared payload was produced by a different executing tool",
+                  ...toolDrift,
+              ],
+          }
+        : { ok: true, manifest, current };
+}
+
+/** The complete receipt for one resolved image. */
+function receiptFor(
+    manifest: PreparedManifest,
+    current: ToolIdentity,
+    image: ResolvedImage,
+): FrozenRecord {
     const identity: FreezeIdentity = {
         schemaVersion: 1,
         kind: "otc-freeze",
@@ -353,17 +397,83 @@ export async function freezeCampaign(
             model: manifest.campaign.runtime.provider.model,
         },
     };
-    const record: FrozenRecord = {
+    return {
         ...identity,
         freezeSha256: freezeIdentity(identity),
         frozenAt: new Date().toISOString(),
     };
-    writeFileSync(
-        frozenPath(root),
-        `${JSON.stringify(record, null, 2)}\n`,
-        "utf8",
+}
+
+/**
+ * Converge on a receipt another caller published. Only the same resolved
+ * identity is acceptable; a different image can never both succeed.
+ */
+function convergeFreeze(
+    root: string,
+    manifest: PreparedManifest,
+    current: ToolIdentity,
+    record: FrozenRecord,
+    image: ResolvedImage,
+): FreezeResult {
+    const winner = loadFrozen(root);
+    if (!winner.ok) {
+        return {
+            ok: false,
+            problems: [
+                "another freeze published a receipt that is not readable",
+                winner.problem,
+            ],
+        };
+    }
+    if (freezeIdentity(identityOf(winner.record)) !== record.freezeSha256) {
+        return {
+            ok: false,
+            problems: [
+                "another freeze already published a different receipt",
+                `observed image ${winner.record.imageId}, this caller resolved ${image.imageId}`,
+                ...freezeDifferences(manifest, winner.record, current),
+            ],
+        };
+    }
+    return { ok: true, record: winner.record, alreadyFrozen: true };
+}
+
+/**
+ * Freeze a prepared campaign: resolve the image to its immutable identity,
+ * verify the CLI version it contains, and record all input identities.
+ * @param root The prepared campaign root.
+ * @param run Process adapter, injected for tests.
+ * @returns The receipt, or every refusal.
+ */
+export async function freezeCampaign(
+    root: string,
+    run: typeof runCommand = runCommand,
+): Promise<FreezeResult> {
+    const preflight = freezePreflight(root);
+    if (!preflight.ok) return preflight;
+    const { manifest, current } = preflight;
+    const existing = existingFreeze(root, manifest, current);
+    if (existing.kind === "ok") {
+        return { ok: true, record: existing.record, alreadyFrozen: true };
+    }
+    if (existing.kind === "refuse") {
+        return { ok: false, problems: existing.problems };
+    }
+    const resolved = await resolveImage(
+        manifest.campaign.runtime.imageId ?? manifest.campaign.runtime.image,
+        manifest.campaign.runtime.opencodeVersion,
+        run,
     );
-    return { ok: true, record, alreadyFrozen: false };
+    if (!resolved.ok) return { ok: false, problems: [resolved.problem] };
+    const image = resolved.image;
+    const record = receiptFor(manifest, current, image);
+    const published = publishFrozen(root, record);
+    if (published.kind === "refused") {
+        return { ok: false, problems: [published.problem] };
+    }
+    return published.kind === "published"
+        ? { ok: true, record, alreadyFrozen: false }
+        : convergeFreeze(root, manifest, current, record, image);
 }
 
 /**
