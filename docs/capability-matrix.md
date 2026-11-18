@@ -40,10 +40,10 @@ harness:
 | Trial dispatch           | `campaign/run.ts`, `adapters/{opencode,podman}`   | real Podman/OpenCode rehearsal; dry-run plan                    |
 | Product primary check    | `campaign/primary.ts`                             | separate no-network container; pass/fail/timeout/error recorded |
 | Deterministic assessment | `evaluators/{docs,skills}`                        | primary outcome folded into the docs criterion                  |
-| Blind judge              | `campaign/judge.ts`, `evaluators/docs/scoring.ts` | neutral packet; established parse/validate/failure classes      |
+| Blind judge              | `campaign/judge.ts`, `evaluators/docs/{packet,verdict,scoring}.ts` | stdin-delivered neutral packet; checked assessment prerequisite; established parse/validate/failure classes |
 | Bounded recovery         | `analysis/recovery.ts`, `analysis/budget.ts`      | one `json-syntax` retry, identical packet, durable claims       |
-| Validated selection      | `analysis/selector.ts`, `campaign/judge.ts`       | per-slot selection record checked against attempts              |
-| Closure / analysis       | `campaign/close.ts`, `reporting/report.ts`        | pending judgement and unsettled claims block closure            |
+| Validated selection      | `analysis/selector.ts`, `campaign/judge.ts`       | per-slot selection published under the admission lock and checked against attempts |
+| Closure / analysis       | `campaign/close.ts`, `reporting/report.ts`        | shared eligibility; selection conflicts and unsettled claims block closure |
 | Status                   | `campaign/status.ts`                              | read-only counts, judgement and next actions                    |
 
 Evidence guarantees added at the repair head:

@@ -451,6 +451,12 @@ async function runExhausted(
         run.result.status === 0,
         `exhausted run failed: ${run.result.stderr}`,
     );
+    // Judging requires the checked deterministic assessment.
+    const assessed = await otc(["assess", "--root", join(root, "root")]);
+    expect(
+        assessed.status === 0,
+        `exhausted assess failed: ${assessed.stderr}`,
+    );
     const judged = await withProvider(
         [{ kind: "text", content: "not json" }],
         port,

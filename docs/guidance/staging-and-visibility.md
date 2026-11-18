@@ -117,8 +117,10 @@ The order that matches those preconditions:
 3. `otc freeze` records the image and CLI identity. Dry-run needs it.
 4. `otc run --dry-run` stages each selected slot in a disposable directory and
    reports any `instruction <id> collides with <as>`; it consumes no trial
-   budget, starts no container and makes no provider request. It prints no
-   mounts or argv and keeps no directory, so confirm those against
+   budget, starts no container and makes no provider request. Each slot is
+   reported `admissible` or `refused` with a `budget:` or `staging:` reason,
+   accounting for spend already claimed and earlier slots in the same preview.
+   It prints no mounts or argv and keeps no directory, so confirm those against
    [`docs/schema.md`](../schema.md) and the campaign.
 5. Dispatch, then inspect `<root>/evidence/trials/<slotId>/workspace/` to see
    what the trial really received.

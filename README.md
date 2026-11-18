@@ -133,8 +133,11 @@ ls "$PKG/examples/skills" "$PKG/examples/provider" "$PKG/container"
 
 # Build the pinned sandbox image once, then reuse its ID.
 podman build \
-  --build-arg NODE_BASE="$(grep -oP 'ARG NODE_BASE=\K.*' "$PKG/container/Containerfile")" \
-  --build-arg OPENCODE_VERSION=2.2.6 -t localhost/otc-sandbox:2.2.6 "$PKG/container"
+  --build-arg NODE_BASE=docker.io/library/node:26.13.0-slim \
+  --build-arg OPENCODE_VERSION=2.2.6 \
+  --build-arg HOST_UID="$(id -u)" \
+  --build-arg HOST_GID="$(id -g)" \
+  -t localhost/otc-sandbox:2.2.6 "$PKG/container"
 
 # Start the shipped scripted provider on the example's port.
 node "$PKG/examples/provider/server.mjs" --port 8799 \
@@ -374,6 +377,35 @@ its original implementation, tests, parity evidence and remaining owner.
 into the new vocabulary without renaming a stamp or scenario id. The old
 campaign roots are not resumed by this engine; use a fresh root and keep the
 original for provenance.
+
+## Stability
+
+One npm package, one binary. Version `0.x` is a pre-1.0 line: a minor release
+may change documented behaviour, and such changes are listed in the release
+notes (`docs/release-<version>.md`) with migration steps.
+
+- **CLI.** Command names, the flags documented by `otc --help`, and exit codes
+  (`0` ok, `1` operational refusal, `2` usage/validation refusal) are the
+  supported surface. A flag a command does not define is a usage error, not an
+  ignored extra. JSON output documents carry their own `schemaVersion`.
+- **JavaScript API.** Named ESM exports from the package root are supported for
+  programmatic use; there is no default export and no implicit singleton. The
+  checked evidence readers (`checkedAssessments`, `checkedSelection`,
+  `judgeStateOf`) are the supported way to read evidence, with their exported
+  types. A deprecated export keeps working for the life of its release line and
+  names its replacement in a `@deprecated` tag; `readAssessments` is deprecated
+  in favour of `checkedAssessments`.
+- **Evaluator analysis.** The docs analysis modules under
+  `src/evaluators/docs/analysis` are exported so recorded evidence can be
+  replayed. Their output follows the recorded schema versions, and historical
+  replay keeps the semantics of the version that recorded it.
+- **Assets.** `examples/`, `container/` and `docs/` ship inside the tarball.
+  Installed consumers should address them through the package directory
+  (`"$(npm root)/@markstanden/opencode-test-container"`), never through a
+  checkout-relative path.
+
+Node 26 is required (`engines`); rootless Podman is required only for lanes
+that dispatch a container.
 
 ## Development
 
