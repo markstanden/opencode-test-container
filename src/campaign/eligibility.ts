@@ -97,65 +97,46 @@ function state(
     };
 }
 
-/**
- * Decide one slot's judge state from checked facts.
- * @param facts The declaration, assessment, selection and attempts.
- * @returns The shared decision.
- */
-export function judgeStateOf(facts: JudgeFacts): JudgeState {
-    const { manifest, slot, assessment } = facts;
-    if (manifest.campaign.assessment.judge === undefined) {
-        return state(
-            "not-declared",
-            `slot ${slot.slotId} is not judged: the campaign declares no judge`,
-        );
-    }
-    const testCase = manifest.suite.cases.find(
-        (entry) => entry.caseId === slot.caseId,
-    );
-    if (testCase === undefined || testCase.kind !== "docs-task") {
-        return state(
-            "not-docs",
-            `slot ${slot.slotId} is not a docs-task case; only docs tasks are judged`,
-        );
-    }
-    if (!facts.trialRecorded) {
-        return state(
-            "unrun",
-            `slot ${slot.slotId} has no recorded trial`,
-        );
-    }
+/** The assessment states that make a slot unjudgeable. */
+function assessmentState(
+    slotId: string,
+    assessment: AssessmentFacts | undefined,
+): JudgeState | null {
     if (assessment === undefined || assessment.state === "missing") {
         return state(
             "assessment-missing",
-            `slot ${slot.slotId} has no deterministic assessment; run otc assess before judging`,
+            `slot ${slotId} has no deterministic assessment; run otc assess before judging`,
         );
     }
     if (assessment.state !== "valid" || assessment.record === null) {
         return state(
             "assessment-untrustworthy",
-            `slot ${slot.slotId} has an untrustworthy deterministic assessment (${assessment.state}); no judge spend is permitted`,
+            `slot ${slotId} has an untrustworthy deterministic assessment (${assessment.state}); no judge spend is permitted`,
         );
     }
     if (assessment.record.validity !== "valid") {
         return state(
             "assessment-invalid",
-            `slot ${slot.slotId} is ${assessment.record.validity}; only a valid capture with a checked assessment is judged`,
+            `slot ${slotId} is ${assessment.record.validity}; only a valid capture with a checked assessment is judged`,
         );
     }
-    if (assessment.record.outcome === "unknown") {
-        return state(
-            "assessment-unknown",
-            `slot ${slot.slotId} has an unknown deterministic outcome; only a pass or fail is judged`,
-        );
-    }
+    return assessment.record.outcome === "unknown"
+        ? state(
+              "assessment-unknown",
+              `slot ${slotId} has an unknown deterministic outcome; only a pass or fail is judged`,
+          )
+        : null;
+}
+
+/** The selection and attempt states, once the assessment is eligible. */
+function judgementState(facts: JudgeFacts, slotId: string): JudgeState {
     if (facts.selection.ok) {
-        return state("judged", `slot ${slot.slotId} already has a checked judgement`);
+        return state("judged", `slot ${slotId} already has a checked judgement`);
     }
     if (facts.selectionPresent) {
         return state(
             "selection-conflict",
-            `slot ${slot.slotId} has an unusable selection: ${facts.selection.problems.join("; ")}`,
+            `slot ${slotId} has an unusable selection: ${facts.selection.problems.join("; ")}`,
             { satisfied: false },
         );
     }
@@ -165,28 +146,59 @@ export function judgeStateOf(facts: JudgeFacts): JudgeState {
         // hide a later verdict whose selection is absent.
         return state(
             "selection-missing",
-            `slot ${slot.slotId} has a usable judgement but no checked selection; record the selection before closure`,
+            `slot ${slotId} has a usable judgement but no checked selection; record the selection before closure`,
             { satisfied: false },
         );
     }
     if (facts.attempts.some((attempt) => !terminalFailure(attempt))) {
         return state(
             "unsettled",
-            `slot ${slot.slotId} has a judge attempt without a terminal record; settle it before judging again`,
+            `slot ${slotId} has a judge attempt without a terminal record; settle it before judging again`,
             { satisfied: false },
         );
     }
     if (facts.attempts.length > 0) {
         return state(
             "terminal-failures",
-            `slot ${slot.slotId} has only terminal judge failures (${facts.attempts
+            `slot ${slotId} has only terminal judge failures (${facts.attempts
                 .map((attempt) => attempt.judgementStatus)
                 .join(", ")})`,
         );
     }
     return state(
         "pending",
-        `slot ${slot.slotId} is eligible for an arm-blind judge`,
+        `slot ${slotId} is eligible for an arm-blind judge`,
         { dispatchable: true, satisfied: false },
+    );
+}
+
+/**
+ * Decide one slot's judge state from checked facts.
+ * @param facts The declaration, assessment, selection and attempts.
+ * @returns The shared decision.
+ */
+export function judgeStateOf(facts: JudgeFacts): JudgeState {
+    const { manifest, slot } = facts;
+    const testCase = manifest.suite.cases.find(
+        (entry) => entry.caseId === slot.caseId,
+    );
+    if (manifest.campaign.assessment.judge === undefined) {
+        return state(
+            "not-declared",
+            `slot ${slot.slotId} is not judged: the campaign declares no judge`,
+        );
+    }
+    if (testCase === undefined || testCase.kind !== "docs-task") {
+        return state(
+            "not-docs",
+            `slot ${slot.slotId} is not a docs-task case; only docs tasks are judged`,
+        );
+    }
+    if (!facts.trialRecorded) {
+        return state("unrun", `slot ${slot.slotId} has no recorded trial`);
+    }
+    return (
+        assessmentState(slot.slotId, facts.assessment) ??
+        judgementState(facts, slot.slotId)
     );
 }

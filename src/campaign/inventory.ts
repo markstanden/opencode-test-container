@@ -156,6 +156,59 @@ function symlinkEntry(
     }
 }
 
+/** The relative, forward-slash path for one inventory entry. */
+function entryPath(realRoot: string, path: string): string {
+    return relative(realRoot, path).split(sep).join("/");
+}
+
+/** Inventory one regular file, or the refusal. */
+function fileEntry(
+    path: string,
+    realRoot: string,
+    version: InventoryVersion,
+): InventoryEntry | string {
+    let digest: string;
+    try {
+        digest = fileSha256(path);
+    } catch (error) {
+        return `${path}: ${error instanceof Error ? error.message : String(error)}`;
+    }
+    const stat = lstatSync(path);
+    return {
+        path: entryPath(realRoot, path),
+        sha256: digest,
+        kind: "file",
+        ...(version === 2 ? { executable: (stat.mode & 0o111) !== 0 } : {}),
+    };
+}
+
+/** One entry's contribution, or the refusal that stopped the walk. */
+function walkEntry(options: {
+    entries: Inventory;
+    realRoot: string;
+    root: string;
+    path: string;
+    version: InventoryVersion;
+}): string | null {
+    const stat = lstatSync(options.path);
+    if (stat.isSymbolicLink()) {
+        const linked = symlinkEntry(
+            options.realRoot,
+            options.root,
+            options.path,
+        );
+        if (!linked.ok) return linked.problem;
+        options.entries.push(linked.entry);
+        return null;
+    }
+    if (stat.isDirectory()) return walk(options);
+    if (!stat.isFile()) return `${options.path} is not a regular file`;
+    const entry = fileEntry(options.path, options.realRoot, options.version);
+    if (typeof entry === "string") return entry;
+    options.entries.push(entry);
+    return null;
+}
+
 /**
  * Inventory a directory deterministically. Symlinks are followed only when
  * their resolved target stays inside the root; anything else is a refusal.
@@ -165,9 +218,8 @@ function symlinkEntry(
  * is the historical format and is what every existing manifest and frozen root
  * was written with: it records content only.
  * @param root The directory to inventory.
- * @param options.version The inventory format; defaults to the historical 1.
+ * @param options The inventory format, defaulting to the historical version 1.
  * @returns The sorted inventory or the first unsafe path.
- * @param options.version The format to write.
  */
 export function inventory(
     root: string,
@@ -177,55 +229,8 @@ export function inventory(
     if (!existsSync(root)) {
         return { ok: false, problem: `${root} does not exist` };
     }
-    const realRoot = realpathSync(root);
     const entries: Inventory = [];
-    const walk = (directory: string): string | null => {
-        const members = readdirSync(directory, {
-            withFileTypes: true,
-        }).sort((left, right) => left.name.localeCompare(right.name));
-        if (version === 2 && members.length === 0 && directory !== realRoot) {
-            entries.push({
-                path: relative(realRoot, directory).split(sep).join("/"),
-                sha256: "",
-                kind: "directory",
-            });
-            return null;
-        }
-        for (const entry of members) {
-            const path = join(directory, entry.name);
-            const stat = lstatSync(path);
-            if (stat.isSymbolicLink()) {
-                const linked = symlinkEntry(realRoot, root, path);
-                if (!linked.ok) return linked.problem;
-                entries.push(linked.entry);
-                continue;
-            }
-            if (stat.isDirectory()) {
-                const problem = walk(path);
-                if (problem !== null) return problem;
-                continue;
-            }
-            if (!stat.isFile()) {
-                return `${path} is not a regular file`;
-            }
-            let digest: string;
-            try {
-                digest = fileSha256(path);
-            } catch (error) {
-                return `${path}: ${error instanceof Error ? error.message : String(error)}`;
-            }
-            entries.push({
-                path: relative(realRoot, path).split(sep).join("/"),
-                sha256: digest,
-                kind: "file",
-                ...(version === 2
-                    ? { executable: (stat.mode & 0o111) !== 0 }
-                    : {}),
-            });
-        }
-        return null;
-    };
-    const problem = walk(realRoot);
+    const problem = walk({ entries, realRoot: realpathSync(root), root, version });
     if (problem !== null) return { ok: false, problem };
     return {
         ok: true,
@@ -233,6 +238,40 @@ export function inventory(
             left.path.localeCompare(right.path),
         ),
     };
+}
+
+/** Walk one directory, appending its entries. */
+function walk(options: {
+    entries: Inventory;
+    realRoot: string;
+    root: string;
+    version: InventoryVersion;
+    path?: string;
+}): string | null {
+    const directory = options.path ?? options.realRoot;
+    const members = readdirSync(directory, { withFileTypes: true }).sort(
+        (left, right) => left.name.localeCompare(right.name),
+    );
+    if (
+        options.version === 2 &&
+        members.length === 0 &&
+        directory !== options.realRoot
+    ) {
+        options.entries.push({
+            path: entryPath(options.realRoot, directory),
+            sha256: "",
+            kind: "directory",
+        });
+        return null;
+    }
+    for (const member of members) {
+        const problem = walkEntry({
+            ...options,
+            path: join(directory, member.name),
+        });
+        if (problem !== null) return problem;
+    }
+    return null;
 }
 
 /** The kind a legacy entry describes when the field is absent. */
@@ -271,24 +310,33 @@ export function inventoryEntryDifferences(
     if (expected.sha256 !== observed.sha256) {
         problems.push(`changed ${path}`);
     }
-    if (
-        expected.executable !== undefined &&
-        observed.executable !== undefined &&
-        expected.executable !== observed.executable
-    ) {
-        problems.push(
-            `changed executable bit ${path} (${expected.executable ? "on" : "off"} -> ${observed.executable ? "on" : "off"})`,
-        );
-    }
+    const executable = executableProblem(path, expected, observed);
+    if (executable !== null) problems.push(executable);
     return problems;
+}
+
+/** The execute-bit difference, when both sides recorded it. */
+function executableProblem(
+    path: string,
+    expected: InventoryEntry,
+    observed: InventoryEntry,
+): string | null {
+    if (
+        expected.executable === undefined ||
+        observed.executable === undefined ||
+        expected.executable === observed.executable
+    ) {
+        return null;
+    }
+    return `changed executable bit ${path} (${expected.executable ? "on" : "off"} -> ${observed.executable ? "on" : "off"})`;
 }
 
 /**
  * Recheck an inventory against a directory.
  * @param root The directory to check.
  * @param expected The inventory that must still hold.
- * @param options.version The inventory format the expected entries use; a
- *   historical version 1 inventory keeps version 1 comparison semantics.
+ * @param options The inventory format the expected entries use; a historical
+ *   version 1 inventory keeps version 1 comparison semantics.
  * @returns The differences; empty means intact.
  */
 export function inventoryDifferences(

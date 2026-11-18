@@ -38,7 +38,7 @@ import {
     type ContainerPlan,
 } from "../adapters/podman/container.ts";
 import type { CommandResult } from "../adapters/process.ts";
-import { decodeTrail, type Usage } from "../adapters/opencode/events.ts";
+import type { Usage } from "../adapters/opencode/events.ts";
 import {
     claimBudget,
     advanceClaim,
@@ -1672,6 +1672,42 @@ async function executeAttempts(options: {
     return lastFailure(options.slot, attempts);
 }
 
+/** The shared eligibility decision for one slot from current evidence. */
+function slotEligibility(options: {
+    root: string;
+    manifest: PreparedManifest;
+    slot: Slot;
+    policy: RecoveryPolicy | null;
+    attempts: RecordedAttempt[];
+}) {
+    const assessment = checkedAssessments({
+        root: options.root,
+        manifest: options.manifest,
+        ledger: readLedger(options.root),
+    }).records.find((entry) => entry.slotId === options.slot.slotId);
+    const selection = checkedSelection({
+        root: options.root,
+        manifest: options.manifest,
+        slot: options.slot,
+        policy: options.policy,
+    });
+    return judgeStateOf({
+        manifest: options.manifest,
+        slot: options.slot,
+        trialRecorded: existsSync(
+            join(trialDirectory(options.root, options.slot.slotId), "meta.json"),
+        ),
+        assessment,
+        selectionPresent: existsSync(
+            selectionPath(options.root, options.slot.slotId),
+        ),
+        selection: selection.ok
+            ? { ok: true, problems: [] }
+            : { ok: false, problems: selection.problems },
+        attempts: options.attempts.map((entry) => entry.meta),
+    });
+}
+
 /** Judge one slot, including at most one registered recovery. */
 async function judgeSlot(options: {
     root: string;
@@ -1691,31 +1727,12 @@ async function judgeSlot(options: {
     if (recorded.problems.length > 0) {
         return { status: "refused", problems: recorded.problems };
     }
-    const assessment = checkedAssessments({
-        root: options.root,
-        manifest: options.manifest,
-        ledger: readLedger(options.root),
-    }).records.find((entry) => entry.slotId === options.slot.slotId);
-    const selection = checkedSelection({
+    const eligibility = slotEligibility({
         root: options.root,
         manifest: options.manifest,
         slot: options.slot,
         policy: options.policy,
-    });
-    const eligibility = judgeStateOf({
-        manifest: options.manifest,
-        slot: options.slot,
-        trialRecorded: existsSync(
-            join(trialDirectory(options.root, options.slot.slotId), "meta.json"),
-        ),
-        assessment,
-        selectionPresent: existsSync(
-            selectionPath(options.root, options.slot.slotId),
-        ),
-        selection: selection.ok
-            ? { ok: true, problems: [] }
-            : { ok: false, problems: selection.problems },
-        attempts: recorded.attempts.map((entry) => entry.meta),
+        attempts: recorded.attempts,
     });
     const blocking: readonly JudgeStateCode[] = [
         "not-declared",

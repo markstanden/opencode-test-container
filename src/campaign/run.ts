@@ -910,24 +910,7 @@ async function dispatchSlot(options: {
     }
     const trialDir = trialDirectory(root, slot.slotId);
     if (dryRun) {
-        if (options.budgetRemaining !== undefined && options.budgetRemaining <= 0) {
-            return {
-                ran: false,
-                refused: true,
-                problems: [],
-                stop: false,
-                admissible: false,
-                reason: "budget: no trial budget remains at this snapshot",
-            };
-        }
-        const planned = dryRunPlan({ ...options, testCase, arm });
-        return planned.ran
-            ? { ...planned, admissible: true, reason: "admissible" }
-            : {
-                  ...planned,
-                  admissible: false,
-                  reason: `staging: ${planned.problems.join("; ")}`,
-              };
+        return dryRunOutcome(options, testCase, arm);
     }
     if (isAborted(options.signal)) {
         return cancelledOutcome(slot.slotId);
@@ -988,6 +971,39 @@ async function dispatchSlot(options: {
 /** Whether a cancellation signal is already aborted, without narrowing it. */
 function isAborted(signal: AbortSignal | undefined): boolean {
     return signal !== undefined && signal.aborted;
+}
+
+/** One slot's read-only admission decision for a dry run. */
+function dryRunOutcome(
+    options: {
+        root: string;
+        manifest: PreparedManifest;
+        frozen: FrozenRecord;
+        slot: Slot;
+        budgetRemaining?: number;
+        passthrough: readonly string[] | undefined;
+    },
+    testCase: SuiteCase,
+    arm: StagedArm,
+): SlotOutcome {
+    if (options.budgetRemaining !== undefined && options.budgetRemaining <= 0) {
+        return {
+            ran: false,
+            refused: true,
+            problems: [],
+            stop: false,
+            admissible: false,
+            reason: "budget: no trial budget remains at this snapshot",
+        };
+    }
+    const planned = dryRunPlan({ ...options, testCase, arm });
+    return planned.ran
+        ? { ...planned, admissible: true, reason: "admissible" }
+        : {
+              ...planned,
+              admissible: false,
+              reason: `staging: ${planned.problems.join("; ")}`,
+          };
 }
 
 /** The refusal recorded when cancellation stops a slot that never dispatched. */
@@ -1214,6 +1230,80 @@ function runState(
     };
 }
 
+/** The inputs shared by a run's preview and live loops. */
+interface RunInputs {
+    root: string;
+    manifest: PreparedManifest;
+    frozen: FrozenRecord;
+    selected: readonly Slot[];
+    already: ReadonlySet<string>;
+    execute: (plan: ContainerPlan) => Promise<CommandResult>;
+    now: () => string;
+    signal: AbortSignal | undefined;
+    passthrough: readonly string[] | undefined;
+}
+
+/** A dry run: read-only admission for every selected slot. */
+async function previewRun(
+    inputs: RunInputs,
+    budget: number,
+): Promise<RunSummary> {
+    const ran: string[] = [];
+    const refused: string[] = [];
+    const problems: string[] = [];
+    const preview: PreviewSlot[] = [];
+    let budgetRemaining = budget;
+    const seen = new Set<string>();
+    for (const slot of inputs.selected) {
+        if (seen.has(slot.slotId)) {
+            preview.push({
+                slotId: slot.slotId,
+                admissible: false,
+                reason: "not admissible: the slot is selected more than once",
+            });
+            continue;
+        }
+        seen.add(slot.slotId);
+        const outcome = await dispatchSlot({
+            ...inputs,
+            slot,
+            dryRun: true,
+            budgetRemaining,
+        });
+        preview.push({
+            slotId: slot.slotId,
+            admissible: outcome.admissible === true,
+            reason: outcome.reason ?? "not admissible",
+        });
+        if (outcome.admissible === true) budgetRemaining -= 1;
+        if (outcome.ran) ran.push(slot.slotId);
+        if (outcome.refused) refused.push(slot.slotId);
+        problems.push(...outcome.problems);
+    }
+    return { ok: problems.length === 0, ran, refused, problems, preview };
+}
+
+/** A live run: dispatch selected slots, stopping on cancellation or policy. */
+async function liveRun(inputs: RunInputs): Promise<RunSummary> {
+    const ran: string[] = [];
+    const refused: string[] = [];
+    const problems: string[] = [];
+    for (const slot of inputs.selected) {
+        if (isAborted(inputs.signal)) {
+            problems.push(
+                `run cancelled before slot ${slot.slotId}; nothing was dispatched`,
+            );
+            break;
+        }
+        const outcome = await dispatchSlot({ ...inputs, slot, dryRun: false });
+        if (outcome.ran) ran.push(slot.slotId);
+        if (outcome.refused) refused.push(slot.slotId);
+        problems.push(...outcome.problems);
+        if (outcome.stop) break;
+    }
+    return { ok: problems.length === 0, ran, refused, problems };
+}
+
 /**
  * Execute one or more scheduled slots. A launch receipt and ledger event are
  * written before the container starts, so an interrupted dispatch remains
@@ -1253,72 +1343,25 @@ export async function runCampaign(
     if (!state.ok) {
         return { ok: false, ran: [], refused: [], problems: state.problems };
     }
-    const manifest = state.manifest;
-    const selected = selectedSlots(manifest.campaign, options.slotIds);
-    const already = new Set(startedSlots(state.ledger.events));
-    const now = deps.now ?? (() => new Date().toISOString());
-    const execute = deps.runContainer ?? runContainer;
-    const dryRun = options.dryRun === true;
-    const ran: string[] = [];
-    const refused: string[] = [];
-    const problems: string[] = [];
-    const preview: PreviewSlot[] = [];
-    // A dry run accounts for spend already claimed on disk and decrements a
-    // local snapshot for each admissible slot; it creates no claim.
-    let budgetRemaining = dryRun
-        ? manifest.campaign.budgets.trials -
-          readClaims(join(root, "evidence"), "trial").length
-        : 0;
-    const previewSeen = new Set<string>();
-    for (const slot of selected) {
-        if (isAborted(options.signal)) {
-            problems.push(
-                `run cancelled before slot ${slot.slotId}; nothing was dispatched`,
-            );
-            break;
-        }
-        if (dryRun && previewSeen.has(slot.slotId)) {
-            preview.push({
-                slotId: slot.slotId,
-                admissible: false,
-                reason: "not admissible: the slot is selected more than once",
-            });
-            continue;
-        }
-        previewSeen.add(slot.slotId);
-        const outcome = await dispatchSlot({
-            root,
-            manifest,
-            frozen: state.frozen,
-            slot,
-            already,
-            dryRun,
-            ...(dryRun ? { budgetRemaining } : {}),
-            passthrough: options.passthrough,
-            signal: options.signal,
-            execute,
-            now,
-        });
-        if (dryRun) {
-            preview.push({
-                slotId: slot.slotId,
-                admissible: outcome.admissible === true,
-                reason: outcome.reason ?? "not admissible",
-            });
-            if (outcome.admissible === true) budgetRemaining -= 1;
-        }
-        if (outcome.ran) ran.push(slot.slotId);
-        if (outcome.refused) refused.push(slot.slotId);
-        problems.push(...outcome.problems);
-        if (outcome.stop) break;
-    }
-    return {
-        ok: problems.length === 0,
-        ran,
-        refused,
-        problems,
-        ...(dryRun ? { preview } : {}),
+    const inputs: RunInputs = {
+        root,
+        manifest: state.manifest,
+        frozen: state.frozen,
+        selected: selectedSlots(state.manifest.campaign, options.slotIds),
+        already: new Set(startedSlots(state.ledger.events)),
+        execute: deps.runContainer ?? runContainer,
+        now: deps.now ?? (() => new Date().toISOString()),
+        signal: options.signal,
+        passthrough: options.passthrough,
     };
+    if (options.dryRun === true) {
+        const used = readClaims(join(root, "evidence"), "trial").length;
+        return previewRun(
+            inputs,
+            state.manifest.campaign.budgets.trials - used,
+        );
+    }
+    return liveRun(inputs);
 }
 
 /** The canonical identity of a trial's immutable launch receipt. */

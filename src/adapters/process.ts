@@ -46,6 +46,52 @@ export interface CommandOptions {
     signal?: AbortSignal;
 }
 
+/** The stdio triple for one child: stdin only when text is supplied. */
+function stdioFor(
+    options: CommandOptions,
+): ["ignore" | "pipe", "pipe", "pipe"] {
+    return [
+        options.stdinText === undefined ? (options.stdin ?? "ignore") : "pipe",
+        "pipe",
+        "pipe",
+    ];
+}
+
+/** Feed exact stdin text, tolerating a child that exits before reading. */
+function feedStdin(
+    child: ReturnType<typeof spawn>,
+    text: string | undefined,
+): void {
+    if (text === undefined) return;
+    child.stdin?.on("error", () => undefined);
+    child.stdin?.end(text);
+}
+
+/**
+ * Wire one cancellation signal to bounded SIGTERM-then-SIGKILL.
+ * @param child The running child.
+ * @param signal The caller's cancellation signal.
+ * @param settled Whether the call has already settled.
+ * @returns The handler to detach, and any kill timer it set synchronously.
+ */
+function cancellationHook(
+    child: ReturnType<typeof spawn>,
+    signal: AbortSignal | undefined,
+    settled: () => boolean,
+): { handler: (() => void) | null; killTimer?: NodeJS.Timeout } {
+    if (signal === undefined) return { handler: null };
+    const handler = (): void => {
+        if (settled()) return;
+        child.kill("SIGTERM");
+        setTimeout(() => {
+            if (!settled()) child.kill("SIGKILL");
+        }, 2_000);
+    };
+    if (signal.aborted) handler();
+    else signal.addEventListener("abort", handler, { once: true });
+    return { handler };
+}
+
 /** One captured stream, with an exact byte bound. */
 interface Capture {
     /** Complete chunks accepted so far. */
@@ -119,13 +165,7 @@ export function runCommand(
             child = spawn(command, [...args], {
                 cwd: options.cwd,
                 env: options.env,
-                stdio: [
-                    options.stdinText === undefined
-                        ? (options.stdin ?? "ignore")
-                        : "pipe",
-                    "pipe",
-                    "pipe",
-                ],
+                stdio: stdioFor(options),
             });
         } catch (error) {
             finish({
@@ -133,11 +173,7 @@ export function runCommand(
             });
             return;
         }
-        if (options.stdinText !== undefined) {
-            // A child may exit before reading; EPIPE is its outcome, not ours.
-            child.stdin?.on("error", () => undefined);
-            child.stdin?.end(options.stdinText);
-        }
+        feedStdin(child, options.stdinText);
         const append = (capture: Capture, chunk: Buffer | string): void => {
             if (capture.overflowed) return;
             const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
@@ -157,19 +193,10 @@ export function runCommand(
             append(err, chunk),
         );
         child.on("error", (error) => finish({ error: error.message }));
-        if (options.signal !== undefined) {
-            onAbort = () => {
-                if (settled) return;
-                child.kill("SIGTERM");
-                killTimer = setTimeout(() => {
-                    if (!settled) child.kill("SIGKILL");
-                }, 2_000);
-            };
-            if (options.signal.aborted) onAbort();
-            else
-                options.signal.addEventListener("abort", onAbort, {
-                    once: true,
-                });
+        const cancellation = cancellationHook(child, options.signal, () => settled);
+        onAbort = cancellation.handler;
+        if (cancellation.killTimer !== undefined) {
+            killTimer = cancellation.killTimer;
         }
         timer = setTimeout(() => {
             timedOut = true;

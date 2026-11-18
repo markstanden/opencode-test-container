@@ -514,6 +514,43 @@ function stageCase(
     };
 }
 
+/** The subject documents declared by every arm. */
+function subjectInputs(bundle: CampaignBundle): string[] {
+    const campaignDir = dirname(bundle.campaignPath);
+    return bundle.campaign.subjects.flatMap((arm) => [
+        ...[...(arm.skills ?? []), ...(arm.plugins ?? [])].map((subject) =>
+            resolve(campaignDir, subject.path),
+        ),
+        ...(arm.instructions ?? []).map((instruction) =>
+            resolve(campaignDir, instruction.path),
+        ),
+    ]);
+}
+
+/** The suite-relative fixtures and checkers declared by every case. */
+function caseInputs(bundle: CampaignBundle): string[] {
+    const suiteDir = dirname(bundle.suitePath);
+    return bundle.suite.cases.flatMap((testCase) => [
+        ...(testCase.fixture === undefined
+            ? []
+            : [resolve(suiteDir, testCase.fixture)]),
+        ...(testCase.kind === "docs-task" &&
+        testCase.primaryCheck !== undefined
+            ? [resolve(suiteDir, testCase.primaryCheck.directory)]
+            : []),
+    ]);
+}
+
+/** Resolve one existing input, or nothing when it is already missing. */
+function realInput(path: string): string[] {
+    if (!existsSync(path)) return [];
+    try {
+        return [realpathSync(path)];
+    } catch {
+        return [];
+    }
+}
+
 /**
  * Every existing input path preparation will stage, resolved to its real
  * location. Overlap is decided before anything is created.
@@ -521,36 +558,12 @@ function stageCase(
  * @returns Real input paths.
  */
 function stagedInputs(bundle: CampaignBundle): string[] {
-    const campaignDir = dirname(bundle.campaignPath);
-    const suiteDir = dirname(bundle.suitePath);
-    const candidates: string[] = [bundle.campaignPath, bundle.suitePath];
-    for (const arm of bundle.campaign.subjects) {
-        for (const subject of [...(arm.skills ?? []), ...(arm.plugins ?? [])]) {
-            candidates.push(resolve(campaignDir, subject.path));
-        }
-        for (const instruction of arm.instructions ?? []) {
-            candidates.push(resolve(campaignDir, instruction.path));
-        }
-    }
-    for (const testCase of bundle.suite.cases) {
-        if (testCase.fixture !== undefined) {
-            candidates.push(resolve(suiteDir, testCase.fixture));
-        }
-        if (
-            testCase.kind === "docs-task" &&
-            testCase.primaryCheck !== undefined
-        ) {
-            candidates.push(resolve(suiteDir, testCase.primaryCheck.directory));
-        }
-    }
-    return candidates.flatMap((path) => {
-        if (!existsSync(path)) return [];
-        try {
-            return [realpathSync(path)];
-        } catch {
-            return [];
-        }
-    });
+    return [
+        bundle.campaignPath,
+        bundle.suitePath,
+        ...subjectInputs(bundle),
+        ...caseInputs(bundle),
+    ].flatMap(realInput);
 }
 
 /**
@@ -572,6 +585,81 @@ function overlapProblems(root: string, inputs: readonly string[]): string[] {
         }
         return [];
     });
+}
+
+/** Stage every arm and case into the claimed root, collecting problems. */
+function stageBundle(
+    bundle: CampaignBundle,
+    root: string,
+): { subjects: StagedArm[]; cases: PreparedCase[]; problems: string[] } {
+    const problems: string[] = [];
+    const suiteDir = dirname(bundle.suitePath);
+    const campaignDir = dirname(bundle.campaignPath);
+    const subjects = bundle.campaign.subjects
+        .map((arm) => stageArm(arm, campaignDir, root, problems))
+        .filter((arm): arm is StagedArm => arm !== null);
+    const cases = bundle.suite.cases
+        .map((testCase) => stageCase(testCase, suiteDir, root, problems))
+        .filter((testCase): testCase is PreparedCase => testCase !== null);
+    return { subjects, cases, problems };
+}
+
+/** The manifest for one fully staged bundle. */
+function manifestFor(
+    bundle: CampaignBundle,
+    subjects: StagedArm[],
+    cases: PreparedCase[],
+): PreparedManifest {
+    const primaryCheckEntries = cases.flatMap((testCase) =>
+        testCase.primaryCheck === undefined
+            ? []
+            : [[testCase.caseId, testCase.primaryCheck.inventory] as const],
+    );
+    return {
+        schemaVersion: 1,
+        inventoryVersion: 2,
+        campaignId: bundle.campaign.campaignId,
+        suiteId: bundle.suite.suiteId,
+        campaignSha256: sha256Bytes(readFileSync(bundle.campaignPath)),
+        suiteSha256: sha256Bytes(readFileSync(bundle.suitePath)),
+        suiteCanonicalSha256: sha256Of(bundle.suite),
+        scheduleSha256: sha256Of(bundle.campaign.schedule.slots),
+        subjectsSha256: sha256Of(
+            Object.fromEntries(
+                subjects.map((arm) => [arm.armId, arm.inventory]),
+            ),
+        ),
+        workspacesSha256: sha256Of(
+            Object.fromEntries(
+                cases.map((testCase) => [
+                    testCase.caseId,
+                    testCase.workspace,
+                ]),
+            ),
+        ),
+        promptsSha256: sha256Of(
+            Object.fromEntries(
+                cases.map((testCase) => [
+                    testCase.caseId,
+                    testCase.promptSha256,
+                ]),
+            ),
+        ),
+        primaryChecksSha256: sha256Of(
+            Object.fromEntries(primaryCheckEntries),
+        ),
+        tool: toolIdentity(),
+        suite: bundle.suite,
+        campaign: normaliseCampaign(bundle),
+        subjects,
+        cases,
+    };
+}
+
+/** Remove only a root this invocation created, then report the refusal. */
+function refuseCreated(root: string, problems: string[]): PrepareResult {
+    rmSync(root, { recursive: true, force: true });
+    return { ok: false, problems };
 }
 
 /**
@@ -618,9 +706,7 @@ export function prepareCampaign(
             ],
         };
     }
-    const problems: string[] = [];
     try {
-        const suiteDir = dirname(bundle.suitePath);
         write(
             join(root, "prepare", "suite.json"),
             `${JSON.stringify(bundle.suite, null, 2)}\n`,
@@ -629,89 +715,20 @@ export function prepareCampaign(
             join(root, "prepare", "campaign.json"),
             readFileSync(bundle.campaignPath, "utf8"),
         );
-        const subjects: StagedArm[] = [];
-        for (const arm of bundle.campaign.subjects) {
-            const staged = stageArm(
-                arm,
-                dirname(bundle.campaignPath),
-                root,
-                problems,
-            );
-            if (staged !== null) subjects.push(staged);
+        const staged = stageBundle(bundle, root);
+        if (staged.problems.length > 0) {
+            return refuseCreated(root, staged.problems);
         }
-        const cases: PreparedCase[] = [];
-        for (const testCase of bundle.suite.cases) {
-            const staged = stageCase(testCase, suiteDir, root, problems);
-            if (staged !== null) cases.push(staged);
-        }
-        if (problems.length === 0) {
-            const campaign = normaliseCampaign(bundle);
-            const subjectsSha256 = sha256Of(
-                Object.fromEntries(
-                    subjects.map((arm) => [arm.armId, arm.inventory]),
-                ),
-            );
-            const workspacesSha256 = sha256Of(
-                Object.fromEntries(
-                    cases.map((testCase) => [
-                        testCase.caseId,
-                        testCase.workspace,
-                    ]),
-                ),
-            );
-            const promptsSha256 = sha256Of(
-                Object.fromEntries(
-                    cases.map((testCase) => [
-                        testCase.caseId,
-                        testCase.promptSha256,
-                    ]),
-                ),
-            );
-            const primaryCheckEntries = cases.flatMap((testCase) =>
-                testCase.primaryCheck === undefined
-                    ? []
-                    : [
-                          [
-                              testCase.caseId,
-                              testCase.primaryCheck.inventory,
-                          ] as const,
-                      ],
-            );
-            const manifest: PreparedManifest = {
-                schemaVersion: 1,
-                inventoryVersion: 2,
-                campaignId: bundle.campaign.campaignId,
-                suiteId: bundle.suite.suiteId,
-                campaignSha256: sha256Bytes(
-                    readFileSync(bundle.campaignPath),
-                ),
-                suiteSha256: sha256Bytes(readFileSync(bundle.suitePath)),
-                suiteCanonicalSha256: sha256Of(bundle.suite),
-                scheduleSha256: sha256Of(bundle.campaign.schedule.slots),
-                subjectsSha256,
-                workspacesSha256,
-                promptsSha256,
-                primaryChecksSha256: sha256Of(
-                    Object.fromEntries(primaryCheckEntries),
-                ),
-                tool: toolIdentity(),
-                suite: bundle.suite,
-                campaign,
-                subjects,
-                cases,
-            };
-            write(
-                join(root, "prepare", "manifest.json"),
-                `${JSON.stringify(manifest, null, 2)}\n`,
-            );
-            return { ok: true, root, manifest };
-        }
+        const manifest = manifestFor(bundle, staged.subjects, staged.cases);
+        write(
+            join(root, "prepare", "manifest.json"),
+            `${JSON.stringify(manifest, null, 2)}\n`,
+        );
+        return { ok: true, root, manifest };
     } catch (error) {
         rmSync(root, { recursive: true, force: true });
         throw error;
     }
-    rmSync(root, { recursive: true, force: true });
-    return { ok: false, problems };
 }
 
 /** The hash of a prepared manifest's canonical content. */
