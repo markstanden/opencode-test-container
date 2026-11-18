@@ -1470,6 +1470,7 @@ async function s13(): Promise<string> {
             );
         }
         const count = await live.chatRequests();
+        expect(count > 0, "the shipped examples provider served no request");
         providerUsed += count;
         return `shipped examples provider served ${count} chat request(s); s1 activation, s2/s3 restraint, all pass`;
     } finally {

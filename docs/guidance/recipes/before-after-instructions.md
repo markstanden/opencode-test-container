@@ -134,7 +134,7 @@ non-evidence, and an invalid capture must not be counted as a refusal.
 
 ## Expected evidence
 
-- Two valid workspace instructions per slot, byte-identical to their arm.
+- One valid workspace instruction per slot, byte-identical to its arm.
 - Per-slot assessments and report rows distinguishing `armId` and
   `repetitionId`.
 - A before/after pass-rate delta per case with the sample size beside it.

@@ -28,8 +28,10 @@ is a result whose claim matches its evidence.
    values in campaign JSON; the validator rejects credential-shaped option keys.
 7. **Use a fresh root.** `prepare` refuses an existing root. Editing a campaign
    and reusing its root is a different experiment pretending to be a retry.
-8. **Dry-run the plan.** `otc run --root <root> --dry-run` and read mounts,
-   image id, argv and environment names before paying for anything.
+8. **Dry-run the plan.** `otc run --root <root> --dry-run` builds and validates
+   each selected slot's plan and lists the slots it would dispatch; no container
+   starts and no provider request is made. It prints no mounts or argv, so check
+   those against [`docs/schema.md`](../schema.md) and the campaign first.
 9. **Freeze once.** Use two repetitions only for a scripted fixture; use three
    for a real model unless the budget forbids it, and record that compromise.
 

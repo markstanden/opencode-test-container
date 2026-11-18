@@ -90,10 +90,11 @@ pass.
 ## Expected evidence
 
 - `evidence/judge/<slot>/attempt-*/` — the packet, attempt metadata and verdict.
-- A **selection record** per slot naming the chosen attempt and every attempt
-  fact; a readable file alone is never a judgement.
-- Report rows carrying `documentationOutcome`, `utility`, the selected attempt
-  id, and the arm-blind packet identity.
+- A **selection record** per slot naming the chosen attempt, the arm-blind
+  packet identity and every attempt fact; a readable file alone is never a
+  judgement.
+- Report rows carrying `documentationOutcome`, `utility` and the selected
+  attempt id.
 - Durable recovery claims that are settled by the dispatch outcome.
 
 Tamper with an assessment, packet or metadata and the judge/status/closure path

@@ -101,8 +101,9 @@ Before spending a trial:
    `<root>/prepare/workspaces/<caseId>/` contains the fixture files you expect.
 2. Every instruction path exists in the workspace and no collision was
    reported.
-3. `otc run --dry-run` prints the plan you intended: mounts, image id, argv and
-   environment names.
+3. `otc run --dry-run` builds each selected slot's plan and lists the slots it
+   would dispatch; it prints no mounts or argv, so confirm those against
+   [`docs/schema.md`](../schema.md) and the campaign.
 
 If the answer to a prompt depends on a file, verify the file is on a writable
 or read-only mount the trial actually has. "The agent ignored it" is usually

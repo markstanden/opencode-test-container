@@ -74,9 +74,22 @@ function relativeLinks(markdown: string): string[] {
     return links;
 }
 
+/** The guidance entry point, which the recursive walk must find. */
+const guidanceIndex = join(repoRoot, "docs", "guidance", "README.md");
+
 describe("consumer-facing Markdown links", () => {
-    it("finds documents to check", () => {
-        assert.ok(documents.length > 0);
+    it("discovers the guidance index through the recursive walk", () => {
+        assert.ok(
+            documents.includes(guidanceIndex),
+            "docs/guidance/README.md is missing from the discovered set",
+        );
+    });
+
+    it("reads relative links from the guidance index", () => {
+        assert.ok(
+            relativeLinks(readFileSync(guidanceIndex, "utf8")).length >= 5,
+            "the guidance index yielded fewer relative links than expected",
+        );
     });
 
     for (const document of documents) {

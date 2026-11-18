@@ -226,6 +226,27 @@ describe("suite validation", () => {
             /unexpected field "targetSkillId"/,
         );
     });
+
+    it("accepts every documented field on a skill-trigger case", () => {
+        const parsed = validateSuite(
+            suite({
+                cases: [
+                    {
+                        caseId: "positive",
+                        kind: "skill-trigger",
+                        targetSkillId: "otel",
+                        expected: "activation",
+                        prompt: "Instrument it.",
+                        fixture: "fixtures/service",
+                        files: { "README.md": "# service\n" },
+                        contamination: "record",
+                        allowMissingTarget: true,
+                    },
+                ],
+            }),
+        );
+        assert.equal(parsed.ok, true);
+    });
 });
 
 describe("campaign validation", () => {

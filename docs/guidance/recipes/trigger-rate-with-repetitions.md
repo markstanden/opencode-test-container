@@ -99,6 +99,9 @@ Three repetitions per case, explicit:
 `repetitionId` is opaque; the slot id is what evidence and reports name.
 `budgets.trials` may equal or undercut the slot count, never exceed it.
 
+This excerpt shows two of the five shapes. Add the other three and raise
+`budgets.trials` to 15 before treating the result as the suite.
+
 ## Run
 
 Use a fresh root per campaign, not per repetition:
@@ -108,7 +111,7 @@ export OPENCODE_API_KEY=...
 otc validate --campaign campaign.json
 otc prepare  --campaign campaign.json --root /tmp/otc-rate
 otc freeze   --root /tmp/otc-rate
-otc run      --root /tmp/otc-rate --dry-run   # read the plan before paying
+otc run      --root /tmp/otc-rate --dry-run   # verify the plan before paying
 otc run      --root /tmp/otc-rate
 otc assess   --root /tmp/otc-rate
 otc close    --root /tmp/otc-rate

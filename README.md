@@ -47,15 +47,16 @@ Three lanes, ordered by what they cost.
 otc validate --campaign examples/skills/campaign.json
 otc prepare  --campaign examples/skills/campaign.json --root /tmp/otc-run
 otc freeze   --root /tmp/otc-run
-otc run      --root /tmp/otc-run --dry-run   # inspect the plan, no dispatch
+otc run      --root /tmp/otc-run --dry-run   # verify the plan, no dispatch
 otc status   --root /tmp/otc-run --json
 ```
 
-`run --dry-run` is the offline endpoint of this lane: nothing is dispatched, so
-no OpenCode process and no provider request exist. Validation success only
-proves the configuration is well formed, not that the experiment measures what
-you intend — see
+`run --dry-run` builds and validates each selected slot's plan and lists the
+slots it would dispatch; nothing is dispatched, so no OpenCode process and no
+provider request exist. Validation success only proves the configuration is
+well formed, not that the experiment measures what you intend — see
 [`docs/guidance/choose-what-youre-measuring.md`](docs/guidance/choose-what-youre-measuring.md).
+The guidance entry point is [`docs/guidance/README.md`](docs/guidance/README.md).
 
 ### Scripted execution — real containers, local provider
 
@@ -149,10 +150,10 @@ claim.
         "opencodeVersion": "2.2.6",
         "provider": {
             "route": "scripted",
-            "model": "scripted/scripted",
+            "model": "zai-coding-plan/glm-5.3-flash",
             "overlay": {
                 "providers": {
-                    "scripted": {
+                    "zai-coding-plan": {
                         "settings": { "baseURL": "http://127.0.0.1:8799/v1" },
                     },
                 },
@@ -160,7 +161,7 @@ claim.
         },
         "timeoutMs": 120000,
         "network": "host",
-        "passthroughEnv": ["SCRIPTED_API_KEY"],
+        "passthroughEnv": ["ZAI_API_KEY"],
     },
     "budgets": { "trials": 1, "judgeAttempts": 0 },
     "assessment": { "kind": "skill-activation" },
@@ -168,11 +169,13 @@ claim.
 ```
 
 The shipped [`examples/skills/campaign.json`](examples/skills/campaign.json)
-uses this shape with three cases. Optional fields — plugin subjects,
-instruction overlays, `imageId` pinning, docs `primaryCheck`, judge and
-recovery declarations — are specified in [`docs/schema.md`](docs/schema.md).
-Keep this sample runnable and add optional fields only when the experiment
-needs them.
+uses this shape with three cases. The model names a real catalogue provider
+whose base URL the overlay rewrites to the loopback fixture; `ZAI_API_KEY` is
+a placeholder value that never reaches the real service. Optional fields —
+plugin subjects, instruction overlays, `imageId` pinning, docs `primaryCheck`,
+judge and recovery declarations — are specified in
+[`docs/schema.md`](docs/schema.md). Keep this sample runnable and add optional
+fields only when the experiment needs them.
 
 A docs campaign may declare a judge and a narrow recovery registration:
 
