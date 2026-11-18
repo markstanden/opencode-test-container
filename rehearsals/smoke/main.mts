@@ -1,5 +1,5 @@
 /**
- * Core real-container smoke suite (S01-S12).
+ * Core real-container smoke suite (S01-S13).
  *
  * Runs the installed tarball's CLI and shipped adapters against a fresh image
  * built from the packaged Containerfile. A loopback scripted provider serves
@@ -8,7 +8,13 @@
  * This command is deliberately separate from `npm test`: ordinary tests stay
  * hermetic, while this one requires rootless Podman.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+    cpSync,
+    existsSync,
+    mkdirSync,
+    readFileSync,
+    writeFileSync,
+} from "node:fs";
 import { spawn } from "node:child_process";
 import { connect } from "node:net";
 import { join } from "node:path";
@@ -1316,6 +1322,161 @@ async function s12(): Promise<string> {
     return "status blocked; closure and reporting refused the tampered record";
 }
 
+/** Start the shipped examples provider and wait until it answers health. */
+async function exampleProvider(
+    port: number,
+    planPath: string,
+): Promise<{
+    chatRequests: () => Promise<number>;
+    close: () => Promise<void>;
+}> {
+    const serverPath = join(
+        consumer,
+        "node_modules",
+        "@markstanden",
+        "opencode-test-container",
+        "examples",
+        "provider",
+        "server.mjs",
+    );
+    const child = spawn(
+        process.execPath,
+        [serverPath, "--port", String(port), "--plan", planPath],
+        { stdio: ["ignore", "pipe", "pipe"] },
+    );
+    let stderr = "";
+    child.stderr.on("data", (chunk: Buffer) => {
+        stderr += String(chunk);
+    });
+    const exited = new Promise<void>((done) => {
+        child.once("exit", () => done());
+    });
+    const deadline = Date.now() + 10_000;
+    let ready = false;
+    while (Date.now() < deadline) {
+        if (child.exitCode !== null) {
+            throw new Error(`example provider exited early: ${stderr.trim()}`);
+        }
+        try {
+            const response = await fetch(`http://127.0.0.1:${port}/health`);
+            if (response.ok) {
+                ready = true;
+                break;
+            }
+        } catch {
+            // Not listening yet; poll again.
+        }
+        await new Promise((again) => setTimeout(again, 100));
+    }
+    if (!ready) {
+        child.kill("SIGKILL");
+        throw new Error(
+            `example provider did not become ready: ${stderr.trim()}`,
+        );
+    }
+    return {
+        chatRequests: async () => {
+            const response = await fetch(`http://127.0.0.1:${port}/health`);
+            return ((await response.json()) as { chatRequests: number })
+                .chatRequests;
+        },
+        close: async () => {
+            child.kill("SIGTERM");
+            await Promise.race([
+                exited,
+                new Promise<void>((done) => setTimeout(done, 5_000)),
+            ]);
+        },
+    };
+}
+
+async function s13(): Promise<string> {
+    const examples = join(work, "s13", "examples");
+    cpSync(
+        join(
+            consumer,
+            "node_modules",
+            "@markstanden",
+            "opencode-test-container",
+            "examples",
+        ),
+        examples,
+        { recursive: true },
+    );
+    const skills = join(examples, "skills");
+    const campaignPath = join(skills, "campaign.json");
+    const campaign = readJson<{
+        runtime: {
+            image: string;
+            provider: {
+                overlay: {
+                    providers: Record<
+                        string,
+                        { settings: { baseURL: string } }
+                    >;
+                };
+            };
+        };
+    }>(campaignPath);
+    const borrowed = await heldPort();
+    const port = borrowed.port;
+    await borrowed.close();
+    const live = await exampleProvider(
+        port,
+        join(skills, "provider-plan.json"),
+    );
+    try {
+        campaign.runtime.image = imageTag;
+        campaign.runtime.provider.overlay.providers[
+            "zai-coding-plan"
+        ]!.settings.baseURL = `http://127.0.0.1:${port}/v1`;
+        writeFileSync(
+            campaignPath,
+            `${JSON.stringify(campaign, null, 2)}\n`,
+            "utf8",
+        );
+        const root = join(work, "s13", "root");
+        await otcMust(
+            env,
+            binary,
+            ["prepare", "--campaign", campaignPath, "--root", root],
+            skills,
+        );
+        await otcMust(env, binary, ["freeze", "--root", root], skills);
+        await otcMust(env, binary, ["run", "--root", root], skills);
+        await otcMust(env, binary, ["assess", "--root", root], skills);
+        const expected = {
+            s1: "target-activation",
+            s2: "no-invocation",
+            s3: "no-invocation",
+        } as const;
+        for (const [slotId, observed] of Object.entries(expected)) {
+            const assessment = readJson<{
+                observed: string;
+                outcome: string;
+                validity: string;
+            }>(join(root, "evidence", "assessments", `${slotId}.json`));
+            expect(
+                assessment.validity === "valid",
+                `${slotId} validity was ${assessment.validity}`,
+            );
+            expect(
+                assessment.observed === observed,
+                `${slotId} observed ${assessment.observed}, expected ${observed}`,
+            );
+            expect(
+                assessment.outcome === "pass",
+                `${slotId} outcome was ${assessment.outcome}`,
+            );
+        }
+        const count = await live.chatRequests();
+        providerUsed += count;
+        return `shipped examples provider served ${count} chat request(s); s1 activation, s2/s3 restraint, all pass`;
+    } finally {
+        await live.close();
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Run
 // ---------------------------------------------------------------------------
@@ -1334,6 +1495,7 @@ try {
     await testCase("S10", "timeout and cancellation cleanup", s10);
     await testCase("S11", "isolation of successive attempts", s11);
     await testCase("S12", "evidence tampering and safe reporting", s12);
+    await testCase("S13", "shipped examples end to end", s13);
 } catch (error) {
     record(
         "setup",
@@ -1388,6 +1550,6 @@ try {
     console.log(
         `smoke: ${results.length - failed.length}/${results.length} case(s) passed; ${providerUsed} scripted inference request(s); image ${imageId}`,
     );
-    const expected = wanted?.length ?? 12;
+    const expected = wanted?.length ?? 13;
     process.exit(failed.length === 0 && results.length === expected ? 0 : 1);
 }
