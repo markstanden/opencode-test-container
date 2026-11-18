@@ -81,27 +81,110 @@ otc close    --root /tmp/otc-rate
 otc analyse  --root /tmp/otc-rate --out /tmp/otc-rate-report
 ```
 
-To parallelise, prepare several roots from the same campaign and select
-disjoint slots with `--slot`; the schedule stays frozen per root, so the split
-stays enumerable.
+## One sharding method
+
+The proved method is **separate roots with a disjoint `--slot` selection, then
+one checked merge before any rate is calculated**. Every shard is prepared and
+frozen from the same campaign document, so each root carries the same frozen
+schedule and only its selected slots dispatch.
+
+```sh
+# Shard A: one repetition of each case (three slots).
+otc prepare --campaign campaign-repetitions.json --root /tmp/otc-rate-a
+otc freeze  --root /tmp/otc-rate-a
+otc run     --root /tmp/otc-rate-a --slot pos-r0 --slot neg-r0 --slot near-r0
+otc assess  --root /tmp/otc-rate-a
+otc close   --root /tmp/otc-rate-a
+otc analyse --root /tmp/otc-rate-a --out /tmp/otc-rate-a-report
+
+# Shard B: the remaining six slots of the nine-slot schedule.
+otc prepare --campaign campaign-repetitions.json --root /tmp/otc-rate-b
+otc freeze  --root /tmp/otc-rate-b
+otc run     --root /tmp/otc-rate-b \
+  --slot pos-r1,pos-r2,neg-r1,neg-r2,near-r1,near-r2
+otc assess  --root /tmp/otc-rate-b
+otc close   --root /tmp/otc-rate-b
+otc analyse --root /tmp/otc-rate-b --out /tmp/otc-rate-b-report
+```
+
+`--slot` accepts repeated flags or one comma-separated list. An empty, blank,
+duplicated or partly empty selector (`--slot "pos-r0,,"`) is a usage error
+before any read; omit the flag to select the whole schedule. Two roots running
+at once is supported from 0.2.0 because admission, trial claims and closure are
+durable and atomic, but a shared root is not the recipe here: the merge below
+is what the shipped tooling proves.
+
+### Merge before you calculate
+
+Pass every shard report to the shipped summariser. It refuses a duplicate slot
+id and reports a campaign/suite mismatch, so a slot cannot be counted twice and
+two different campaigns cannot be pooled by accident:
+
+```sh
+node examples/reporting/rates.mjs \
+  /tmp/otc-rate-a-report/report.json \
+  /tmp/otc-rate-b-report/report.json
+```
+
+From an installed package, the same file is the shipped asset:
+
+```sh
+PKG="$(npm root)/@markstanden/opencode-test-container"
+node "$PKG/examples/reporting/rates.mjs" \
+  /tmp/otc-rate-a-report/report.json \
+  /tmp/otc-rate-b-report/report.json
+```
+
+### Worked denominator
+
+The shipped schedule is nine slots: three cases × three repetitions. The two
+shards above are disjoint (3 + 6), so a complete merge schedules **9/9** and
+the per-case rows add up to it:
+
+| Case                | Arm        | Expected      | Valid | Activation | Pass | Invalid | Unknown | Unrun |
+| ------------------- | ---------- | ------------- | ----- | ---------- | ---- | ------- | ------- | ----- |
+| positive-instrument | skill-only | activation    | 3/3   | 3/3        | 3/3  | 0       | 0       | 0     |
+| negative-near-miss  | skill-only | no-activation | 3/3   | 0/3        | 3/3  | 0       | 0       | 0     |
+| negative-unrelated  | skill-only | no-activation | 3/3   | 0/3        | 3/3  | 0       | 0       | 0     |
+
+The three rows' 3/3 denominators add up to the nine-slot total. The
+summariser prints one row per case and arm; this suite has one arm.
+
+Missing and duplicate slots have different answers:
+
+- **Missing.** A slot absent from every shard is not evidence. It cannot appear
+  in a `report.json` at all, so the merged denominator shrinks to what was
+  actually scheduled and analysed. Say so in the write-up: the denominator is
+  the merged report's `scheduled` count, never the nine-slot plan. If a root
+  was prepared but a slot never ran, the report carries it as `unrun` and it is
+  excluded from the rate while staying visible in the table.
+- **Duplicate.** A slot present in two shards is a contradiction. The
+  summariser refuses the merge with `duplicate slot <id> across shards`; fix
+  the selection (the shards must be disjoint) and re-analyse. Never add the two
+  counts by hand.
+
+Re-run `otc status --root <shard>` before analysing. It lists `unrun` slots
+(pending dispatch), `assess` before judging, and `close` only when every
+started trial ended.
 
 ## Reading the rates
 
 OTC scores each slot; it does not aggregate a rate. Derive both rates from the
-published report with the shipped summariser, which is the same code the tests
-exercise:
+published report — or the merged shard reports — with the shipped summariser,
+which is the same code the tests exercise:
 
 ```sh
-# installed consumer (or $(npm root -g)/@markstanden/opencode-test-container/…)
-node node_modules/@markstanden/opencode-test-container/examples/reporting/rates.mjs \
-  /tmp/otc-rate-report/report.json
+# installed consumer
+PKG="$(npm root)/@markstanden/opencode-test-container"
+node "$PKG/examples/reporting/rates.mjs" /tmp/otc-rate-report/report.json
 
 # from a checkout
 node examples/reporting/rates.mjs /tmp/otc-rate-report/report.json
 ```
 
 The output is one row per case **and arm**, so two treatments of the same case
-never merge.
+never merge. Pass several report paths only for disjoint shards of one
+campaign; see [Merge before you calculate](#merge-before-you-calculate).
 
 Two rates, two questions:
 

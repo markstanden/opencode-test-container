@@ -1,6 +1,6 @@
 {
     "name": "@markstanden/opencode-test-container",
-    "version": "0.1.1",
+    "version": "0.2.0",
     "type": "module",
     "description": "An isolated test sandbox for OpenCode plugins, skills and agent instructions.",
     "repository": {

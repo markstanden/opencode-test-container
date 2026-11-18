@@ -14,7 +14,12 @@
  * are reported separately. With no valid slots the rate is unavailable, not
  * zero.
  *
- * Usage: node rates.mjs <report.json> [--control <caseId>]…
+ * Sharded campaigns publish one report per root. Pass every report to merge
+ * them before rates: a duplicate slot id is refused, and every scheduled slot
+ * absent from a shard must still appear as its own unrun row, so the merged
+ * denominator is the frozen schedule rather than whatever arrived.
+ *
+ * Usage: node rates.mjs <report.json> [<report.json>…] [--control <caseId>]…
  */
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
@@ -112,6 +117,43 @@ export function summariseRates(report, options = {}) {
     };
 }
 
+/**
+ * Merge reports from separate campaign roots into one checked document.
+ *
+ * Shards of the same campaign must agree on `campaignId` and `suiteId`. A slot
+ * id may appear once; a duplicate is a contradiction between roots, never a
+ * silently counted extra sample.
+ * @param reports One or more parsed `report.json` documents.
+ * @returns The merged report.
+ */
+export function mergeReports(reports) {
+    if (reports.length === 0) throw new Error("no reports to merge");
+    if (reports.length === 1) return reports[0];
+    const identity = reports.map(
+        (report) => `${String(report?.campaignId)}\u0000${String(report?.suiteId)}`,
+    );
+    if (new Set(identity).size !== 1) {
+        throw new Error(
+            `reports name different campaigns: ${[...new Set(identity)].join(", ")}`,
+        );
+    }
+    const seen = new Set();
+    const slots = [];
+    for (const report of reports) {
+        for (const slot of report?.slots ?? []) {
+            const slotId = String(slot.slotId);
+            if (seen.has(slotId)) {
+                throw new Error(
+                    `duplicate slot ${slotId} across shards; split the schedule disjointly`,
+                );
+            }
+            seen.add(slotId);
+            slots.push(slot);
+        }
+    }
+    return { ...reports[0], slots };
+}
+
 /** One rate as `count/denominator` or `unavailable`. */
 function cell(count, denominator) {
     return denominator === 0 ? "unavailable" : `${count}/${denominator}`;
@@ -156,10 +198,10 @@ export function renderRates(summary) {
     return sections.join("\n\n");
 }
 
-/** Read the CLI arguments: one report path and zero or more control case ids. */
+/** Read the CLI arguments: report paths and zero or more control case ids. */
 function options(argv) {
     const controls = [];
-    let path = "";
+    const paths = [];
     for (let index = 0; index < argv.length; index += 1) {
         const argument = argv[index];
         if (argument === "--control") {
@@ -167,22 +209,33 @@ function options(argv) {
             if (argv[index] !== undefined) controls.push(argv[index]);
             continue;
         }
-        if (path === "") path = argument;
+        paths.push(argument);
     }
-    return { path, controls };
+    return { paths, controls };
 }
 
 if (
     process.argv[1] !== undefined &&
     import.meta.url === pathToFileURL(process.argv[1]).href
 ) {
-    const { path, controls } = options(process.argv.slice(2));
-    if (path === "") {
+    const { paths, controls } = options(process.argv.slice(2));
+    if (paths.length === 0) {
         console.error(
-            "usage: node rates.mjs <report.json> [--control <caseId>]…",
+            "usage: node rates.mjs <report.json> [<report.json>…] [--control <caseId>]…",
         );
         process.exit(2);
     }
-    const report = JSON.parse(readFileSync(path, "utf8"));
-    console.log(renderRates(summariseRates(report, { controls })));
+    try {
+        const report = mergeReports(
+            paths.map((path) =>
+                JSON.parse(readFileSync(path, "utf8")),
+            ),
+        );
+        console.log(renderRates(summariseRates(report, { controls })));
+    } catch (error) {
+        console.error(
+            `rates: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        process.exit(2);
+    }
 }

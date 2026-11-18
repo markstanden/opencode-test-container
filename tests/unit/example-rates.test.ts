@@ -1,11 +1,13 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+    mergeReports,
     renderRates,
     summariseRates,
 } from "../../examples/reporting/rates.mjs";
 
 interface SlotInput {
+    slotId?: string;
     caseId?: string;
     armId?: string;
     repetitionId?: string;
@@ -205,5 +207,58 @@ describe("example rate summary", () => {
         );
         assert.equal(summary.controls[0]?.control, true);
         assert.match(renderRates(summary), /control/i);
+    });
+});
+
+describe("sharded report merge", () => {
+    it("merges disjoint shards into the frozen denominator", () => {
+        // Arrange: nine slots split three and six, as separate roots.
+        const first = report([
+            slot({ slotId: "pos-r0" }),
+            slot({ slotId: "pos-r1" }),
+            slot({ slotId: "pos-r2" }),
+        ]);
+        const second = report([
+            slot({ slotId: "neg-r0", observed: "no-invocation" }),
+            slot({ slotId: "neg-r1", observed: "no-invocation" }),
+            slot({ slotId: "neg-r2", observed: "no-invocation" }),
+            slot({ slotId: "near-r0", observed: "no-invocation" }),
+            slot({ slotId: "near-r1", observed: "no-invocation" }),
+            slot({ slotId: "near-r2", observed: "no-invocation" }),
+        ]);
+
+        // Act
+        const merged = mergeReports([first, second]);
+        const summary = summariseRates(merged);
+
+        // Assert
+        assert.equal(merged.slots?.length, 9);
+        assert.equal(
+            summary.rows.reduce((sum, row) => sum + row.scheduled, 0),
+            9,
+        );
+    });
+
+    it("refuses a duplicate slot across shards", () => {
+        // Act / Assert
+        assert.throws(
+            () =>
+                mergeReports([
+                    report([slot({ slotId: "pos-r0" })]),
+                    report([slot({ slotId: "pos-r0" })]),
+                ]),
+            /duplicate slot pos-r0/,
+        );
+    });
+
+    it("refuses shards from different campaigns", () => {
+        // Arrange
+        const other = { ...report([slot({ slotId: "b" })]), campaignId: "x" };
+
+        // Act / Assert
+        assert.throws(
+            () => mergeReports([report([slot({ slotId: "a" })]), other]),
+            /different campaigns/,
+        );
     });
 });

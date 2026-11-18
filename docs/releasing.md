@@ -46,8 +46,8 @@ Also configure:
 2. Tag the merge commit — not the branch head you happen to have:
 
     ```sh
-    git tag -a v0.1.1 -m "0.1.1" <merge-commit>
-    git push origin v0.1.1   # this is the publish
+    git tag -a v0.2.0 -m "0.2.0" <merge-commit>
+    git push origin v0.2.0   # this is the publish
     ```
 
 3. Approve the `npm-publish` environment deployment in the run.
@@ -79,10 +79,12 @@ attestation automatically under OIDC on a public repository.
 
 ```sh
 npm audit signatures
-npm view @markstanden/opencode-test-container@0.1.1 dist.attestations
-npm view @markstanden/opencode-test-container@0.1.1 gitHead
+npm view @markstanden/opencode-test-container@0.2.0 dist.attestations
+npm view @markstanden/opencode-test-container@0.2.0 gitHead
 ```
 
 The attestation ties the tarball to this repository, workflow, tag and commit.
 `0.1.0` predates trusted publishing and carries no attestation; see
-[release-0.1.0.md](release-0.1.0.md).
+[release-0.1.0.md](release-0.1.0.md). The 0.2.0 candidate is recorded in
+[release-0.2.0.md](release-0.2.0.md); registry fields there exist only after a
+human pushes the tag.
