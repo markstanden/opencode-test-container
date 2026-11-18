@@ -27,11 +27,24 @@ curl --fail http://127.0.0.1:8799/health
 ```
 
 - `match` is a substring of the latest user message. The first matching entry
-  wins; each entry serves its `responses` in order and repeats the last one.
+  wins.
+- The provider keeps no per-prompt counter. Which response a request gets is
+  derived from that request's own history: the number of `assistant` messages
+  after its latest `user` message. A fresh conversation (no assistant turn yet)
+  gets `responses[0]`; the follow-up after a tool result gets `responses[1]`;
+  an identical prompt later in the conversation starts at `responses[0]` again.
+- Consequences: identical fresh conversations always start the same way,
+  interleaved clients never consume each other's plan, and a retried identical
+  request replays the same response instead of advancing. Requests past the end
+  of a plan repeat its last response.
 - A response is `{ "text": "…" }`, `{ "tool": "name", "args": { … } }`,
   `{ "error": 500 }` or `{ "truncate": "partial text" }`. The last two let a
   recipe demonstrate an operational failure without a real provider.
-- `GET /health` answers readiness without consuming a chat response.
+- Streamed tool turns finish with `tool_calls`; streamed text finishes with
+  `stop`.
+- `GET /health` answers readiness without consuming a chat response. Its
+  `chatRequests` counter is server-wide and counts every chat-completions
+  request actually received, including retries and scripted errors.
 
 This is a fixture, not a simulator: it exercises OTC's wiring and scoring, not
 model behaviour. A response plan that loads a skill proves the harness records

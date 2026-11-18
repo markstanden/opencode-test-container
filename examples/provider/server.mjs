@@ -12,6 +12,7 @@
 import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { selectResponse } from "./plan.mjs";
 
 const args = process.argv.slice(2);
 
@@ -25,42 +26,7 @@ const port = Number(valueAfter("--port", "8799"));
 const planPath = resolve(valueAfter("--plan", "provider-plan.json"));
 const plan = JSON.parse(readFileSync(planPath, "utf8"));
 
-const served = new Map();
 let chatRequests = 0;
-
-/** The latest user message's text, from a chat-completions body. */
-function userText(body) {
-    const messages = Array.isArray(body.messages) ? body.messages : [];
-    for (let index = messages.length - 1; index >= 0; index -= 1) {
-        const message = messages[index];
-        if (message?.role !== "user") continue;
-        if (typeof message.content === "string") return message.content;
-        if (Array.isArray(message.content)) {
-            return message.content
-                .filter((part) => part?.type === "text")
-                .map((part) => part.text)
-                .join("\n");
-        }
-    }
-    return "";
-}
-
-/** Pick the next planned response for one request. */
-function pick(body) {
-    const text = userText(body);
-    const entry = (plan.entries ?? []).find((candidate) =>
-        text.includes(candidate.match),
-    );
-    const fallback = plan.fallback ?? { text: "No scripted response matched." };
-    if (entry === undefined) return fallback;
-    const count = served.get(entry.match) ?? 0;
-    served.set(entry.match, count + 1);
-    const responses = entry.responses ?? [];
-    return (
-        responses[Math.min(count, Math.max(responses.length - 1, 0))] ??
-        fallback
-    );
-}
 
 /** Read one request body as JSON, never throwing. */
 async function bodyOf(request) {
@@ -91,14 +57,14 @@ function chunk(body, delta, finishReason = null) {
 }
 
 /** Stream a complete assistant turn and close the response. */
-function streamText(response, body, delta) {
+function streamText(response, body, delta, finishReason = "stop") {
     response.writeHead(200, {
         "content-type": "text/event-stream",
         "cache-control": "no-cache",
         connection: "keep-alive",
     });
     response.write(chunk(body, { role: "assistant", ...delta }));
-    response.write(chunk(body, {}, "stop"));
+    response.write(chunk(body, {}, finishReason));
     response.end("data: [DONE]\n\n");
 }
 
@@ -126,10 +92,15 @@ function toolCall(response, body, reply, streaming) {
         },
     };
     if (streaming) {
-        return streamText(response, body, {
-            content: null,
-            tool_calls: [call],
-        });
+        return streamText(
+            response,
+            body,
+            {
+                content: null,
+                tool_calls: [call],
+            },
+            "tool_calls",
+        );
     }
     return complete(
         response,
@@ -178,7 +149,7 @@ const server = createServer((request, response) => {
             return sendJson(response, 200, { object: "list", data: [] });
         }
         chatRequests += 1;
-        const reply = pick(body);
+        const reply = selectResponse(plan, body.messages);
         if (reply.error !== undefined) {
             const status = Number(reply.error) || 500;
             return sendJson(response, status, {
