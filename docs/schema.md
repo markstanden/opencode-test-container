@@ -34,6 +34,28 @@ is rendered as `r<N>` only at the adapter boundary.
 `docs-task` cases may also carry `truth` (arm-blind judge context) and `primaryCheck: { id, directory, script, timeoutMs? }`. The checker directory
 is staged under `prepare/primary-checks/<caseId>`; the fixed contract is
 `node /checker/<script> /live /pristine`. It is never mounted into the trial.
+A `skill-trigger` case has no primary check: the validator rejects
+`primaryCheck` there rather than ignoring it.
+
+## Path bases
+
+Relative paths resolve against different documents by field; there is no
+single "campaign-relative" rule.
+
+| Field                                                              | Resolves against                     |
+| ------------------------------------------------------------------ | ------------------------------------ |
+| `suite.path`                                                       | the campaign document                |
+| subject `skills[].path`, `plugins[].path`, `instructions[].path`   | the campaign document                |
+| case `fixture`                                                     | the suite document                   |
+| `primaryCheck.directory`                                           | the suite document                   |
+| case `files` keys                                                  | the trial workspace root             |
+| instruction `as`                                                   | a destination inside the trial workspace |
+
+Trial workspace construction order is fixture, then inline `files`, then arm
+instructions. Instructions are copied last and a target that already exists is
+refused with `instruction <id> collides with <as>`. A fixture that ships
+`AGENTS.md` cannot be overridden by an instruction targeting `AGENTS.md`; make
+the workspace copy a `files` entry or leave it out of the fixture.
 
 A campaign `assessment` may carry `judge: { model, timeoutMs? }` and
 `recovery` (the narrow registration in `analysis/recovery.ts`). Judge and
