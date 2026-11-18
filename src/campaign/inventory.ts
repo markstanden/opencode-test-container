@@ -219,6 +219,7 @@ function walkEntry(options: {
  * was written with: it records content only.
  * @param root The directory to inventory.
  * @param options The inventory format, defaulting to the historical version 1.
+ * @param options.version The format to write.
  * @returns The sorted inventory or the first unsafe path.
  */
 export function inventory(
@@ -337,6 +338,7 @@ function executableProblem(
  * @param expected The inventory that must still hold.
  * @param options The inventory format the expected entries use; a historical
  *   version 1 inventory keeps version 1 comparison semantics.
+ * @param options.version The format to compare with.
  * @returns The differences; empty means intact.
  */
 export function inventoryDifferences(

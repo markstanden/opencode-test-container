@@ -878,8 +878,7 @@ async function dispatchSlot(options: {
     execute: (plan: ContainerPlan) => Promise<CommandResult>;
     now: () => string;
 }): Promise<SlotOutcome> {
-    const { root, manifest, frozen, slot, already, dryRun, execute, now } =
-        options;
+    const { root, manifest, frozen, slot, already, dryRun } = options;
     const precondition = slotPrecondition(root, manifest, slot, already);
     if (precondition !== null) {
         return dryRun
@@ -908,21 +907,45 @@ async function dispatchSlot(options: {
                 : {}),
         };
     }
-    const trialDir = trialDirectory(root, slot.slotId);
     if (dryRun) {
         return dryRunOutcome(options, testCase, arm);
     }
+    return liveSlot({ ...options, testCase, arm });
+}
+
+/** Claim, plan, dispatch and record one live slot. */
+async function liveSlot(
+    options: {
+        root: string;
+        manifest: PreparedManifest;
+        frozen: FrozenRecord;
+        slot: Slot;
+        testCase: SuiteCase;
+        arm: StagedArm;
+        passthrough: readonly string[] | undefined;
+        signal: AbortSignal | undefined;
+        execute: (plan: ContainerPlan) => Promise<CommandResult>;
+        now: () => string;
+    },
+): Promise<SlotOutcome> {
+    const { root, manifest, frozen, slot, testCase, arm, execute, now } =
+        options;
+    const trialDir = trialDirectory(root, slot.slotId);
     if (isAborted(options.signal)) {
         return cancelledOutcome(slot.slotId);
     }
     const claimed = claimTrial(root, manifest, slot);
     if (!claimed.ok) return claimed.outcome;
     const planned = planClaimed({
-        ...options,
+        root,
+        manifest,
+        frozen,
+        slot,
         testCase,
         arm,
         trialDir,
         claim: claimed.claim,
+        passthrough: options.passthrough,
     });
     if (!planned.ok) return planned.outcome;
     // Cancellation between planning and launch: nothing was dispatched, so the

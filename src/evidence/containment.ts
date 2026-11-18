@@ -111,6 +111,7 @@ export function resolveContained(
  * @param root The contained root.
  * @param path The root-relative path.
  * @param options Optional hook run after classification and before the open.
+ * @param options.beforeOpen Runs after classification and before the open.
  * @returns The bytes, or the refusal.
  */
 export function readContainedBytes(
@@ -159,6 +160,7 @@ export function readContainedBytes(
  * @param root The contained root.
  * @param path The root-relative path.
  * @param options Optional hook run after classification and before the open.
+ * @param options.beforeOpen Runs after classification and before the open.
  * @returns The text, or the refusal.
  */
 export function readContainedFile(
