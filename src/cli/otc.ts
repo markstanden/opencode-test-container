@@ -105,9 +105,7 @@ export function assertCommandIntent(options: CliOptions): void {
     for (const flag of options.provided) {
         if (flag === "--help") continue;
         if (!allowed.includes(flag)) {
-            throw new UsageError(
-                `${options.command} does not accept ${flag}`,
-            );
+            throw new UsageError(`${options.command} does not accept ${flag}`);
         }
     }
     if (options.provided.includes("--slot") && options.slots.length === 0) {

@@ -130,7 +130,8 @@ export function mergeReports(reports) {
     if (reports.length === 0) throw new Error("no reports to merge");
     if (reports.length === 1) return reports[0];
     const identity = reports.map(
-        (report) => `${String(report?.campaignId)}\u0000${String(report?.suiteId)}`,
+        (report) =>
+            `${String(report?.campaignId)}\u0000${String(report?.suiteId)}`,
     );
     if (new Set(identity).size !== 1) {
         throw new Error(
@@ -227,9 +228,7 @@ if (
     }
     try {
         const report = mergeReports(
-            paths.map((path) =>
-                JSON.parse(readFileSync(path, "utf8")),
-            ),
+            paths.map((path) => JSON.parse(readFileSync(path, "utf8"))),
         );
         console.log(renderRates(summariseRates(report, { controls })));
     } catch (error) {

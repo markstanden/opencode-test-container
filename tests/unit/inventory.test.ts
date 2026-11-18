@@ -263,9 +263,7 @@ describe("versioned inventory identity", () => {
             assert.equal(read?.executable, false);
             assert.deepEqual(
                 current.ok
-                    ? current.entries.find(
-                          (entry) => entry.path === "empty",
-                      )
+                    ? current.entries.find((entry) => entry.path === "empty")
                     : undefined,
                 { path: "empty", sha256: "", kind: "directory" },
             );
@@ -347,7 +345,10 @@ describe("versioned inventory identity", () => {
                 statSync(join(destination, "run.sh")).mode & 0o111,
                 0o111,
             );
-            assert.equal(statSync(join(destination, "empty")).isDirectory(), true);
+            assert.equal(
+                statSync(join(destination, "empty")).isDirectory(),
+                true,
+            );
         } finally {
             rmSync(source, { recursive: true, force: true });
             rmSync(dirname(destination), { recursive: true, force: true });

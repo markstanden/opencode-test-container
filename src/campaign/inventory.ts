@@ -231,7 +231,12 @@ export function inventory(
         return { ok: false, problem: `${root} does not exist` };
     }
     const entries: Inventory = [];
-    const problem = walk({ entries, realRoot: realpathSync(root), root, version });
+    const problem = walk({
+        entries,
+        realRoot: realpathSync(root),
+        root,
+        version,
+    });
     if (problem !== null) return { ok: false, problem };
     return {
         ok: true,

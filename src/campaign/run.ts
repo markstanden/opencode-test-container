@@ -914,20 +914,18 @@ async function dispatchSlot(options: {
 }
 
 /** Claim, plan, dispatch and record one live slot. */
-async function liveSlot(
-    options: {
-        root: string;
-        manifest: PreparedManifest;
-        frozen: FrozenRecord;
-        slot: Slot;
-        testCase: SuiteCase;
-        arm: StagedArm;
-        passthrough: readonly string[] | undefined;
-        signal: AbortSignal | undefined;
-        execute: (plan: ContainerPlan) => Promise<CommandResult>;
-        now: () => string;
-    },
-): Promise<SlotOutcome> {
+async function liveSlot(options: {
+    root: string;
+    manifest: PreparedManifest;
+    frozen: FrozenRecord;
+    slot: Slot;
+    testCase: SuiteCase;
+    arm: StagedArm;
+    passthrough: readonly string[] | undefined;
+    signal: AbortSignal | undefined;
+    execute: (plan: ContainerPlan) => Promise<CommandResult>;
+    now: () => string;
+}): Promise<SlotOutcome> {
     const { root, manifest, frozen, slot, testCase, arm, execute, now } =
         options;
     const trialDir = trialDirectory(root, slot.slotId);

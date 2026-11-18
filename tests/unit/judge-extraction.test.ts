@@ -117,9 +117,13 @@ describe("judge extraction parity", () => {
             assert.equal(ran.ok, true, ran.problems.join("; "));
             const assessed = assessCampaign(root);
             assert.equal(assessed.ok, true, assessed.problems.join("; "));
-            const judged = await judgeCampaign(root, {
-                slotIds: ["useful-write"],
-            }, { runContainer: runs });
+            const judged = await judgeCampaign(
+                root,
+                {
+                    slotIds: ["useful-write"],
+                },
+                { runContainer: runs },
+            );
             assert.equal(judged.ok, true, judged.problems.join("; "));
 
             const slot = prepared.manifest.campaign.schedule.slots.find(
@@ -152,22 +156,19 @@ describe("judge extraction parity", () => {
                 ),
                 "utf8",
             );
-            const leaks = blindingProblems(
-                registered,
-                {
-                    root,
-                    campaignId: prepared.manifest.campaignId,
-                    armIds: prepared.manifest.campaign.subjects.map(
-                        (arm) => arm.armId,
-                    ),
-                    slotIds: prepared.manifest.campaign.schedule.slots.map(
-                        (entry) => entry.slotId,
-                    ),
-                    caseIds: prepared.manifest.suite.cases.map(
-                        (entry) => entry.caseId,
-                    ),
-                },
-            );
+            const leaks = blindingProblems(registered, {
+                root,
+                campaignId: prepared.manifest.campaignId,
+                armIds: prepared.manifest.campaign.subjects.map(
+                    (arm) => arm.armId,
+                ),
+                slotIds: prepared.manifest.campaign.schedule.slots.map(
+                    (entry) => entry.slotId,
+                ),
+                caseIds: prepared.manifest.suite.cases.map(
+                    (entry) => entry.caseId,
+                ),
+            });
 
             // Assert
             assert.equal(rebuilt.ok, true);

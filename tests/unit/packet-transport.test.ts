@@ -49,7 +49,11 @@ async function largeRoot(size: number): Promise<{ dir: string; root: string }> {
     cpSync(FIXTURE, dir, { recursive: true });
     const root = join(dir, "root");
     const prepared = prepareCampaign(join(dir, "campaign.json"), root);
-    assert.equal(prepared.ok, true, prepared.ok ? "" : prepared.problems.join("; "));
+    assert.equal(
+        prepared.ok,
+        true,
+        prepared.ok ? "" : prepared.problems.join("; "),
+    );
     const frozen = await freezeCampaign(root, fakeImage as never);
     assert.equal(frozen.ok, true, frozen.ok ? "" : frozen.problems.join("; "));
     const ran = await runCampaign(
@@ -97,7 +101,11 @@ describe("judge packet transport", () => {
             );
 
             // Assert
-            assert.equal(built.ok, true, built.ok ? "" : built.problems.join("; "));
+            assert.equal(
+                built.ok,
+                true,
+                built.ok ? "" : built.problems.join("; "),
+            );
             if (!built.ok) return;
             const packet = built.plan.stdin;
             assert.equal(typeof packet, "string");

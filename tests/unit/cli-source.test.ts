@@ -53,13 +53,7 @@ describe("CLI source surface", () => {
         for (const value of malformed) {
             assert.throws(
                 () =>
-                    parseArgs([
-                        "run",
-                        "--root",
-                        "/tmp/root",
-                        "--slot",
-                        value,
-                    ]),
+                    parseArgs(["run", "--root", "/tmp/root", "--slot", value]),
                 /--slot/,
                 `accepted selector ${JSON.stringify(value)}`,
             );
@@ -78,12 +72,7 @@ describe("CLI source surface", () => {
         );
         assert.throws(
             () =>
-                parseArgs([
-                    "delivery-check",
-                    "--root",
-                    "/tmp/root",
-                    "--json",
-                ]),
+                parseArgs(["delivery-check", "--root", "/tmp/root", "--json"]),
             /delivery-check does not accept --json/,
         );
     });

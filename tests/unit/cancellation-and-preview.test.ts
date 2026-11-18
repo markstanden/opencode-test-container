@@ -76,7 +76,11 @@ async function campaignRoot(options: { trials?: number } = {}): Promise<{
     }
     const root = join(dir, "root");
     const prepared = prepareCampaign(join(dir, "campaign.json"), root);
-    assert.equal(prepared.ok, true, prepared.ok ? "" : prepared.problems.join("; "));
+    assert.equal(
+        prepared.ok,
+        true,
+        prepared.ok ? "" : prepared.problems.join("; "),
+    );
     const frozen = await freezeCampaign(root, fakeImage as never);
     assert.equal(frozen.ok, true, frozen.ok ? "" : frozen.problems.join("; "));
     return { dir, root };
@@ -104,7 +108,10 @@ describe("cancellation boundaries", () => {
 
             // Assert
             assert.equal(summary.ok, false);
-            assert.match(summary.problems.join("; "), /cancelled before any dispatch/);
+            assert.match(
+                summary.problems.join("; "),
+                /cancelled before any dispatch/,
+            );
             assert.equal(plans.length, 0);
             assert.deepEqual(readClaims(join(root, "evidence"), "trial"), []);
             assert.deepEqual(readLedger(root).events, []);
@@ -143,18 +150,18 @@ describe("cancellation boundaries", () => {
             assert.equal(plans[0]?.signal, controller.signal);
             assert.notEqual(plans[0]?.name, undefined);
             assert.deepEqual(summary.ran, ["s1"]);
-            assert.match(summary.problems.join("; "), /cancelled before slot s2/);
+            assert.match(
+                summary.problems.join("; "),
+                /cancelled before slot s2/,
+            );
             const claims = readClaims(join(root, "evidence"), "trial");
             assert.equal(claims.length, 1);
             assert.equal(claims[0]?.state, "closed");
-            assert.deepEqual(
-                readdirSync(join(root, "evidence", "trials")),
-                ["s1"],
-            );
+            assert.deepEqual(readdirSync(join(root, "evidence", "trials")), [
+                "s1",
+            ]);
             assert.equal(
-                existsSync(
-                    join(root, "evidence", "trials", "s2"),
-                ),
+                existsSync(join(root, "evidence", "trials", "s2")),
                 false,
             );
             assert.equal(
@@ -233,18 +240,26 @@ describe("budget preview", () => {
         try {
             // Act: both see an unclaimed budget before either claims.
             const summaries = await Promise.all([
-                runCampaign(root, {}, {
-                    runContainer: async () => {
-                        calls += 1;
-                        return result();
+                runCampaign(
+                    root,
+                    {},
+                    {
+                        runContainer: async () => {
+                            calls += 1;
+                            return result();
+                        },
                     },
-                }),
-                runCampaign(root, {}, {
-                    runContainer: async () => {
-                        calls += 1;
-                        return result();
+                ),
+                runCampaign(
+                    root,
+                    {},
+                    {
+                        runContainer: async () => {
+                            calls += 1;
+                            return result();
+                        },
                     },
-                }),
+                ),
             ]);
 
             // Assert

@@ -111,7 +111,8 @@ function slotJudgement(options: {
     manifest: StatusManifest;
     slot: StatusManifest["campaign"]["schedule"]["slots"][number];
     policy: ReturnType<typeof policyOf>;
-    assessment: ReturnType<typeof checkedAssessments>["records"][number] | undefined;
+    assessment:
+        ReturnType<typeof checkedAssessments>["records"][number] | undefined;
 }): {
     state: ReturnType<typeof judgeStateOf>;
     attempts: number;
@@ -130,7 +131,10 @@ function slotJudgement(options: {
         manifest: options.manifest,
         slot: options.slot,
         trialRecorded: existsSync(
-            join(trialDirectory(options.root, options.slot.slotId), "meta.json"),
+            join(
+                trialDirectory(options.root, options.slot.slotId),
+                "meta.json",
+            ),
         ),
         assessment: options.assessment,
         selectionPresent: existsSync(
@@ -184,10 +188,13 @@ function judgementOf(
 ): StatusReport["judgement"] {
     if (manifest.campaign.assessment.judge === undefined) return null;
     const policy = policyOf(manifest);
-    const bySlot = new Map(
-        assessments.map((entry) => [entry.slotId, entry]),
-    );
-    const counts = { judged: 0, pending: 0, failed: 0, problems: [] as string[] };
+    const bySlot = new Map(assessments.map((entry) => [entry.slotId, entry]));
+    const counts = {
+        judged: 0,
+        pending: 0,
+        failed: 0,
+        problems: [] as string[],
+    };
     let attempts = 0;
     let invalid = 0;
     for (const slot of manifest.campaign.schedule.slots) {
@@ -478,12 +485,7 @@ export function statusOf(root: string): StatusReport {
     );
     const assessments = assessmentView(root, manifest, ledger);
     const frozen = frozenView(root);
-    const judgement = judgementOf(
-        root,
-        manifest,
-        ledger,
-        assessments.records,
-    );
+    const judgement = judgementOf(root, manifest, ledger, assessments.records);
     const problems = [
         ...(ledger.state === "malformed" ? ledger.problems : []),
         ...assessments.problems,

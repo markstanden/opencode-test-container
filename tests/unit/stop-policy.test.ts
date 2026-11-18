@@ -23,10 +23,7 @@ import { assessCampaign } from "../../src/campaign/assess.ts";
 import { judgeCampaign } from "../../src/campaign/judge.ts";
 import { runCommand, type CommandResult } from "../../src/adapters/process.ts";
 import type { ContainerPlan } from "../../src/adapters/podman/container.ts";
-import {
-    docsCallEvent,
-    writeJournal,
-} from "../support/docs-trial.ts";
+import { docsCallEvent, writeJournal } from "../support/docs-trial.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DOCS = join(HERE, "..", "fixtures", "docs-campaign");

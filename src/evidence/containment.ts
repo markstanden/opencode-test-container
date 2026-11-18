@@ -169,9 +169,7 @@ export function readContainedFile(
     options: { beforeOpen?: (realPath: string) => void } = {},
 ): ContainedText {
     const read = readContainedBytes(root, path, options);
-    return read.ok
-        ? { ok: true, text: read.bytes.toString("utf8") }
-        : read;
+    return read.ok ? { ok: true, text: read.bytes.toString("utf8") } : read;
 }
 
 /** A snapshot of one directory's regular files, refused on any unsafe object. */

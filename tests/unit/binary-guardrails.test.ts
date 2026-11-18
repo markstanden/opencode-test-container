@@ -93,7 +93,9 @@ describe("binary unchanged-file guardrails", () => {
 
     it("fails a one-byte change even when both decodings are identical", () => {
         // Arrange: two invalid bytes that both decode to U+FFFD.
-        const directory = trial(Buffer.from([0x00, 0x81, 0xff, 0xfe, 0xc3, 0x28, 0x0a]));
+        const directory = trial(
+            Buffer.from([0x00, 0x81, 0xff, 0xfe, 0xc3, 0x28, 0x0a]),
+        );
         try {
             // Act
             const assessment = assess(directory);

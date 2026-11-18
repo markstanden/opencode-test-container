@@ -18,18 +18,18 @@ is rendered as `r<N>` only at the adapter boundary.
 
 ## Versioned documents
 
-| Document      | Version | Notes                                                                 |
-| ------------- | ------- | --------------------------------------------------------------------- |
-| suite         | 1       | discriminated `skill-trigger` / `docs-task`; no executable fields     |
-| campaign      | 1       | explicit slots, runtime, budgets, assessment, optional stop policy    |
+| Document      | Version | Notes                                                                                                                              |
+| ------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| suite         | 1       | discriminated `skill-trigger` / `docs-task`; no executable fields                                                                  |
+| campaign      | 1       | explicit slots, runtime, budgets, assessment, optional stop policy                                                                 |
 | manifest      | 1       | embedded suite and normalised campaign; no source absolute paths; `inventoryVersion: 2` records execute bits and empty directories |
-| freeze        | 1       | `kind: "otc-freeze"`, immutable IDs, tool identity and `freezeSha256` |
-| assessment    | 1       | skill or docs shape; evaluator version and source-evidence binding    |
-| primary check | 1       | product checker identity, fixed interpreter and outcome               |
-| judgement     | 1       | arm-blind judge verdict and its failure class                         |
-| selection     | 1       | per-slot chosen attempt and every attempt fact                        |
-| report        | 1       | derived, `reportSha256` over content; per-slot `usageProblems`      |
-| ledger event  | 1       | trial, primary-check, assessment, judge and close events              |
+| freeze        | 1       | `kind: "otc-freeze"`, immutable IDs, tool identity and `freezeSha256`                                                              |
+| assessment    | 1       | skill or docs shape; evaluator version and source-evidence binding                                                                 |
+| primary check | 1       | product checker identity, fixed interpreter and outcome                                                                            |
+| judgement     | 1       | arm-blind judge verdict and its failure class                                                                                      |
+| selection     | 1       | per-slot chosen attempt and every attempt fact                                                                                     |
+| report        | 1       | derived, `reportSha256` over content; per-slot `usageProblems`                                                                     |
+| ledger event  | 1       | trial, primary-check, assessment, judge and close events                                                                           |
 
 `docs-task` cases may also carry `truth` (arm-blind judge context) and `primaryCheck: { id, directory, script, timeoutMs? }`. The checker directory
 is staged under `prepare/primary-checks/<caseId>`; the fixed contract is
@@ -91,19 +91,19 @@ deterministic assessment for the same slot with a valid capture and a `pass` or
 `fail` outcome. The shared decision is `src/campaign/eligibility.ts`; preview,
 status, judge and closure consume the same state and reasons.
 
-| State                    | Meaning                                                        | Paid attempt |
-| ------------------------ | -------------------------------------------------------------- | ------------ |
-| `pending`                | checked assessment, no attempt                                 | yes, one claim |
-| `terminal-failures`      | every attempt ended without a verdict                          | no (recovery policy decides) |
-| `judged`                 | checked selection                                              | no           |
-| `selection-missing`      | usable verdict, no selection                                   | no; judge repairs, close refuses |
-| `selection-conflict`     | selection present but inconsistent                             | no; close refuses |
-| `unsettled`              | attempt without a terminal record                              | no; closure refuses |
-| `assessment-missing`     | no deterministic record                                        | no           |
-| `assessment-untrustworthy` | corrupt, unsupported or conflicting record                   | no           |
-| `assessment-invalid`     | invalid or unknown capture                                     | no           |
-| `assessment-unknown`     | valid record with an unknown outcome                           | no           |
-| `unrun`, `not-docs`, `not-declared` | nothing to judge                                    | no           |
+| State                               | Meaning                                    | Paid attempt                     |
+| ----------------------------------- | ------------------------------------------ | -------------------------------- |
+| `pending`                           | checked assessment, no attempt             | yes, one claim                   |
+| `terminal-failures`                 | every attempt ended without a verdict      | no (recovery policy decides)     |
+| `judged`                            | checked selection                          | no                               |
+| `selection-missing`                 | usable verdict, no selection               | no; judge repairs, close refuses |
+| `selection-conflict`                | selection present but inconsistent         | no; close refuses                |
+| `unsettled`                         | attempt without a terminal record          | no; closure refuses              |
+| `assessment-missing`                | no deterministic record                    | no                               |
+| `assessment-untrustworthy`          | corrupt, unsupported or conflicting record | no                               |
+| `assessment-invalid`                | invalid or unknown capture                 | no                               |
+| `assessment-unknown`                | valid record with an unknown outcome       | no                               |
+| `unrun`, `not-docs`, `not-declared` | nothing to judge                           | no                               |
 
 A blocking state anywhere in the selection refuses the whole `otc judge`
 invocation before any claim, so it costs zero paid attempts. A valid adverse

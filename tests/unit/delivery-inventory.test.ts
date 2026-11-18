@@ -70,10 +70,7 @@ describe("frozen inventory execution identity", () => {
                 "otel-helper",
             );
             assert.equal(statSync(join(staged, "run.sh")).mode & 0o111, 0o111);
-            assert.equal(
-                statSync(join(staged, "empty")).isDirectory(),
-                true,
-            );
+            assert.equal(statSync(join(staged, "empty")).isDirectory(), true);
             assert.deepEqual(preparedDifferences(root, manifest), []);
         } finally {
             rmSync(dir, { recursive: true, force: true });

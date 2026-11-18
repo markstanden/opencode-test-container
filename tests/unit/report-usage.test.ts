@@ -1,12 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import {
-    cpSync,
-    mkdirSync,
-    mkdtempSync,
-    rmSync,
-    writeFileSync,
-} from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -139,7 +133,11 @@ async function closedRoot(
     cpSync(fixture, dir, { recursive: true });
     const root = join(dir, "root");
     const prepared = prepareCampaign(join(dir, "campaign.json"), root);
-    assert.equal(prepared.ok, true, prepared.ok ? "" : prepared.problems.join("; "));
+    assert.equal(
+        prepared.ok,
+        true,
+        prepared.ok ? "" : prepared.problems.join("; "),
+    );
     const frozen = await freezeCampaign(root, fakeImage as never);
     assert.equal(frozen.ok, true, frozen.ok ? "" : frozen.problems.join("; "));
     const ran = await runCampaign(root, {}, { runContainer: container });
@@ -147,14 +145,14 @@ async function closedRoot(
     const assessed = assessCampaign(root);
     assert.equal(assessed.ok, true, assessed.problems.join("; "));
     if (judged) {
-        const judgedResult = await judgeCampaign(root, {}, {
-            runContainer: container,
-        });
-        assert.equal(
-            judgedResult.ok,
-            true,
-            judgedResult.problems.join("; "),
+        const judgedResult = await judgeCampaign(
+            root,
+            {},
+            {
+                runContainer: container,
+            },
         );
+        assert.equal(judgedResult.ok, true, judgedResult.problems.join("; "));
     }
     const closed = closeCampaign(root);
     assert.equal(closed.ok, true, closed.ok ? "" : closed.problems.join("; "));
@@ -162,7 +160,10 @@ async function closedRoot(
 }
 
 /** One slot's usage from a fresh report. */
-function reportUsage(root: string, dir: string): {
+function reportUsage(
+    root: string,
+    dir: string,
+): {
     usage: unknown;
     problems: string[];
 } {
@@ -201,13 +202,7 @@ describe("closed report usage identity", () => {
         const { dir, root } = await closedRoot(SKILLS, skills());
         try {
             writeFileSync(
-                join(
-                    root,
-                    "evidence",
-                    "trials",
-                    "s1",
-                    "usage.json",
-                ),
+                join(root, "evidence", "trials", "s1", "usage.json"),
                 `${JSON.stringify({ inputTokens: 999, outputTokens: 999, reported: true })}\n`,
                 "utf8",
             );
@@ -245,13 +240,7 @@ describe("closed report usage identity", () => {
         const { dir, root } = await closedRoot(DOCS, docs(), true);
         try {
             writeFileSync(
-                join(
-                    root,
-                    "evidence",
-                    "trials",
-                    "useful-write",
-                    "usage.json",
-                ),
+                join(root, "evidence", "trials", "useful-write", "usage.json"),
                 `${JSON.stringify({ inputTokens: 7, outputTokens: 7, reported: true })}\n`,
                 "utf8",
             );

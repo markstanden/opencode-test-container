@@ -105,9 +105,7 @@ function docs(calls: { judge: number; trial: number }) {
             status: 0,
             signal: null,
             stdout: `${
-                slot === "useful-write"
-                    ? `${docsCallEvent("ses_retry")}\n`
-                    : ""
+                slot === "useful-write" ? `${docsCallEvent("ses_retry")}\n` : ""
             }${textEvent("Nothing to record.")}\n`,
             stderr: "",
             timedOut: false,
@@ -138,7 +136,11 @@ async function frozen(
     }
     const root = join(dir, "root");
     const prepared = prepareCampaign(campaignPath, root);
-    assert.equal(prepared.ok, true, prepared.ok ? "" : prepared.problems.join("; "));
+    assert.equal(
+        prepared.ok,
+        true,
+        prepared.ok ? "" : prepared.problems.join("; "),
+    );
     const result = await freezeCampaign(root, fakeImage as never);
     assert.equal(result.ok, true, result.ok ? "" : result.problems.join("; "));
     return { dir, root };
@@ -239,9 +241,13 @@ describe("pre-dispatch refusal is retriable", () => {
 
             // Act: the judge cannot build a safe environment for the attempt.
             process.env[TOKEN] = "line\nbreak";
-            const refused = await judgeCampaign(root, {}, {
-                runContainer: docs(calls),
-            });
+            const refused = await judgeCampaign(
+                root,
+                {},
+                {
+                    runContainer: docs(calls),
+                },
+            );
 
             // Assert
             assert.equal(refused.ok, false);
@@ -259,9 +265,7 @@ describe("pre-dispatch refusal is retriable", () => {
                 false,
             );
             assert.deepEqual(readClaims(join(root, "evidence"), "judge"), []);
-            const judgementNames = names(
-                join(root, "evidence", "judgements"),
-            );
+            const judgementNames = names(join(root, "evidence", "judgements"));
             assert.equal(
                 judgementNames.some((name) => /^attempt-/.test(name)),
                 false,
@@ -281,9 +285,13 @@ describe("pre-dispatch refusal is retriable", () => {
 
             // Act: correction, retry and closure.
             process.env[TOKEN] = "safe-value";
-            const retried = await judgeCampaign(root, {}, {
-                runContainer: docs(calls),
-            });
+            const retried = await judgeCampaign(
+                root,
+                {},
+                {
+                    runContainer: docs(calls),
+                },
+            );
             assert.equal(retried.ok, true, retried.problems.join("; "));
             assert.equal(calls.judge, 3);
             const closed = closeCampaign(root);

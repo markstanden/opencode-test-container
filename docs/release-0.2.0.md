@@ -9,14 +9,14 @@ workflow runs; it is added to this file after the fact, never predicted.
 `0.2.0` is the first minor after the published `0.1.1`. It includes the two
 merged changes that `0.1.1` predates, plus this candidate's fixes.
 
-| Fact                     | Value                                                       |
-| ------------------------ | ----------------------------------------------------------- |
-| Proposed version         | `0.2.0`                                                     |
-| Base (reviewed `main`)   | `f02d6bda13132115a03e85f6275cf0ae5d5b3e7c`                  |
-| Published `0.1.1` source | `60acb33ee12d7cfb13ce512d49474edf04b167d7`                  |
+| Fact                     | Value                                                                                                                                                        |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Proposed version         | `0.2.0`                                                                                                                                                      |
+| Base (reviewed `main`)   | `f02d6bda13132115a03e85f6275cf0ae5d5b3e7c`                                                                                                                   |
+| Published `0.1.1` source | `60acb33ee12d7cfb13ce512d49474edf04b167d7`                                                                                                                   |
 | Included pull requests   | [#3](https://github.com/markstanden/opencode-test-container/pull/3), [#4](https://github.com/markstanden/opencode-test-container/pull/4) and this release PR |
-| Publication route        | the existing tag-triggered `.github/workflows/npm--publish.yml` over npm trusted publishing |
-| Tag owner                | a human, after the agreed candidate is merged                |
+| Publication route        | the existing tag-triggered `.github/workflows/npm--publish.yml` over npm trusted publishing                                                                  |
+| Tag owner                | a human, after the agreed candidate is merged                                                                                                                |
 
 `0.1.1` shipped from `60acb33`; the reviewed `main` at `f02d6bd` already
 contains #3 (evidence boundaries and the real-container smoke suite) and #4

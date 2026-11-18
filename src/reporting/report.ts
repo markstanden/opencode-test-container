@@ -118,9 +118,7 @@ function readUsage(
         return {
             usage: null,
             problems:
-                bound === null
-                    ? []
-                    : ["the bound usage record is missing"],
+                bound === null ? [] : ["the bound usage record is missing"],
         };
     }
     const bytes = readFileSync(path);
@@ -249,7 +247,9 @@ function usageSection(report: Report): string[] {
                 ? ""
                 : ` [${slot.usageProblems.join("; ")}]`;
         if (usage === null)
-            return [`- ${slot.slotId}: unknown (no accepted usage record)${note}`];
+            return [
+                `- ${slot.slotId}: unknown (no accepted usage record)${note}`,
+            ];
         return [
             `- ${slot.slotId}: input ${String(usage.inputTokens ?? "unknown")}, output ${String(usage.outputTokens ?? "unknown")}, cache read ${String(usage.cacheReadTokens ?? "unknown")}, reported ${String(usage.reported ?? false)}${note}`,
         ];

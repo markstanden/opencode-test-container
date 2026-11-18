@@ -1695,7 +1695,10 @@ function slotEligibility(options: {
         manifest: options.manifest,
         slot: options.slot,
         trialRecorded: existsSync(
-            join(trialDirectory(options.root, options.slot.slotId), "meta.json"),
+            join(
+                trialDirectory(options.root, options.slot.slotId),
+                "meta.json",
+            ),
         ),
         assessment,
         selectionPresent: existsSync(
@@ -1871,10 +1874,7 @@ function judgePreflight(options: {
             manifest: options.manifest,
             slot,
             trialRecorded: existsSync(
-                join(
-                    trialDirectory(options.root, slot.slotId),
-                    "meta.json",
-                ),
+                join(trialDirectory(options.root, slot.slotId), "meta.json"),
             ),
             assessment: assessments.get(slot.slotId),
             selectionPresent: existsSync(

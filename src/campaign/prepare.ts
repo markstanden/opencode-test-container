@@ -534,8 +534,7 @@ function caseInputs(bundle: CampaignBundle): string[] {
         ...(testCase.fixture === undefined
             ? []
             : [resolve(suiteDir, testCase.fixture)]),
-        ...(testCase.kind === "docs-task" &&
-        testCase.primaryCheck !== undefined
+        ...(testCase.kind === "docs-task" && testCase.primaryCheck !== undefined
             ? [resolve(suiteDir, testCase.primaryCheck.directory)]
             : []),
     ]);
@@ -631,10 +630,7 @@ function manifestFor(
         ),
         workspacesSha256: sha256Of(
             Object.fromEntries(
-                cases.map((testCase) => [
-                    testCase.caseId,
-                    testCase.workspace,
-                ]),
+                cases.map((testCase) => [testCase.caseId, testCase.workspace]),
             ),
         ),
         promptsSha256: sha256Of(
@@ -645,9 +641,7 @@ function manifestFor(
                 ]),
             ),
         ),
-        primaryChecksSha256: sha256Of(
-            Object.fromEntries(primaryCheckEntries),
-        ),
+        primaryChecksSha256: sha256Of(Object.fromEntries(primaryCheckEntries)),
         tool: toolIdentity(),
         suite: bundle.suite,
         campaign: normaliseCampaign(bundle),
@@ -826,9 +820,7 @@ function primaryCheckDifferences(
     const checker = join(root, "prepare", testCase.primaryCheck.directory);
     return inventoryDifferences(checker, testCase.primaryCheck.inventory, {
         version,
-    }).map(
-        (difference) => `primary-checks/${testCase.caseId}: ${difference}`,
-    );
+    }).map((difference) => `primary-checks/${testCase.caseId}: ${difference}`);
 }
 
 /** The canonical text of a prepared manifest, for receipts and displays. */

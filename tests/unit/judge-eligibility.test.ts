@@ -138,8 +138,7 @@ function container(options: {
                 options.judgeResponses?.(slotId, attemptId) ??
                 JSON.stringify({
                     documentationOutcome: "none",
-                    documentationReason:
-                        "The evidence supports this outcome.",
+                    documentationReason: "The evidence supports this outcome.",
                     evidence: ["docs/notes/otel.md"],
                 });
             return {
@@ -195,7 +194,11 @@ async function frozenDocs(): Promise<{ dir: string; root: string }> {
     cpSync(DOCS, dir, { recursive: true });
     const root = join(dir, "root");
     const prepared = prepareCampaign(join(dir, "campaign.json"), root);
-    assert.equal(prepared.ok, true, prepared.ok ? "" : prepared.problems.join("; "));
+    assert.equal(
+        prepared.ok,
+        true,
+        prepared.ok ? "" : prepared.problems.join("; "),
+    );
     const frozen = await freezeCampaign(root, fakeImage as never);
     assert.equal(frozen.ok, true, frozen.ok ? "" : frozen.problems.join("; "));
     return { dir, root };
@@ -212,7 +215,11 @@ describe("judge eligibility", () => {
                 assessment: Record<string, unknown>;
             };
             campaign.assessment.judge = { model: "scripted/judge" };
-            writeFileSync(path, `${JSON.stringify(campaign, null, 2)}\n`, "utf8");
+            writeFileSync(
+                path,
+                `${JSON.stringify(campaign, null, 2)}\n`,
+                "utf8",
+            );
 
             // Act
             const loaded = loadCampaignBundle(path);
@@ -241,9 +248,13 @@ describe("judge eligibility", () => {
             assert.equal(ran.ok, true, ran.problems.join("; "));
 
             // Act
-            const judged = await judgeCampaign(root, {}, {
-                runContainer: runs,
-            });
+            const judged = await judgeCampaign(
+                root,
+                {},
+                {
+                    runContainer: runs,
+                },
+            );
 
             // Assert
             assert.equal(judged.ok, false);
@@ -279,9 +290,13 @@ describe("judge eligibility", () => {
             assert.equal(assessed.ok, true, assessed.problems.join("; "));
 
             // Act
-            const judged = await judgeCampaign(root, {}, {
-                runContainer: runs,
-            });
+            const judged = await judgeCampaign(
+                root,
+                {},
+                {
+                    runContainer: runs,
+                },
+            );
 
             // Assert
             assert.equal(judged.ok, false);
@@ -311,9 +326,13 @@ describe("judge eligibility", () => {
             );
 
             // Act
-            const judged = await judgeCampaign(root, {}, {
-                runContainer: runs,
-            });
+            const judged = await judgeCampaign(
+                root,
+                {},
+                {
+                    runContainer: runs,
+                },
+            );
 
             // Assert
             assert.equal(judged.ok, true, judged.problems.join("; "));
@@ -333,7 +352,8 @@ describe("judge eligibility", () => {
 /** The judgement a slot's documented state supports. */
 function validJudgement(slotId: string): string {
     return JSON.stringify({
-        documentationOutcome: slotId === "useful-write" ? "useful-create" : "none",
+        documentationOutcome:
+            slotId === "useful-write" ? "useful-create" : "none",
         documentationReason: "The evidence supports this outcome.",
         evidence: ["docs/notes/otel.md"],
     });
@@ -357,11 +377,23 @@ describe("recovery conflicts and concurrent closure", () => {
             assert.equal(ran.ok, true, ran.problems.join("; "));
             const assessed = assessCampaign(root);
             assert.equal(assessed.ok, true, assessed.problems.join("; "));
-            const judged = await judgeCampaign(root, {}, {
-                runContainer: runs,
-            });
+            const judged = await judgeCampaign(
+                root,
+                {},
+                {
+                    runContainer: runs,
+                },
+            );
             assert.equal(judged.ok, true, judged.problems.join("; "));
-            rmSync(join(root, "evidence", "judgements", "useful-write", "selection.json"));
+            rmSync(
+                join(
+                    root,
+                    "evidence",
+                    "judgements",
+                    "useful-write",
+                    "selection.json",
+                ),
+            );
 
             // Act: closure sees a usable verdict with no selection.
             const refused = closeCampaign(root);
@@ -375,9 +407,13 @@ describe("recovery conflicts and concurrent closure", () => {
             assert.notEqual(readLedgerState(root), "closed");
 
             // Act: the judge repairs the missing selection and closure succeeds.
-            const repaired = await judgeCampaign(root, {
-                slotIds: ["useful-write"],
-            }, { runContainer: runs });
+            const repaired = await judgeCampaign(
+                root,
+                {
+                    slotIds: ["useful-write"],
+                },
+                { runContainer: runs },
+            );
             assert.equal(repaired.ok, true, repaired.problems.join("; "));
             assert.equal(
                 existsSync(

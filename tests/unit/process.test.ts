@@ -153,18 +153,19 @@ describe("stdin transport", () => {
 
         // Assert
         assert.equal(result.status, 0, result.stderr);
-        assert.equal(
-            result.stdout,
-            `${String(payload.length)}:BEGINEND`,
-        );
+        assert.equal(result.stdout, `${String(payload.length)}:BEGINEND`);
     });
 
     it("reports a child that never reads stdin without hanging", async () => {
         // Act
-        const result = await runCommand(process.execPath, ["-e", "process.exit(0)"], {
-            stdinText: "ignored",
-            timeoutMs: 20_000,
-        });
+        const result = await runCommand(
+            process.execPath,
+            ["-e", "process.exit(0)"],
+            {
+                stdinText: "ignored",
+                timeoutMs: 20_000,
+            },
+        );
 
         // Assert
         assert.equal(result.status, 0);

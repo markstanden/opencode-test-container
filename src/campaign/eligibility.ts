@@ -131,7 +131,10 @@ function assessmentState(
 /** The selection and attempt states, once the assessment is eligible. */
 function judgementState(facts: JudgeFacts, slotId: string): JudgeState {
     if (facts.selection.ok) {
-        return state("judged", `slot ${slotId} already has a checked judgement`);
+        return state(
+            "judged",
+            `slot ${slotId} already has a checked judgement`,
+        );
     }
     if (facts.selectionPresent) {
         return state(
@@ -140,7 +143,9 @@ function judgementState(facts: JudgeFacts, slotId: string): JudgeState {
             { satisfied: false },
         );
     }
-    if (facts.attempts.some((attempt) => attempt.judgementStatus === "judged")) {
+    if (
+        facts.attempts.some((attempt) => attempt.judgementStatus === "judged")
+    ) {
         // The attempt is usable, so the judge may repair the missing selection
         // by recording it. Closure may not: an earlier failed attempt must not
         // hide a later verdict whose selection is absent.

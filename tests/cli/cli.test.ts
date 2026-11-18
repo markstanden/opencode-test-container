@@ -345,11 +345,10 @@ describe("packaged consumer", () => {
                 ].join("\n"),
                 "utf8",
             );
-            const checkedImport = spawnSync(
-                process.execPath,
-                [script, root],
-                { cwd: consumer, encoding: "utf8" },
-            );
+            const checkedImport = spawnSync(process.execPath, [script, root], {
+                cwd: consumer,
+                encoding: "utf8",
+            });
             assert.equal(checkedImport.status, 0, checkedImport.stderr);
             const checkedJson = JSON.parse(checkedImport.stdout) as {
                 ok: boolean;

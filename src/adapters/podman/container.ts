@@ -168,9 +168,7 @@ export async function runContainer(
     const result = await run("podman", containerArgv(plan), {
         timeoutMs: plan.timeoutMs,
         maxBuffer: 64 * 1024 * 1024,
-        ...(plan.stdin === undefined
-            ? {}
-            : { stdinText: plan.stdin }),
+        ...(plan.stdin === undefined ? {} : { stdinText: plan.stdin }),
         ...(plan.signal === undefined ? {} : { signal: plan.signal }),
     });
     // Killing the Podman client is not proof the container stopped. A timeout,

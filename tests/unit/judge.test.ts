@@ -187,9 +187,7 @@ function container(options: {
             options.record?.push(`${slotId}/${attemptId}`);
             const response =
                 options.judgeResponses?.(slotId, attemptId) ??
-                judgement(
-                    slotId.includes("useful") ? "useful-create" : "none",
-                );
+                judgement(slotId.includes("useful") ? "useful-create" : "none");
             return {
                 status: 0,
                 signal: null,
@@ -590,9 +588,7 @@ describe("blind docs judge", () => {
         assert.equal(
             closed.ok
                 ? false
-                : closed.problems.some((problem) =>
-                      /unresolved/.test(problem),
-                  ),
+                : closed.problems.some((problem) => /unresolved/.test(problem)),
             true,
         );
     });

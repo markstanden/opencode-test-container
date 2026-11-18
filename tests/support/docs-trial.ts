@@ -53,10 +53,7 @@ export function docsCallEvent(session = "ses_test"): string {
  * @param plan The trial plan, whose journal mount and key identify the trial.
  * @param session The session id the journal must attribute.
  */
-export function writeJournal(
-    plan: ContainerPlan,
-    session = "ses_test",
-): void {
+export function writeJournal(plan: ContainerPlan, session = "ses_test"): void {
     const journal = mountSource(plan, "/journal");
     const key = readFileSync(
         join(dirname(journal), "journal-key.txt"),
@@ -90,8 +87,7 @@ export function writeJournal(
 export function validJudgement(slotId: string, outcome?: string): string {
     return JSON.stringify({
         documentationOutcome:
-            outcome ??
-            (slotId.includes("useful") ? "useful-create" : "none"),
+            outcome ?? (slotId.includes("useful") ? "useful-create" : "none"),
         documentationReason: "The evidence supports this outcome.",
         evidence: ["docs/notes/otel.md"],
     });

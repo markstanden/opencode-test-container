@@ -193,7 +193,11 @@ export function runCommand(
             append(err, chunk),
         );
         child.on("error", (error) => finish({ error: error.message }));
-        const cancellation = cancellationHook(child, options.signal, () => settled);
+        const cancellation = cancellationHook(
+            child,
+            options.signal,
+            () => settled,
+        );
         onAbort = cancellation.handler;
         if (cancellation.killTimer !== undefined) {
             killTimer = cancellation.killTimer;

@@ -49,7 +49,11 @@ async function frozenRoot(): Promise<{ dir: string; root: string }> {
     cpSync(FIXTURE, dir, { recursive: true });
     const root = join(dir, "root");
     const prepared = prepareCampaign(join(dir, "campaign.json"), root);
-    assert.equal(prepared.ok, true, prepared.ok ? "" : prepared.problems.join("; "));
+    assert.equal(
+        prepared.ok,
+        true,
+        prepared.ok ? "" : prepared.problems.join("; "),
+    );
     const frozen = await freezeCampaign(root, fakeImage as never);
     assert.equal(frozen.ok, true, frozen.ok ? "" : frozen.problems.join("; "));
     return { dir, root };
@@ -130,10 +134,7 @@ describe("workspace answer placement", () => {
             assert.equal(ran.ok, true, ran.problems.join("; "));
             const trialDir = join(root, "evidence", "trials", "restraint");
             assert.equal(
-                readFileSync(
-                    join(trialDir, "workspace", "answer.md"),
-                    "utf8",
-                ),
+                readFileSync(join(trialDir, "workspace", "answer.md"), "utf8"),
                 readFileSync(join(trialDir, "answer.md"), "utf8"),
             );
             const meta = JSON.parse(
