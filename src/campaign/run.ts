@@ -1,9 +1,12 @@
 import { randomBytes } from "node:crypto";
 import {
+    closeSync,
+    constants,
     copyFileSync,
     existsSync,
     mkdirSync,
     mkdtempSync,
+    openSync,
     readFileSync,
     rmSync,
     writeFileSync,
@@ -40,6 +43,7 @@ import {
 import type { CommandResult } from "../adapters/process.ts";
 import { deliveryCheck, loadFrozen, type FrozenRecord } from "./freeze.ts";
 import { stageTree } from "./inventory.ts";
+import { containedEntry } from "../evidence/containment.ts";
 import { executePrimaryCheck, type PrimaryCheckRecord } from "./primary.ts";
 import { runShouldStop } from "./stop-policy.ts";
 import { withAdmission } from "./admission.ts";
@@ -468,22 +472,75 @@ function captureIntegrity(
     return integrity;
 }
 
+/**
+ * Place the answer where a docs primary checker expects it, without ever
+ * overwriting or following a subject-controlled destination.
+ *
+ * The canonical answer stays in host-owned trial evidence. This copy exists
+ * only because the checker's contract reads `/workspace/answer.md`. Exclusive
+ * creation means a subject-written answer survives untouched; an existing
+ * symlink, FIFO or directory is reported as a problem rather than followed,
+ * so the copy can never write outside the workspace.
+ * @param workspace The trial workspace.
+ * @param text The captured answer.
+ * @returns Whether a copy was written, or the refusal.
+ */
+function placeWorkspaceAnswer(
+    workspace: string,
+    text: string,
+): { ok: true; written: boolean } | { ok: false; problem: string } {
+    const target = join(workspace, "answer.md");
+    let fd: number;
+    try {
+        fd = openSync(
+            target,
+            constants.O_WRONLY |
+                constants.O_CREAT |
+                constants.O_EXCL |
+                constants.O_NOFOLLOW,
+            0o600,
+        );
+    } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code === "EEXIST" || code === "ELOOP") {
+            // Occupied: keep what the subject wrote, but only when it is a
+            // regular file. Classifying without following refuses a symlink,
+            // FIFO, directory or escaping object explicitly.
+            const entry = containedEntry(workspace, "answer.md");
+            if (!entry.ok) {
+                return {
+                    ok: false,
+                    problem: `workspace answer.md is unsafe: ${entry.problem}`,
+                };
+            }
+            if (entry.kind === "file") return { ok: true, written: false };
+            return {
+                ok: false,
+                problem: `workspace answer.md is a ${entry.kind}; refusing to replace it`,
+            };
+        }
+        return {
+            ok: false,
+            problem: `workspace answer.md could not be created: ${error instanceof Error ? error.message : String(error)}`,
+        };
+    }
+    try {
+        writeFileSync(fd, text, "utf8");
+    } finally {
+        closeSync(fd);
+    }
+    return { ok: true, written: true };
+}
+
 /** Write all evidence for one completed trial. */
 function writeTrialEvidence(
     trialDir: string,
     result: CommandResult,
     trail: DecodedTrail,
     meta: TrialMeta,
-    answerInWorkspace: boolean,
 ): void {
     writeFileSync(join(trialDir, "events.jsonl"), result.stdout, "utf8");
     writeFileSync(join(trialDir, "answer.md"), trail.text, "utf8");
-    if (answerInWorkspace) {
-        const answerPath = join(trialDir, "workspace", "answer.md");
-        if (!existsSync(answerPath)) {
-            writeFileSync(answerPath, trail.text, "utf8");
-        }
-    }
     writeFileSync(
         join(trialDir, "tools.jsonl"),
         trail.calls.length === 0
@@ -576,6 +633,13 @@ async function executeSlot(options: {
     const completedAt = now();
     const trail = decodeTrail(result.stdout);
     const integrity = captureIntegrity(result, trail);
+    if (options.testCase.kind === "docs-task") {
+        const placed = placeWorkspaceAnswer(
+            join(trialDir, "workspace"),
+            trail.text,
+        );
+        if (!placed.ok) integrity.push(placed.problem);
+    }
     const meta: TrialMeta = {
         schemaVersion: 1,
         campaignId: manifest.campaignId,
@@ -600,13 +664,7 @@ async function executeSlot(options: {
         imageId: frozen.imageId,
         completedAt,
     };
-    writeTrialEvidence(
-        trialDir,
-        result,
-        trail,
-        meta,
-        options.testCase.kind === "docs-task",
-    );
+    writeTrialEvidence(trialDir, result, trail, meta);
     appendLedgerEvent(
         root,
         {
