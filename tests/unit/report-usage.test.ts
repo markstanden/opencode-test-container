@@ -169,7 +169,6 @@ function reportUsage(root: string, dir: string): {
 } {
     const out = join(dir, `report-${String(Math.random()).slice(2)}`);
     const report = analyseCampaign(root, out);
-    assert.equal(report.ok, true, report.ok ? "" : report.problems.join("; "));
     if (!report.ok) throw new Error(report.problems.join("; "));
     const slot = report.report.slots[0];
     assert.notEqual(slot, undefined);

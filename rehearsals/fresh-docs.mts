@@ -23,7 +23,11 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { startProvider, type ScriptedResponse } from "./provider.mts";
+import {
+    startProvider,
+    type CapturedRequest,
+    type ScriptedResponse,
+} from "./provider.mts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "..");
@@ -183,6 +187,14 @@ const PLAIN: ScriptedResponse[] = [
     },
 ];
 
+/**
+ * A packet marker and padding above the host's ordinary single-argument limit
+ * (128 KiB). The judge packet carries the authored truth, so this proves the
+ * packet reaches the provider through stdin rather than argv.
+ */
+const LARGE_PACKET_MARKER = "OTC-LARGE-PACKET-MARKER-20261118";
+const LARGE_PACKET_PADDING = 200 * 1024;
+
 /** One judge verdict. */
 function verdict(outcome: string): ScriptedResponse {
     return {
@@ -204,6 +216,7 @@ async function withProvider(
     result: ChildResult;
     chatRequests: number;
     otherRequests: number;
+    requests: CapturedRequest[];
 }> {
     const provider = await startProvider(port, plan);
     try {
@@ -211,6 +224,7 @@ async function withProvider(
             result: await run(),
             chatRequests: provider.chatCount(),
             otherRequests: provider.otherCount(),
+            requests: [...provider.requests],
         };
     } finally {
         await provider.close();
@@ -224,6 +238,7 @@ interface SlotObservation {
     trialOther: number;
     judgeChat: number;
     judgeOther: number;
+    judgeRequests: CapturedRequest[];
     assessment: Record<string, unknown> | null;
     selection: Record<string, unknown> | null;
     attempts: Array<Record<string, unknown>>;
@@ -237,6 +252,18 @@ async function runCampaign(
 ): Promise<{ root: string; observations: SlotObservation[] }> {
     const root = join(work, "campaign");
     cpSync(join(HERE, "fixtures", "fresh-docs"), root, { recursive: true });
+    // Pad one authored truth so its blinded packet is above the host's
+    // single-argument limit.
+    const suitePath = join(root, "suite.json");
+    const suite = JSON.parse(readFileSync(suitePath, "utf8")) as {
+        cases: Array<{ caseId: string; truth?: string }>;
+    };
+    for (const testCase of suite.cases) {
+        if (testCase.caseId === "useful-write") {
+            testCase.truth = `${LARGE_PACKET_MARKER}${"x".repeat(LARGE_PACKET_PADDING)}`;
+        }
+    }
+    writeFileSync(suitePath, `${JSON.stringify(suite, null, 2)}\n`, "utf8");
     const port = await freePort();
     writeCampaign(join(root, "campaign.json"), imageId, port);
     const prepared = await otc([
@@ -273,6 +300,7 @@ async function runCampaign(
             trialOther: trial.otherRequests,
             judgeChat: 0,
             judgeOther: 0,
+            judgeRequests: [],
             assessment: null,
             selection: null,
             attempts: [],
@@ -315,6 +343,7 @@ async function runCampaign(
         );
         observation.judgeChat = judged.chatRequests;
         observation.judgeOther = judged.otherRequests;
+        observation.judgeRequests = judged.requests;
         observation.assessment = json(
             join(
                 root,
@@ -552,7 +581,32 @@ function assertObservations(
     assertCriteria(byId);
     assertRecovery(byId);
     assertTraffic(observations);
+    assertPacketTransport(byId);
     return byId;
+}
+
+/**
+ * Assert the blinded packet above the host's single-argument limit reached the
+ * provider intact. The packet is streamed on stdin, so the request body must
+ * carry the authored-truth marker and be larger than 128 KiB.
+ */
+function assertPacketTransport(byId: Record<string, SlotObservation>): void {
+    const useful = byId["useful-write"];
+    expect(useful !== undefined, "no useful-write judge observation");
+    const bodies = useful.judgeRequests
+        .filter((request) => request.path.includes("chat/completions"))
+        .map((request) => JSON.stringify(request.body));
+    const delivered = bodies.filter((body) =>
+        body.includes(LARGE_PACKET_MARKER),
+    );
+    expect(
+        delivered.length > 0,
+        "the judge provider did not receive the blinded packet content",
+    );
+    expect(
+        (delivered[0] ?? "").length > 128 * 1024,
+        "the delivered packet was below the ordinary single-argument limit",
+    );
 }
 
 /** Close, analyse and prove post-close refusal. */

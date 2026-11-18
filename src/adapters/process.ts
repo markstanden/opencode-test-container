@@ -36,6 +36,12 @@ export interface CommandOptions {
     maxBuffer?: number;
     /** The stdin value. */
     stdin?: "ignore" | "pipe";
+    /**
+     * Exact bytes written to the child's stdin before it runs. The stream is
+     * closed immediately, so a reader such as `opencode run` sees a complete
+     * prompt without any argument-vector size limit.
+     */
+    stdinText?: string;
     /** Cancels the child with the same bounded grace as a timeout. */
     signal?: AbortSignal;
 }
@@ -113,13 +119,24 @@ export function runCommand(
             child = spawn(command, [...args], {
                 cwd: options.cwd,
                 env: options.env,
-                stdio: [options.stdin ?? "ignore", "pipe", "pipe"],
+                stdio: [
+                    options.stdinText === undefined
+                        ? (options.stdin ?? "ignore")
+                        : "pipe",
+                    "pipe",
+                    "pipe",
+                ],
             });
         } catch (error) {
             finish({
                 error: error instanceof Error ? error.message : String(error),
             });
             return;
+        }
+        if (options.stdinText !== undefined) {
+            // A child may exit before reading; EPIPE is its outcome, not ours.
+            child.stdin?.on("error", () => undefined);
+            child.stdin?.end(options.stdinText);
         }
         const append = (capture: Capture, chunk: Buffer | string): void => {
             if (capture.overflowed) return;

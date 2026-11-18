@@ -135,3 +135,39 @@ describe("bounded process capture", () => {
         assert.equal(Date.now() - started < 3000, true);
     });
 });
+
+describe("stdin transport", () => {
+    it("delivers exact text larger than the argument limit", async () => {
+        // Arrange: 200 KiB is above the host's ordinary single-argument cap.
+        const payload = `BEGIN${"x".repeat(200 * 1024)}END`;
+
+        // Act
+        const result = await runCommand(
+            process.execPath,
+            [
+                "-e",
+                "let s='';process.stdin.on('data',c=>s+=c).on('end',()=>process.stdout.write(String(s.length)+':'+s.slice(0,5)+s.slice(-3)))",
+            ],
+            { stdinText: payload, timeoutMs: 20_000 },
+        );
+
+        // Assert
+        assert.equal(result.status, 0, result.stderr);
+        assert.equal(
+            result.stdout,
+            `${String(payload.length)}:BEGINEND`,
+        );
+    });
+
+    it("reports a child that never reads stdin without hanging", async () => {
+        // Act
+        const result = await runCommand(process.execPath, ["-e", "process.exit(0)"], {
+            stdinText: "ignored",
+            timeoutMs: 20_000,
+        });
+
+        // Assert
+        assert.equal(result.status, 0);
+        assert.equal(result.timedOut, false);
+    });
+});

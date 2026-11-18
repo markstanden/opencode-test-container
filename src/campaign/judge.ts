@@ -715,10 +715,14 @@ function planAttempt(options: {
                 // The session title is model-visible metadata: never encode a
                 // slot, arm or attempt identity in it.
                 title: `otc-judge-${sha256Bytes(options.attemptId).slice(0, 12)}`,
-                prompt: options.packet,
+                prompt: null,
                 printLogs: process.env.OTC_PRINT_LOGS === "1",
             }),
         ],
+        // The blinded packet is the model's prompt. It travels on stdin so a
+        // packet larger than the host's per-argument limit still arrives
+        // byte for byte; it is never in the process argument vector.
+        stdin: options.packet,
         envNames: [...new Set(names)],
         envFile,
         timeoutMs:

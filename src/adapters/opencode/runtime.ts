@@ -58,13 +58,13 @@ export function opencodeConfig(campaign: Campaign, arm: Arm): OpencodeConfig {
  * @returns The complete argv (without the binary).
  * @param options.model The model value.
  * @param options.title The title value.
- * @param options.prompt The prompt value.
+ * @param options.prompt The prompt value, or null when it arrives on stdin.
  * @param options.printLogs The printLogs value.
  */
 export function opencodeRunArgs(options: {
     model: string;
     title: string;
-    prompt: string;
+    prompt: string | null;
     printLogs?: boolean;
 }): string[] {
     return [
@@ -79,7 +79,7 @@ export function opencodeRunArgs(options: {
         "--format",
         "json",
         ...(options.printLogs === true ? ["--print-logs"] : []),
-        options.prompt,
+        ...(options.prompt === null ? [] : [options.prompt]),
     ];
 }
 

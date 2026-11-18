@@ -24,6 +24,11 @@ export interface ContainerPlan {
     network: "host" | "none";
     /** The argv value. */
     argv: string[];
+    /**
+     * Exact text streamed to the container's stdin. Used for content too large
+     * for the host's single-argument limit; the stream is closed immediately.
+     */
+    stdin?: string;
     /** Environment names passed by reference; values never enter argv. */
     envNames: string[];
     /** A 0600 env file read by Podman; values never enter argv. */
@@ -111,6 +116,7 @@ export function containerArgv(plan: ContainerPlan): string[] {
     const args = [
         "run",
         "--rm",
+        ...(plan.stdin === undefined ? [] : ["-i"]),
         ...(plan.name === undefined ? [] : ["--name", plan.name]),
         ...Object.entries(plan.labels ?? {}).flatMap(([key, value]) => [
             "--label",
@@ -162,6 +168,9 @@ export async function runContainer(
     const result = await run("podman", containerArgv(plan), {
         timeoutMs: plan.timeoutMs,
         maxBuffer: 64 * 1024 * 1024,
+        ...(plan.stdin === undefined
+            ? {}
+            : { stdinText: plan.stdin }),
         ...(plan.signal === undefined ? {} : { signal: plan.signal }),
     });
     // Killing the Podman client is not proof the container stopped. A timeout,
