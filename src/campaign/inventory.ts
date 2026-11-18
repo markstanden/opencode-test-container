@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import {
+    chmodSync,
     closeSync,
     constants,
     existsSync,
@@ -21,16 +22,24 @@ import { pathWithin } from "../evidence/paths.ts";
 export interface InventoryEntry {
     /** The path value. */
     path: string;
-    /** The sha256 value. */
+    /** The sha256 value; empty for an empty-directory entry. */
     sha256: string;
     /** The entry kind; absent legacy inventories describe regular files. */
-    kind?: "file" | "symlink";
+    kind?: "file" | "symlink" | "directory";
     /** Present only for a contained symlink, recording its relative target. */
     link?: string;
+    /**
+     * Whether any execute bit is set. Present only in inventory version 2 for
+     * regular files; absent legacy inventories keep version 1 semantics.
+     */
+    executable?: boolean;
 }
 
 /** A deterministic inventory of a directory tree. */
 export type Inventory = InventoryEntry[];
+
+/** The inventory formats this engine can read and write. */
+export type InventoryVersion = 1 | 2;
 
 /**
  * Whether a path is inside a root. Containment is compared by path
@@ -150,21 +159,39 @@ function symlinkEntry(
 /**
  * Inventory a directory deterministically. Symlinks are followed only when
  * their resolved target stays inside the root; anything else is a refusal.
+ *
+ * Version 2 records each regular file's execute bit and every empty directory,
+ * both of which can change whether a staged payload still executes. Version 1
+ * is the historical format and is what every existing manifest and frozen root
+ * was written with: it records content only.
  * @param root The directory to inventory.
+ * @param options.version The inventory format; defaults to the historical 1.
  * @returns The sorted inventory or the first unsafe path.
+ * @param options.version The format to write.
  */
 export function inventory(
     root: string,
+    options: { version?: InventoryVersion } = {},
 ): { ok: true; entries: Inventory } | { ok: false; problem: string } {
+    const version = options.version ?? 1;
     if (!existsSync(root)) {
         return { ok: false, problem: `${root} does not exist` };
     }
     const realRoot = realpathSync(root);
     const entries: Inventory = [];
     const walk = (directory: string): string | null => {
-        for (const entry of readdirSync(directory, {
+        const members = readdirSync(directory, {
             withFileTypes: true,
-        }).sort((left, right) => left.name.localeCompare(right.name))) {
+        }).sort((left, right) => left.name.localeCompare(right.name));
+        if (version === 2 && members.length === 0 && directory !== realRoot) {
+            entries.push({
+                path: relative(realRoot, directory).split(sep).join("/"),
+                sha256: "",
+                kind: "directory",
+            });
+            return null;
+        }
+        for (const entry of members) {
             const path = join(directory, entry.name);
             const stat = lstatSync(path);
             if (stat.isSymbolicLink()) {
@@ -191,6 +218,9 @@ export function inventory(
                 path: relative(realRoot, path).split(sep).join("/"),
                 sha256: digest,
                 kind: "file",
+                ...(version === 2
+                    ? { executable: (stat.mode & 0o111) !== 0 }
+                    : {}),
             });
         }
         return null;
@@ -206,13 +236,15 @@ export function inventory(
 }
 
 /** The kind a legacy entry describes when the field is absent. */
-function kindOf(entry: InventoryEntry): "file" | "symlink" {
+function kindOf(entry: InventoryEntry): "file" | "symlink" | "directory" {
     return entry.kind ?? (entry.link === undefined ? "file" : "symlink");
 }
 
 /**
- * Compare one path's identity: kind, link target and content bytes. A link
- * retargeted to identical bytes is still a change.
+ * Compare one path's identity: kind, link target, content bytes and, when the
+ * frozen entry recorded it, the execute bit. A link retargeted to identical
+ * bytes is still a change; an execute bit that was never recorded is not a
+ * change, so historical inventories keep their original semantics.
  * @param path The relative path.
  * @param expected The frozen entry.
  * @param observed The current entry.
@@ -239,6 +271,15 @@ export function inventoryEntryDifferences(
     if (expected.sha256 !== observed.sha256) {
         problems.push(`changed ${path}`);
     }
+    if (
+        expected.executable !== undefined &&
+        observed.executable !== undefined &&
+        expected.executable !== observed.executable
+    ) {
+        problems.push(
+            `changed executable bit ${path} (${expected.executable ? "on" : "off"} -> ${observed.executable ? "on" : "off"})`,
+        );
+    }
     return problems;
 }
 
@@ -246,14 +287,17 @@ export function inventoryEntryDifferences(
  * Recheck an inventory against a directory.
  * @param root The directory to check.
  * @param expected The inventory that must still hold.
+ * @param options.version The inventory format the expected entries use; a
+ *   historical version 1 inventory keeps version 1 comparison semantics.
  * @returns The differences; empty means intact.
  */
 export function inventoryDifferences(
     root: string,
     expected: Inventory,
+    options: { version?: InventoryVersion } = {},
 ): string[] {
     if (!existsSync(root)) return ["directory is missing"];
-    const observed = inventory(root);
+    const observed = inventory(root, options);
     if (!observed.ok) return [observed.problem];
     const expectedMap = new Map(expected.map((entry) => [entry.path, entry]));
     const observedMap = new Map(
@@ -352,6 +396,9 @@ export function stageTree(
         if (!stat.isFile()) return `${from} is not a regular file`;
         mkdirSync(dirname(to), { recursive: true });
         copyFileSync(from, to);
+        // Child processes execute staged scripts and plugins; the copy must
+        // keep the executable bits that made the source runnable.
+        chmodSync(to, stat.mode & 0o777);
         return null;
     };
     const members =

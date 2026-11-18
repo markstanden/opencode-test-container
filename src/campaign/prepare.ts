@@ -90,6 +90,12 @@ export interface PreparedCase {
 export interface PreparedManifest {
     /** The schema version value. */
     schemaVersion: 1;
+    /**
+     * The inventory format these entries use. Version 2 records execute bits
+     * and empty directories; an absent field is a historical version 1
+     * manifest and is compared with version 1 semantics.
+     */
+    inventoryVersion?: 2;
     /** The campaign id value. */
     campaignId: string;
     /** The suite id value. */
@@ -388,7 +394,7 @@ function stageArm(
         }),
         inventory: [],
     };
-    const armInventory = inventory(destination);
+    const armInventory = inventory(destination, { version: 2 });
     if (!armInventory.ok) {
         problems.push(`arm ${arm.armId}: ${armInventory.problem}`);
         return null;
@@ -437,7 +443,7 @@ function stagePrimaryCheck(
         );
         return undefined;
     }
-    const stagedInventory = inventory(target);
+    const stagedInventory = inventory(target, { version: 2 });
     if (!stagedInventory.ok) {
         problems.push(
             `case ${testCase.caseId} primary check: ${stagedInventory.problem}`,
@@ -489,7 +495,7 @@ function stageCase(
         write(join(workspace, path), contents);
     }
     const primaryCheck = stagePrimaryCheck(testCase, suiteDir, root, problems);
-    const stagedWorkspace = inventory(workspace);
+    const stagedWorkspace = inventory(workspace, { version: 2 });
     if (!stagedWorkspace.ok) {
         problems.push(`case ${testCase.caseId}: ${stagedWorkspace.problem}`);
         return null;
@@ -574,6 +580,7 @@ export function prepareCampaign(
     );
     const manifest: PreparedManifest = {
         schemaVersion: 1,
+        inventoryVersion: 2,
         campaignId: bundle.campaign.campaignId,
         suiteId: bundle.suite.suiteId,
         campaignSha256: sha256Bytes(readFileSync(bundle.campaignPath)),
@@ -633,6 +640,7 @@ export function preparedDifferences(
     root: string,
     manifest: PreparedManifest,
 ): string[] {
+    const version = manifest.inventoryVersion === 2 ? 2 : 1;
     const problems: string[] = [];
     const suitePath = join(root, "prepare", "suite.json");
     if (!existsSync(suitePath)) {
@@ -651,6 +659,7 @@ export function preparedDifferences(
         for (const difference of inventoryDifferences(
             directory,
             arm.inventory,
+            { version },
         )) {
             problems.push(`subjects/${arm.armId}: ${difference}`);
         }
@@ -660,12 +669,13 @@ export function preparedDifferences(
         for (const difference of inventoryDifferences(
             workspace,
             testCase.workspace,
+            { version },
         )) {
             problems.push(`workspaces/${testCase.caseId}: ${difference}`);
         }
         const promptProblem = promptDifference(root, testCase);
         if (promptProblem !== null) problems.push(promptProblem);
-        problems.push(...primaryCheckDifferences(root, testCase));
+        problems.push(...primaryCheckDifferences(root, testCase, version));
     }
     return problems;
 }
@@ -683,10 +693,13 @@ function promptDifference(root: string, testCase: PreparedCase): string | null {
 function primaryCheckDifferences(
     root: string,
     testCase: PreparedCase,
+    version: 1 | 2,
 ): string[] {
     if (testCase.primaryCheck === undefined) return [];
     const checker = join(root, "prepare", testCase.primaryCheck.directory);
-    return inventoryDifferences(checker, testCase.primaryCheck.inventory).map(
+    return inventoryDifferences(checker, testCase.primaryCheck.inventory, {
+        version,
+    }).map(
         (difference) => `primary-checks/${testCase.caseId}: ${difference}`,
     );
 }
