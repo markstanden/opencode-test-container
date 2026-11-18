@@ -66,11 +66,32 @@ Totals: 6 trial + 5 judge + 1 exhausted scripted chat requests, 0 readiness
 probes, 0 paid provider calls.
 
 The 0.2.0 run also pads the `useful-write` authored truth so its blinded packet
-exceeds 128 KiB, then asserts the scripted provider received the padding marker
-in a chat request body. That proves the packet travelled on stdin: with the
-packet as one argv element the container launch would fail before any request.
+exceeds 128 KiB, then extracts the provider's user-message bytes and compares
+their SHA-256 with the registered packet on disk. Exact equality — not a marker
+and not a size threshold — proves the packet travelled on stdin unchanged: with
+the packet as one argv element the container launch would fail before any
+request.
 The exhausted root now runs `otc assess` before judging, as eligibility
 requires, and still refuses the recovery after one judge chat request.
+
+## Installed sharding recipe (`rehearsals/sharding.mts`)
+
+The installed-tarball rehearsal also runs the documented two-root recipe through
+the installed `otc` binary and the shipped scripted provider: the nine-slot
+repetitions campaign is prepared and frozen twice, shard A runs three slots and
+shard B the other six, both are assessed, closed and analysed, and the installed
+`rates.mjs` merges the two reports.
+
+Recorded 2026-11-18 on image `sha256:361245f24c5a…`, installed version `0.2.0`:
+
+- each root's `report.json` lists all **9** slots (3 and 6 executed, the rest
+  `unrun`), which is the overlap a shard naturally produces;
+- the merge reconciles by slot id: **9** merged rows, each executed once;
+- output rows: positive `3/3` valid with `3/3` activation and `3/3` pass;
+  both negatives `3/3` valid with `0/3` activation and `3/3` pass;
+- merging shard A with itself exits 2 with
+  `slot pos-r0 was executed in more than one shard (valid and valid)`;
+- 12 scripted provider requests, 0 paid calls.
 
 ## Installed tarball (`npm run rehearse:installed`)
 

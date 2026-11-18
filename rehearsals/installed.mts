@@ -102,7 +102,11 @@ function installedRehearsal(
     binary: string,
     work: string,
     consumer: string,
-): { receipt: Record<string, unknown>; identity: Record<string, unknown> } {
+): {
+    receipt: Record<string, unknown>;
+    identity: Record<string, unknown>;
+    installedRoot: string;
+} {
     const rehearsal = run(
         process.execPath,
         [join(HERE, "fresh-docs.mts"), work],
@@ -152,7 +156,43 @@ function installedRehearsal(
             status: statusTool,
             artifact,
         },
+        installedRoot,
     };
+}
+
+/** Run the installed-package sharding recipe and return its receipt. */
+function installedSharding(
+    binary: string,
+    installedRoot: string,
+    work: string,
+): Record<string, unknown> {
+    mkdirSync(work, { recursive: true });
+    const rehearsal = run(
+        process.execPath,
+        [join(HERE, "sharding.mts"), work],
+        REPO,
+        {
+            OTC_CLI: binary,
+            OTC_PKG: installedRoot,
+            OTC_KEEP_REHEARSAL: "1",
+            ...(process.env.OTC_IMAGE === undefined
+                ? {}
+                : { OTC_IMAGE: process.env.OTC_IMAGE }),
+        },
+    );
+    if (rehearsal.status !== 0) {
+        throw new Error(
+            `installed sharding rehearsal failed:\n${rehearsal.stdout}\n${rehearsal.stderr}`,
+        );
+    }
+    const receiptPath = join(work, "sharding-receipt.json");
+    if (!existsSync(receiptPath)) {
+        throw new Error("installed sharding rehearsal wrote no receipt");
+    }
+    return JSON.parse(readFileSync(receiptPath, "utf8")) as Record<
+        string,
+        unknown
+    >;
 }
 
 /** The main proof. */
@@ -163,12 +203,18 @@ function main(): void {
     try {
         const installed = packAndInstall(root, consumer);
         const rehearsal = installedRehearsal(installed.binary, work, consumer);
+        const sharding = installedSharding(
+            installed.binary,
+            rehearsal.installedRoot,
+            join(root, "sharding work"),
+        );
         const proof = {
             schemaVersion: 1,
             consumer,
             installed,
             identity: rehearsal.identity,
             rehearsal: rehearsal.receipt,
+            sharding,
         };
         writeFileSync(
             join(root, "installed-rehearsal.json"),

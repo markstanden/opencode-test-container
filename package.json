@@ -37,7 +37,8 @@
         "rehearse:offline": "npm run build && node rehearsals/offline.mts",
         "rehearse:fresh-docs": "npm run build && node rehearsals/fresh-docs.mts",
         "rehearse:installed": "npm run build && node rehearsals/installed.mts",
-        "test:smoke": "npm run build && node rehearsals/smoke/main.mts"
+        "test:smoke": "npm run build && node rehearsals/smoke/main.mts",
+        "rehearse:sharding": "npm run build && node rehearsals/sharding.mts"
     },
     "devDependencies": {
         "@types/node": "^26.6.4",

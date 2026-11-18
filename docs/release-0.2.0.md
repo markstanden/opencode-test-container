@@ -49,12 +49,16 @@ contains #3 (evidence boundaries and the real-container smoke suite) and #4
 
 ### Lifecycle
 
-- **Cancellation boundaries.** An already-aborted signal spawns nothing.
+- **Cancellation boundaries.** An already-aborted signal is refused before
+  `spawn`: the process adapter and the container adapter return without
+  creating a child or invoking Podman.
   Cancelling one slot starts no later slot, releases only claims that provably
   never dispatched, and leaves in-flight evidence accounted for.
 - **Pre-dispatch refusals are retriable.** A preparation or planning refusal
   removes only that invocation's provisional root, trial directory or judge
-  attempt, so a corrected invocation can retry at the same path.
+  attempt, so a corrected invocation can retry at the same path. `prepare`
+  creates missing parents first, then claims the final directory exclusively,
+  so a fresh nested root still works and a competing caller still loses.
 - **Staging overlap is refused.** A root inside a fixture (or containing an
   input) fails before anything is created; a pre-existing root is never
   removed.
@@ -85,7 +89,9 @@ contains #3 (evidence boundaries and the real-container smoke suite) and #4
 
 The full blinded packet is streamed on stdin instead of the process argument
 vector. Packets above the host's 128 KiB single-argument limit are delivered
-intact, and no packet content appears in argv.
+intact, and no packet content appears in argv. The rehearsal compares the
+provider's user-message bytes with the registered packet by SHA-256, not by a
+marker, so a truncated or reordered delivery fails the proof.
 
 ### Evaluators and packaging
 
@@ -97,8 +103,10 @@ intact, and no packet content appears in argv.
   types, plus the shared judge eligibility types. `readAssessments` remains
   exported and is documented as deprecated; the installed-ESM test imports the
   replacement from the package root.
-- Shipped `examples/reporting/rates.mjs` accepts several disjoint shard reports
-  and refuses duplicate slots or a campaign mismatch before rates.
+- Shipped `examples/reporting/rates.mjs` accepts several shard reports and
+  reconciles them: every root lists the whole frozen schedule, so an all-unrun
+  slot is kept once, a slot executed in exactly one shard takes that row, and
+  a slot executed in two shards is refused. Campaign mismatches are refused.
 
 ## Migration notes for 0.1.1 users
 
@@ -140,12 +148,13 @@ A hash cannot be written here: this file ships inside the tarball, so adding
 the hash would change the artefact it describes.
 
 Local gates on the candidate head: `npm ci`, `npm test` (816 tests),
-`npm run typecheck`, `npm run test:coverage` (all OTC 92.2/82.3/93.6; new
-lifecycle 90.5/79.4/92.4; migrated analysis 95.5/90.1/95.7), `defined comply`
-(compliant, no repairs on a clean clone), installed-tarball rehearsal,
-real rootless Podman smoke (13/13 cases, 34 scripted requests, image
-`sha256:e7dfd7dd57a6…`), fresh-docs rehearsal with a >128 KiB blind packet
-delivered on stdin, and the skills/docs offline rehearsal.
+`npm run typecheck`, `npm run test:coverage`, `defined comply` (compliant, no
+repairs on a clean clone), installed-tarball rehearsal, real rootless Podman
+smoke (13/13 cases, 34 scripted requests, image `sha256:e7dfd7dd57a6…`),
+fresh-docs rehearsal with a >128 KiB blind packet whose provider message
+matches the registered packet hash, the installed-package sharding recipe
+(two roots, 9 merged rows, 3/3 per case, duplicate execution refused), and the
+skills/docs offline rehearsal.
 
 The exact head, PR and CI links are recorded in the PR handback. Nothing here
 asserts a published artefact.
