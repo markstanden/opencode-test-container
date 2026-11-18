@@ -129,12 +129,12 @@ the 0.1.1 README shipped with that version.
 These facts describe the candidate tarball built from the PR head. They are
 **not** registry evidence.
 
-| Fact                | Value                                                                |
-| ------------------- | -------------------------------------------------------------------- |
-| `npm pack` filename | `markstanden-opencode-test-container-0.2.0.tgz`                      |
-| Package version     | `0.2.0`, `engines.node: ">=26"`                                       |
-| Shipped assets      | `dist/`, `container/`, `examples/`, `docs/`, `README.md`, `LICENSE`  |
-| Tarball identity    | recorded in the PR handback and recomputed from the final PR head    |
+| Fact                | Value                                                               |
+| ------------------- | ------------------------------------------------------------------- |
+| `npm pack` filename | `markstanden-opencode-test-container-0.2.0.tgz`                     |
+| Package version     | `0.2.0`, `engines.node: ">=26"`                                     |
+| Shipped assets      | `dist/`, `container/`, `examples/`, `docs/`, `README.md`, `LICENSE` |
+| Tarball identity    | recorded in the PR handback and recomputed from the final PR head   |
 
 A hash cannot be written here: this file ships inside the tarball, so adding
 the hash would change the artefact it describes.
