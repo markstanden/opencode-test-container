@@ -6,7 +6,7 @@ claim it cannot support. Start with the one that costs nothing.
 | Recipe                                                                 | Provider          | Establishes                                                     |
 | ---------------------------------------------------------------------- | ----------------- | --------------------------------------------------------------- |
 | [`scripted-skill-activation.md`](scripted-skill-activation.md)         | scripted loopback | OTC's staging, capture and scoring work end to end              |
-| [`trigger-rate-with-repetitions.md`](trigger-rate-with-repetitions.md) | real route        | How often a description triggers, per case                      |
+| [`trigger-rate-with-repetitions.md`](trigger-rate-with-repetitions.md) | real route        | Activation and criterion pass rates, per case and arm           |
 | [`before-after-instructions.md`](before-after-instructions.md)         | real route        | Whether changed always-loaded guidance changes behaviour        |
 | [`docs-recording.md`](docs-recording.md)                               | scripted or real  | Whether the docs plugin records or refuses correctly            |
 | [`docs-judge.md`](docs-judge.md)                                       | real judge model  | A semantic documentation judgement beside the deterministic one |
@@ -32,7 +32,8 @@ Every recipe uses the same lifecycle:
 otc validate --campaign <campaign.json>
 otc prepare  --campaign <campaign.json> --root <root>
 otc freeze   --root <root>
-otc run      --root <root>            # --dry-run first if the plan is new
+otc run      --root <root> --dry-run  # needs the freeze above; plans only
+otc run      --root <root>
 otc assess   --root <root>
 otc close    --root <root>
 otc analyse  --root <root> --out <fresh-report-dir>

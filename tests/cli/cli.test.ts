@@ -285,6 +285,47 @@ describe("packaged consumer", () => {
                 true,
                 "installed CLI wrote the analysis",
             );
+
+            // The shipped rate summariser must run from the installed tarball,
+            // with no repository path, against a report in the consumer cwd.
+            const ratesReport = join(consumer, "rates-report.json");
+            const quiet = (index: number) => ({
+                slotId: `near-r${String(index)}`,
+                caseId: "negative-near-miss",
+                armId: "skill-only",
+                repetitionId: `r${String(index)}`,
+                expected: "no-activation",
+                observed: "no-invocation",
+                validity: "valid",
+                outcome: "pass",
+            });
+            writeFileSync(
+                ratesReport,
+                `${JSON.stringify({ slots: [quiet(0), quiet(1), quiet(2)] })}\n`,
+                "utf8",
+            );
+            const rates = spawnSync(
+                process.execPath,
+                [
+                    join(
+                        consumer,
+                        "node_modules",
+                        "@markstanden",
+                        "opencode-test-container",
+                        "examples",
+                        "reporting",
+                        "rates.mjs",
+                    ),
+                    ratesReport,
+                ],
+                { cwd: consumer, encoding: "utf8" },
+            );
+            assert.equal(rates.status, 0, rates.stderr);
+            assert.match(
+                rates.stdout,
+                /\| negative-near-miss \| skill-only \| no-activation \| 3\/3 \| 0\/3 \| 3\/3 \|/,
+                "the installed summariser did not report activation and pass separately",
+            );
         } finally {
             rmSync(consumer, { recursive: true, force: true });
             rmSync(stage, { recursive: true, force: true });
