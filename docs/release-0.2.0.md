@@ -140,8 +140,8 @@ A hash cannot be written here: this file ships inside the tarball, so adding
 the hash would change the artefact it describes.
 
 Local gates on the candidate head: `npm ci`, `npm test` (816 tests),
-`npm run typecheck`, `npm run test:coverage` (all OTC 92.1/82.2/93.6; new
-lifecycle 90.4/79.3/92.4; migrated analysis 95.5/90.1/95.7), `defined comply`
+`npm run typecheck`, `npm run test:coverage` (all OTC 92.2/82.3/93.6; new
+lifecycle 90.5/79.4/92.4; migrated analysis 95.5/90.1/95.7), `defined comply`
 (compliant, no repairs on a clean clone), installed-tarball rehearsal,
 real rootless Podman smoke (13/13 cases, 34 scripted requests, image
 `sha256:e7dfd7dd57a6…`), fresh-docs rehearsal with a >128 KiB blind packet
