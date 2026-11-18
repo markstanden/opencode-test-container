@@ -154,6 +154,17 @@ export async function runContainer(
     plan: ContainerPlan,
     run: typeof runCommand = runCommand,
 ): Promise<CommandResult> {
+    if (plan.signal?.aborted === true) {
+        // No container exists yet; skip Podman entirely, including cleanup.
+        return {
+            status: null,
+            signal: null,
+            stdout: "",
+            stderr: "",
+            timedOut: false,
+            error: "not started: signal already aborted",
+        };
+    }
     const problems = mountProblems(plan.mounts);
     if (problems.length > 0) {
         return {

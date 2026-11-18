@@ -125,6 +125,18 @@ export function runCommand(
     args: readonly string[],
     options: CommandOptions = {},
 ): Promise<CommandResult> {
+    // Cancellation before launch must not create a child at all. Checking
+    // after `spawn` would still pay for process creation and exec.
+    if (options.signal?.aborted === true) {
+        return Promise.resolve({
+            status: null,
+            signal: null,
+            stdout: "",
+            stderr: "",
+            timedOut: false,
+            error: "not started: signal already aborted",
+        });
+    }
     const timeoutMs = options.timeoutMs ?? 120_000;
     const maxBuffer = options.maxBuffer ?? 64 * 1024 * 1024;
     return new Promise((resolvePromise) => {

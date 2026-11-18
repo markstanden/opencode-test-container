@@ -172,3 +172,26 @@ describe("stdin transport", () => {
         assert.equal(result.timedOut, false);
     });
 });
+
+describe("pre-launch cancellation", () => {
+    it("does not attempt to spawn a child for an already-aborted signal", async () => {
+        // Arrange: a missing executable distinguishes an attempted spawn
+        // (ENOENT) from never reaching spawn at all.
+        const controller = new AbortController();
+        controller.abort();
+
+        // Act
+        const result = await runCommand(
+            "/definitely/not/an/otc-binary",
+            ["--version"],
+            { signal: controller.signal, timeoutMs: 5_000 },
+        );
+
+        // Assert
+        assert.equal(result.error, "not started: signal already aborted");
+        assert.equal(result.status, null);
+        assert.equal(result.signal, null);
+        assert.equal(result.timedOut, false);
+    });
+
+});
