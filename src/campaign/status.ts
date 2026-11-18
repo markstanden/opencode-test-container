@@ -4,6 +4,7 @@ import type { LifecycleState } from "../contracts/types.ts";
 import { loadPreparedManifest } from "./prepare.ts";
 import { deliveryCheck, loadFrozen } from "./freeze.ts";
 import { readLedger, trialStarts } from "./ledger.ts";
+import { judgeStateOf } from "./eligibility.ts";
 import { checkedAssessments } from "../evidence/assessments.ts";
 import { admissionLockStatus } from "./admission.ts";
 import {
@@ -108,10 +109,15 @@ function lifecycleStateOf(options: {
 function judgementOf(
     root: string,
     manifest: StatusManifest,
+    ledger: ReturnType<typeof readLedger>,
+    assessments: ReturnType<typeof checkedAssessments>["records"],
 ): StatusReport["judgement"] {
     if (manifest.campaign.assessment.judge === undefined) return null;
     const policy = policyOf(manifest);
     const slots = manifest.campaign.schedule.slots;
+    const assessmentsBySlot = new Map(
+        assessments.map((entry) => [entry.slotId, entry]),
+    );
     let judged = 0;
     let pending = 0;
     let failed = 0;
@@ -126,7 +132,7 @@ function judgementOf(
                 attempt.judgementStatus === "invalid-verdict" ||
                 attempt.judgementStatus === "judge-error",
         ).length;
-        const checked = policy.ok
+        const selection = policy.ok
             ? checkedSelection({
                   root,
                   manifest,
@@ -134,24 +140,28 @@ function judgementOf(
                   policy: policy.policy,
               })
             : { ok: false as const, problems: policy.problems };
-        if (checked.ok) {
-            judged += 1;
-        } else if (existsSync(selectionPathOf(root, slot.slotId))) {
-            problems.push(
-                ...checked.problems.map(
-                    (problem) => `${slot.slotId}: ${problem}`,
-                ),
-            );
-        } else if (
-            existsSync(join(trialDirectory(root, slot.slotId), "meta.json"))
+        const state = judgeStateOf({
+            manifest,
+            slot,
+            trialRecorded: existsSync(
+                join(trialDirectory(root, slot.slotId), "meta.json"),
+            ),
+            assessment: assessmentsBySlot.get(slot.slotId),
+            selectionPresent: existsSync(selectionPathOf(root, slot.slotId)),
+            selection: selection.ok
+                ? { ok: true, problems: [] }
+                : { ok: false, problems: selection.problems },
+            attempts: recorded,
+        });
+        if (state.code === "judged") judged += 1;
+        else if (state.code === "terminal-failures") failed += 1;
+        else if (state.code === "pending") pending += 1;
+        else if (
+            state.code === "selection-conflict" ||
+            state.code === "selection-missing" ||
+            state.code === "unsettled"
         ) {
-            const terminal = recorded.some(
-                (attempt) =>
-                    attempt.judgementStatus === "invalid-verdict" ||
-                    attempt.judgementStatus === "judge-error",
-            );
-            if (terminal) failed += 1;
-            else pending += 1;
+            problems.push(`${slot.slotId}: ${state.reason}`);
         }
     }
     const unsettled = ["trial", "judge", "recovery"].reduce(
@@ -430,7 +440,12 @@ export function statusOf(root: string): StatusReport {
     );
     const assessments = assessmentView(root, manifest, ledger);
     const frozen = frozenView(root);
-    const judgement = judgementOf(root, manifest);
+    const judgement = judgementOf(
+        root,
+        manifest,
+        ledger,
+        assessments.records,
+    );
     const problems = [
         ...(ledger.state === "malformed" ? ledger.problems : []),
         ...assessments.problems,

@@ -21,6 +21,7 @@ import { readClaims } from "../../src/campaign/budget.ts";
 import { readLedger } from "../../src/campaign/ledger.ts";
 import type { CommandResult } from "../../src/adapters/process.ts";
 import type { ContainerPlan } from "../../src/adapters/podman/container.ts";
+import { docsCallEvent, writeJournal } from "../support/docs-trial.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SKILLS = join(HERE, "..", "fixtures", "skill-basic");
@@ -98,10 +99,16 @@ function docs(calls: { judge: number; trial: number }) {
             };
         }
         calls.trial += 1;
+        const slot = plan.labels?.["otc.slot"] ?? "";
+        if (slot === "useful-write") writeJournal(plan, "ses_retry");
         return {
             status: 0,
             signal: null,
-            stdout: `${textEvent("Nothing to record.")}\n`,
+            stdout: `${
+                slot === "useful-write"
+                    ? `${docsCallEvent("ses_retry")}\n`
+                    : ""
+            }${textEvent("Nothing to record.")}\n`,
             stderr: "",
             timedOut: false,
             error: null,

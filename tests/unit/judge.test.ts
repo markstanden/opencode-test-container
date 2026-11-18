@@ -1,6 +1,6 @@
 import { after, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import {
     cpSync,
     existsSync,
@@ -85,13 +85,68 @@ function flagValue(plan: ContainerPlan, flag: string): string {
     return plan.argv[index + 1] ?? "";
 }
 
+/** The docs call one useful trial makes, as an OpenCode tool event. */
+function docsCallEvent(): string {
+    return JSON.stringify({
+        type: "tool_use",
+        sessionID: "ses_test",
+        messageID: "msg_text",
+        part: {
+            type: "tool",
+            id: "call_1",
+            tool: "docs",
+            state: {
+                status: "completed",
+                input: { add: { mode: "create" } },
+                output: "repo:notes/otel.md — created.",
+            },
+        },
+    });
+}
+
 /** A scripted trial stream for one slot. */
 function trialStream(slotId: string): string {
-    return `${textEvent(
+    const call = slotId === "useful-write" ? `${docsCallEvent()}\n` : "";
+    return `${call}${textEvent(
         slotId === "useful-write"
             ? "Recorded the convention."
             : "Renamed the variable.",
     )}\n`;
+}
+
+/** Write the signed operation journal for a useful trial. */
+function writeJournal(plan: ContainerPlan): void {
+    const journal = mountSource(plan, "/journal");
+    const key = readFileSync(
+        join(dirname(journal), "journal-key.txt"),
+        "utf8",
+    ).trim();
+    const record = {
+        schemaVersion: 1,
+        tool: "docs",
+        surface: "native",
+        status: "completed",
+        input: { add: { mode: "create" } },
+        result: {
+            content: "created",
+            metadata: {
+                written: true,
+                lake: "repo",
+                path: "notes/otel.md",
+            },
+        },
+        sessionID: "ses_test",
+        messageID: "msg_text",
+        callID: "call_1",
+    };
+    const mac = createHmac("sha256", key)
+        .update(JSON.stringify(record), "utf8")
+        .digest("hex");
+    writeFileSync(
+        join(journal, "docs-operations.jsonl"),
+        `${JSON.stringify({ ...record, mac })}\n`,
+        "utf8",
+    );
 }
 
 /** A judgement payload. */
@@ -132,7 +187,9 @@ function container(options: {
             options.record?.push(`${slotId}/${attemptId}`);
             const response =
                 options.judgeResponses?.(slotId, attemptId) ??
-                judgement(slotId === "useful-write" ? "useful-create" : "none");
+                judgement(
+                    slotId.includes("useful") ? "useful-create" : "none",
+                );
             return {
                 status: 0,
                 signal: null,
@@ -145,7 +202,7 @@ function container(options: {
         const slotId =
             ["useful-write", "restraint", "primary-failure"].find((id) =>
                 title.endsWith(`-${id}`),
-            ) ?? "";
+            ) ?? (title.includes("useful") ? "useful-write" : "");
         if (slotId === "useful-write") {
             const workspace = mountSource(plan, "/workspace");
             mkdirSync(join(workspace, "docs", "notes"), { recursive: true });
@@ -154,6 +211,7 @@ function container(options: {
                 "# OpenTelemetry note\n\nName spans after the operation.\n",
                 "utf8",
             );
+            writeJournal(plan);
         }
         return {
             status: 0,
@@ -532,7 +590,9 @@ describe("blind docs judge", () => {
         assert.equal(
             closed.ok
                 ? false
-                : closed.problems.some((problem) => /unjudged/.test(problem)),
+                : closed.problems.some((problem) =>
+                      /unresolved/.test(problem),
+                  ),
             true,
         );
     });

@@ -23,6 +23,10 @@ import { assessCampaign } from "../../src/campaign/assess.ts";
 import { judgeCampaign } from "../../src/campaign/judge.ts";
 import { runCommand, type CommandResult } from "../../src/adapters/process.ts";
 import type { ContainerPlan } from "../../src/adapters/podman/container.ts";
+import {
+    docsCallEvent,
+    writeJournal,
+} from "../support/docs-trial.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DOCS = join(HERE, "..", "fixtures", "docs-campaign");
@@ -283,7 +287,8 @@ describe("stop-policy execution", () => {
                 };
             }
             const title = plan.argv[plan.argv.indexOf("--title") + 1] ?? "";
-            if (title.endsWith("-useful-write")) {
+            const useful = title.endsWith("-useful-write");
+            if (useful) {
                 const mount = plan.mounts.find(
                     (entry) => entry.target === "/workspace",
                 );
@@ -297,11 +302,14 @@ describe("stop-policy execution", () => {
                     "# OpenTelemetry\n\nName spans after the operation.\n",
                     "utf8",
                 );
+                writeJournal(plan, "ses_stop");
             }
             return {
                 status: 0,
                 signal: null,
-                stdout: `${textEvent("Done.")}\n`,
+                stdout: `${
+                    useful ? `${docsCallEvent("ses_stop")}\n` : ""
+                }${textEvent("Done.")}\n`,
                 stderr: "",
                 timedOut: false,
                 error: null,
@@ -339,6 +347,8 @@ describe("stop-policy execution", () => {
             { slotIds: selection },
             { runContainer: trial },
         );
+        await assessCampaign(stop.root);
+        await assessCampaign(legacy.root);
         const v2 = await judgeCampaign(
             stop.root,
             { slotIds: selection },

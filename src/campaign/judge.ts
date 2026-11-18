@@ -79,6 +79,8 @@ import {
 } from "../evidence/containment.ts";
 import { randomBytes } from "node:crypto";
 import { appendLedgerEvent, readLedger } from "./ledger.ts";
+import { judgeStateOf, type JudgeStateCode } from "./eligibility.ts";
+import { checkedAssessments } from "../evidence/assessments.ts";
 import { isAdverseOutcome, judgeShouldStop } from "./stop-policy.ts";
 import { withAdmission } from "./admission.ts";
 import {
@@ -884,6 +886,7 @@ function judgeState(
           manifest: PreparedManifest;
           frozen: FrozenRecord;
           policy: RecoveryPolicy | null;
+          ledger: ReturnType<typeof readLedger>;
       }
     | { ok: false; problems: string[] } {
     const prepared = loadPreparedManifest(root);
@@ -924,6 +927,7 @@ function judgeState(
         manifest: prepared.manifest,
         frozen: frozen.record,
         policy: policy.policy,
+        ledger,
     };
 }
 
@@ -1007,6 +1011,10 @@ async function dispatchAttempt(options: {
     claims: DispatchClaims;
     execute: (plan: ContainerPlan) => Promise<CommandResult>;
     now: () => string;
+    /** Publish the per-slot selection inside the same terminal critical section. */
+    publishSelection?: (
+        attempt: RecordedAttempt,
+    ) => { ok: true } | { ok: false; problems: string[] };
 }): Promise<
     { ok: true; attempt: RecordedAttempt } | { ok: false; problem: string }
 > {
@@ -1120,54 +1128,74 @@ async function dispatchAttempt(options: {
         timedOut: result.timedOut,
         captureProblems: outcome.captureProblems,
     };
-    storeAttempt({
-        attemptDir: planned.attemptDir,
-        meta,
-        result,
-        outcome,
-        usage: outcome.usage,
-    });
-    advanceClaim(spawned.judge, "closed", {
-        note: outcome.status,
-        stamp: options.slot.slotId,
+    const attempt: RecordedAttempt = {
         attemptId: options.attemptId,
-    });
-    if (spawned.recovery !== undefined) {
-        advanceClaim(spawned.recovery, "closed", {
+        meta,
+        facts: {
+            attemptId: options.attemptId,
+            judgementStatus: outcome.status,
+            packetSha256: options.packetSha256,
+            failureClass: outcome.failureClass,
+            complete: outcome.complete,
+        },
+    };
+    // Terminal publication is one critical section: attempt evidence, claim
+    // closure, the ledger event and (for a usable verdict) the selection land
+    // together, so a concurrent close sees either the open claim or the whole
+    // terminal state, never a judged verdict with no selection.
+    const published = withAdmission(options.root, () => {
+        storeAttempt({
+            attemptDir: planned.attemptDir,
+            meta,
+            result,
+            outcome,
+            usage: outcome.usage,
+        });
+        advanceClaim(spawned.judge, "closed", {
             note: outcome.status,
             stamp: options.slot.slotId,
             attemptId: options.attemptId,
         });
-    }
-    appendLedgerEvent(
-        options.root,
-        {
-            event: "judge-attempt",
-            campaignId: options.manifest.campaignId,
-            slotId: options.slot.slotId,
-            attemptId: options.attemptId,
-            judgementStatus: outcome.status,
-            failureClass: outcome.failureClass,
-            packetSha256: options.packetSha256,
-            complete: outcome.complete,
-            exit: result.status,
-        },
-        completedAt,
-    );
-    return {
-        ok: true,
-        attempt: {
-            attemptId: options.attemptId,
-            meta,
-            facts: {
+        if (spawned.recovery !== undefined) {
+            advanceClaim(spawned.recovery, "closed", {
+                note: outcome.status,
+                stamp: options.slot.slotId,
+                attemptId: options.attemptId,
+            });
+        }
+        appendLedgerEvent(
+            options.root,
+            {
+                event: "judge-attempt",
+                campaignId: options.manifest.campaignId,
+                slotId: options.slot.slotId,
                 attemptId: options.attemptId,
                 judgementStatus: outcome.status,
-                packetSha256: options.packetSha256,
                 failureClass: outcome.failureClass,
+                packetSha256: options.packetSha256,
                 complete: outcome.complete,
+                exit: result.status,
             },
-        },
-    };
+            completedAt,
+        );
+        return options.publishSelection === undefined ||
+            outcome.status !== "judged"
+            ? { ok: true as const }
+            : options.publishSelection(attempt);
+    });
+    if (!published.ok) {
+        return {
+            ok: false,
+            problem: `terminal judge publication was refused: ${published.problem}`,
+        };
+    }
+    if (!published.value.ok) {
+        return {
+            ok: false,
+            problem: `the judgement could not be selected: ${published.value.problems.join("; ")}`,
+        };
+    }
+    return { ok: true, attempt };
 }
 
 /** Resolve one slot's case, prepared payload and judge model. */
@@ -1197,8 +1225,10 @@ function resolveCase(
         : { testCase, prepared, judgeModel: judge.model };
 }
 
-/** Record a checked selection and its ledger event. */
-function recordSelection(options: {
+/** Record a checked selection and its ledger event. The caller holds the
+ * admission lock, so selection, claim and attempt evidence publish as one
+ * terminal state. */
+function publishSelection(options: {
     root: string;
     manifest: PreparedManifest;
     slot: Slot;
@@ -1221,6 +1251,18 @@ function recordSelection(options: {
         options.now(),
     );
     return { ok: true };
+}
+
+/** Record a checked selection under the admission lock. */
+function recordSelection(
+    options: Parameters<typeof publishSelection>[0],
+): { ok: true } | { ok: false; problems: string[] } {
+    const admitted = withAdmission(options.root, () =>
+        publishSelection(options),
+    );
+    return admitted.ok
+        ? admitted.value
+        : { ok: false, problems: [admitted.problem] };
 }
 
 /** One checked per-slot selection and the evidence it names. */
@@ -1889,22 +1931,6 @@ function ensurePacket(
         : { problem: frozen.problem };
 }
 
-/** Store the usable judgement and return the slot's terminal result. */
-function settleJudged(options: {
-    root: string;
-    manifest: PreparedManifest;
-    slot: Slot;
-    attempts: RecordedAttempt[];
-    selectedAttemptId: string;
-    policy: RecoveryPolicy | null;
-    now: () => string;
-}): { status: "judged" | "refused"; problems: string[] } {
-    const selected = recordSelection(options);
-    return selected.ok
-        ? { status: "judged", problems: [] }
-        : { status: "refused", problems: selected.problems };
-}
-
 /** Dispatch and recover for one ready slot. */
 async function executeAttempts(options: {
     root: string;
@@ -1951,21 +1977,25 @@ async function executeAttempts(options: {
             claims: claimed.claims,
             execute: options.execute,
             now: options.now,
+            publishSelection: (attempt) =>
+                publishSelection({
+                    root: options.root,
+                    manifest: options.manifest,
+                    slot: options.slot,
+                    attempts: [...attempts, attempt],
+                    selectedAttemptId: attempt.attemptId,
+                    policy: options.policy,
+                    now: options.now,
+                }),
         });
         if (!dispatched.ok) {
             return { status: "refused", problems: [dispatched.problem] };
         }
         attempts = [...attempts, dispatched.attempt];
         if (dispatched.attempt.meta.judgementStatus === "judged") {
-            return settleJudged({
-                root: options.root,
-                manifest: options.manifest,
-                slot: options.slot,
-                attempts,
-                selectedAttemptId: claimed.attemptId,
-                policy: options.policy,
-                now: options.now,
-            });
+            // The selection was published with the attempt, under the same
+            // admission lock, so the slot is already terminal.
+            return { status: "judged", problems: [] };
         }
         if (options.policy === null) return lastFailure(options.slot, attempts);
     }
@@ -1990,6 +2020,53 @@ async function judgeSlot(options: {
     const recorded = recordedAttempts(options.root, options.slot.slotId);
     if (recorded.problems.length > 0) {
         return { status: "refused", problems: recorded.problems };
+    }
+    const assessment = checkedAssessments({
+        root: options.root,
+        manifest: options.manifest,
+        ledger: readLedger(options.root),
+    }).records.find((entry) => entry.slotId === options.slot.slotId);
+    const selection = checkedSelection({
+        root: options.root,
+        manifest: options.manifest,
+        slot: options.slot,
+        policy: options.policy,
+    });
+    const eligibility = judgeStateOf({
+        manifest: options.manifest,
+        slot: options.slot,
+        trialRecorded: existsSync(
+            join(trialDirectory(options.root, options.slot.slotId), "meta.json"),
+        ),
+        assessment,
+        selectionPresent: existsSync(
+            selectionPath(options.root, options.slot.slotId),
+        ),
+        selection: selection.ok
+            ? { ok: true, problems: [] }
+            : { ok: false, problems: selection.problems },
+        attempts: recorded.attempts.map((entry) => entry.meta),
+    });
+    const blocking: readonly JudgeStateCode[] = [
+        "not-declared",
+        "not-docs",
+        "unrun",
+        "assessment-missing",
+        "assessment-untrustworthy",
+        "assessment-invalid",
+        "assessment-unknown",
+        "selection-conflict",
+        "unsettled",
+    ];
+    if (blocking.includes(eligibility.code)) {
+        return { status: "refused", problems: [eligibility.reason] };
+    }
+    if (
+        options.dryRun &&
+        eligibility.code === "terminal-failures" &&
+        options.policy === null
+    ) {
+        return { status: "refused", problems: [eligibility.reason] };
     }
     const settled = settleExisting({ ...options, attempts: recorded.attempts });
     if (settled !== null) return settled;
@@ -2058,6 +2135,81 @@ function judgeSlots(
     });
 }
 
+/** Eligibility states that must stop the whole judge invocation before spend. */
+const BLOCKING_STATES: readonly JudgeStateCode[] = [
+    "not-declared",
+    "not-docs",
+    "assessment-missing",
+    "assessment-untrustworthy",
+    "assessment-invalid",
+    "assessment-unknown",
+    "selection-conflict",
+    "unsettled",
+];
+
+/** Whether a decision blocks any paid dispatch in this invocation. */
+function blocksSpend(code: JudgeStateCode): boolean {
+    return BLOCKING_STATES.includes(code);
+}
+
+/**
+ * Pre-flight every selected slot before any claim or dispatch. A missing or
+ * untrustworthy assessment, an inconsistent selection or an unsettled attempt
+ * anywhere in the selection means zero paid attempts for the whole invocation:
+ * a judge run either works from trustworthy evidence or does not spend.
+ */
+function judgePreflight(options: {
+    root: string;
+    manifest: PreparedManifest;
+    policy: RecoveryPolicy | null;
+    slots: readonly Slot[];
+}): { slotId: string; reason: string }[] {
+    const ledger = readLedger(options.root);
+    const assessments = new Map(
+        checkedAssessments({
+            root: options.root,
+            manifest: options.manifest,
+            ledger,
+        }).records.map((entry) => [entry.slotId, entry]),
+    );
+    return options.slots.flatMap((slot) => {
+        const recorded = recordedAttempts(options.root, slot.slotId);
+        const selection = checkedSelection({
+            root: options.root,
+            manifest: options.manifest,
+            slot,
+            policy: options.policy,
+        });
+        const state = judgeStateOf({
+            manifest: options.manifest,
+            slot,
+            trialRecorded: existsSync(
+                join(
+                    trialDirectory(options.root, slot.slotId),
+                    "meta.json",
+                ),
+            ),
+            assessment: assessments.get(slot.slotId),
+            selectionPresent: existsSync(
+                selectionPath(options.root, slot.slotId),
+            ),
+            selection: selection.ok
+                ? { ok: true, problems: [] }
+                : { ok: false, problems: selection.problems },
+            attempts: recorded.attempts.map((entry) => entry.meta),
+        });
+        if (recorded.problems.length > 0) {
+            return recorded.problems.map((problem) => ({
+                slotId: slot.slotId,
+                reason: problem,
+            }));
+        }
+        return blocksSpend(state.code)
+            ? [{ slotId: slot.slotId, reason: state.reason }]
+            : [];
+    });
+}
+
 /**
  * Judge every selected slot from checked evidence. A usable selection is
  * idempotent; a complete `json-syntax` failure is recovered once when a policy
@@ -2086,6 +2238,24 @@ export async function judgeCampaign(
         };
     }
     const manifest = state.manifest;
+    const selected = judgeSlots(manifest, options.slotIds);
+    const blocked = judgePreflight({
+        root,
+        manifest,
+        policy: state.policy,
+        slots: selected,
+    });
+    if (blocked.length > 0) {
+        return {
+            ok: false,
+            judged: [],
+            skipped: [],
+            refused: [...new Set(blocked.map((entry) => entry.slotId))],
+            problems: blocked.map(
+                (entry) => `slot ${entry.slotId}: ${entry.reason}`,
+            ),
+        };
+    }
     const execute = deps.runContainer ?? runContainer;
     const now = deps.now ?? (() => new Date().toISOString());
     const tally = await judgeInOrder({
@@ -2093,7 +2263,7 @@ export async function judgeCampaign(
         manifest,
         frozen: state.frozen,
         policy: state.policy,
-        slots: judgeSlots(manifest, options.slotIds),
+        slots: selected,
         dryRun: options.dryRun === true,
         execute,
         now,

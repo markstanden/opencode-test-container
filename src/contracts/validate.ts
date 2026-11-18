@@ -1229,6 +1229,15 @@ function assessmentComposition(
     kind: AssessmentKind,
     problems: string[],
 ): Pick<Campaign["assessment"], "judge" | "recovery"> | null {
+    if (value.judge !== undefined && kind !== "docs-recording") {
+        // A judge grades docs evidence. Declaring one alongside the
+        // deterministic skill evaluator is a configuration error, not a
+        // campaign that quietly refuses every slot at judge time.
+        problems.push(
+            "campaign.assessment.judge is only supported for docs-recording",
+        );
+        return null;
+    }
     const recovery =
         value.recovery === undefined
             ? undefined

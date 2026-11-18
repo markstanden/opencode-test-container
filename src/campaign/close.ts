@@ -8,10 +8,13 @@ import {
     policyOf,
     readJudgeAttempts,
 } from "./judge.ts";
+import { judgeStateOf } from "./eligibility.ts";
+import type { RecoveryPolicy } from "../evaluators/docs/analysis/recovery.ts";
 import { readClaims } from "./budget.ts";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { withAdmission } from "./admission.ts";
+import { selectionPath } from "../evidence/paths.ts";
 
 /** Unsettled spend claims that must stop closure, or an empty list. */
 function unsettledClaims(root: string): string[] {
@@ -28,31 +31,54 @@ function unsettledClaims(root: string): string[] {
     );
 }
 
-/** Completed slots with neither a selected judgement nor a terminal failure. */
-function unjudgedCompleted(
+/**
+ * Completed slots whose judgement state closure may not accept.
+ *
+ * The shared eligibility decision keeps the intended distinctions: a checked
+ * selection satisfies closure, the declared all-terminal-failures policy
+ * accepts a slot whose attempts all ended without a verdict, and an
+ * inconsistent selection — or a usable verdict with no selection — is a
+ * conflict that is reported, never silently accepted because an earlier
+ * attempt failed.
+ */
+function unresolvedJudgements(
     root: string,
     manifest: PreparedManifest,
+    ledger: ReturnType<typeof readLedger>,
     completed: ReadonlySet<string>,
+    policy: RecoveryPolicy | null,
 ): string[] {
     if (manifest.campaign.assessment.judge === undefined) return [];
-    const policy = policyOf(manifest);
+    const assessments = new Map(
+        checkedAssessments({ root, manifest, ledger }).records.map((entry) => [
+            entry.slotId,
+            entry,
+        ]),
+    );
     return manifest.campaign.schedule.slots.flatMap((slot) => {
         if (!completed.has(slot.slotId)) return [];
-        const checked = policy.ok
-            ? checkedSelection({
-                  root,
-                  manifest,
-                  slot,
-                  policy: policy.policy,
-              })
-            : { ok: false as const, problems: policy.problems };
-        if (checked.ok) return [];
-        const terminal = readJudgeAttempts(root, slot.slotId).some(
-            (attempt) =>
-                attempt.judgementStatus === "invalid-verdict" ||
-                attempt.judgementStatus === "judge-error",
-        );
-        return terminal ? [] : [slot.slotId];
+        const selection = checkedSelection({
+            root,
+            manifest,
+            slot,
+            policy,
+        });
+        const state = judgeStateOf({
+            manifest,
+            slot,
+            trialRecorded: true,
+            assessment: assessments.get(slot.slotId),
+            selectionPresent: existsSync(selectionPath(root, slot.slotId)),
+            selection: selection.ok
+                ? { ok: true, problems: [] }
+                : { ok: false, problems: selection.problems },
+            attempts: readJudgeAttempts(root, slot.slotId),
+        });
+        return state.satisfied
+            ? []
+            : [
+                  `slot ${slot.slotId} judgement is unresolved: ${state.reason}; closure would hide the conflict`,
+              ];
     });
 }
 
@@ -122,11 +148,15 @@ function closureRefusals(
     }
     const policy = policyOf(manifest);
     if (!policy.ok) return policy.problems;
-    const pending = unjudgedCompleted(root, manifest, ended);
-    return pending.length > 0
-        ? [
-              `unjudged completed slot(s): ${pending.join(", ")}; run otc judge before closure`,
-          ]
+    const judgementConflicts = unresolvedJudgements(
+        root,
+        manifest,
+        ledger,
+        ended,
+        policy.policy,
+    );
+    return judgementConflicts.length > 0
+        ? ["judgement evidence is unresolved", ...judgementConflicts]
         : [];
 }
 
