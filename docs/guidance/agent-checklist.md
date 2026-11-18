@@ -15,10 +15,12 @@ is a result whose claim matches its evidence.
    `primaryCheck.directory` exists, with the right base — see
    [`docs/schema.md`](../schema.md) § Path bases. A fixture is relative to the
    suite, not the campaign.
-4. **Check spend.** `budgets.trials` may not exceed the slot count.
-   `timeoutMs` should sit above the slowest trial you have seen; a timeout is
-   invalid evidence. For a real route, estimate requests per trial, not per
-   campaign.
+4. **Check spend and repetitions.** `budgets.trials` may not exceed the slot
+   count. `timeoutMs` should sit above the slowest trial you have seen; a timeout
+   is invalid evidence. For a real route, estimate requests per trial, not per
+   campaign. Choose the repetition count before `prepare`: two repetitions only
+   for a scripted fixture; three for a real model unless the budget forbids it,
+   and record that compromise.
 5. **Check the provider.** A scripted route needs its loopback server listening
    and `network: "host"`. A real route needs a real `provider/model`, an overlay
    for routing only, and credential **names** in `passthroughEnv`. No secret
@@ -43,9 +45,6 @@ is a result whose claim matches its evidence.
     [`docs/schema.md`](../schema.md) and the campaign instead.
 11. **Dispatch.** `otc run --root <root>`, then inspect the materialised trial
     workspace under `evidence/trials/<slotId>/workspace/`.
-12. **Pick the repetition count.** Use two repetitions only for a scripted
-    fixture; use three for a real model unless the budget forbids it, and record
-    that compromise.
 
 ## After the run
 
