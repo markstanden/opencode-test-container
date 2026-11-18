@@ -6,9 +6,12 @@ An isolated test sandbox for OpenCode plugins, skills and agent instructions.
 scheduled slot in a Podman sandbox through the real OpenCode CLI, executes the
 product's primary check, assesses the captured evidence deterministically,
 optionally dispatches an arm-blind judge, closes the ledger and renders a
-report. The judge is the only model call OTC makes; a campaign either uses a
-scripted loopback provider (offline) or the host provider route the runtime
-declares (potentially paid).
+report. A trial is a real agent run: OpenCode may make several provider
+requests, so the trial budget bounds agent work, not necessarily billing. The
+deterministic assessment and evidence replay make no model call; the optional
+judge is one additional, separately budgeted model call. A campaign either uses
+a scripted loopback provider (no credentials, no paid requests) or the host
+provider route the runtime declares (potentially paid).
 
 ```sh
 npm install --global @markstanden/opencode-test-container
@@ -34,20 +37,48 @@ does not need a checkout, `tsx` or Bun.
 A minimal skill-only campaign needs no docs plugin, no knowledge lake and no
 judge. See [`examples/skills`](examples/skills).
 
-## Quick start (offline, no provider call)
+## Quick start
+
+Three lanes, ordered by what they cost.
+
+### Validate and plan — no provider dispatch
 
 ```sh
 otc validate --campaign examples/skills/campaign.json
 otc prepare  --campaign examples/skills/campaign.json --root /tmp/otc-run
 otc freeze   --root /tmp/otc-run
-otc run      --root /tmp/otc-run --dry-run   # inspect the plan, no dispatch
+otc run      --root /tmp/otc-run --dry-run   # verify the plan, no dispatch
+otc status   --root /tmp/otc-run --json
+```
+
+`run --dry-run` builds and validates each selected slot's plan and lists the
+slots it would dispatch; nothing is dispatched, so no OpenCode process and no
+provider request exist. Validation success only proves the configuration is
+well formed, not that the experiment measures what you intend — see
+[`docs/guidance/choose-what-youre-measuring.md`](docs/guidance/choose-what-youre-measuring.md).
+The guidance entry point is [`docs/guidance/README.md`](docs/guidance/README.md).
+
+### Scripted execution — real containers, local provider
+
+```sh
 otc run      --root /tmp/otc-run             # real Podman + OpenCode
 otc judge    --root /tmp/otc-run             # optional blind judge, if declared
 otc assess   --root /tmp/otc-run             # deterministic, zero judge calls
 otc close    --root /tmp/otc-run
 otc analyse  --root /tmp/otc-run --out /tmp/otc-report
-otc status   --root /tmp/otc-run --json
 ```
+
+These trials dispatch the real OpenCode CLI, but the provider is a scripted
+loopback server, so no credential is read and no paid request is made. The
+example expects that server at `127.0.0.1:8799`; start it before `run` — see
+[`examples/skills`](examples/skills).
+
+### Real-provider execution — potentially paid
+
+Point `runtime.provider.overlay` at your route and name the credential in
+`passthroughEnv`. Each trial can then make several provider requests: budget
+`budgets.trials` and `timeoutMs` from measured cost, not from
+`judgeAttempts`.
 
 `status` is read-only: it does not build images, probe providers, repair files
 or dispatch. Its next actions are derived from the manifest and checked
@@ -96,15 +127,11 @@ claim.
 {
     "schemaVersion": 1,
     "campaignId": "skills-local",
-    "suite": { "path": "suite.json", "sha256": "<optional pinned hash>" },
+    "suite": { "path": "suite.json" },
     "subjects": [
         {
             "armId": "skill-only",
             "skills": [{ "id": "otel-helper", "path": "skills/otel-helper" }],
-            "plugins": [{ "id": "docs", "path": "/abs/path/to/plugin" }],
-            "instructions": [
-                { "id": "overlay", "path": "AGENTS.md", "as": "AGENTS.md" },
-            ],
         },
     ],
     "schedule": {
@@ -120,21 +147,35 @@ claim.
     },
     "runtime": {
         "image": "localhost/otc-sandbox:2.2.6",
-        "imageId": "sha256:…",
         "opencodeVersion": "2.2.6",
         "provider": {
             "route": "scripted",
-            "model": "vendor/model",
-            "overlay": {},
+            "model": "zai-coding-plan/glm-5.3-flash",
+            "overlay": {
+                "providers": {
+                    "zai-coding-plan": {
+                        "settings": { "baseURL": "http://127.0.0.1:8799/v1" },
+                    },
+                },
+            },
         },
-        "timeoutMs": 180000,
+        "timeoutMs": 120000,
         "network": "host",
-        "passthroughEnv": ["PROVIDER_API_KEY"],
+        "passthroughEnv": ["ZAI_API_KEY"],
     },
-    "budgets": { "trials": 1, "judgeAttempts": 2 },
+    "budgets": { "trials": 1, "judgeAttempts": 0 },
     "assessment": { "kind": "skill-activation" },
 }
 ```
+
+The shipped [`examples/skills/campaign.json`](examples/skills/campaign.json)
+uses this shape with three cases. The model names a real catalogue provider
+whose base URL the overlay rewrites to the loopback fixture; `ZAI_API_KEY` is
+a placeholder value that never reaches the real service. Optional fields —
+plugin subjects, instruction overlays, `imageId` pinning, docs `primaryCheck`,
+judge and recovery declarations — are specified in
+[`docs/schema.md`](docs/schema.md). Keep this sample runnable and add optional
+fields only when the experiment needs them.
 
 A docs campaign may declare a judge and a narrow recovery registration:
 
@@ -155,14 +196,17 @@ A docs campaign may declare a judge and a narrow recovery registration:
 }
 ```
 
-`judgeAttempts` counts dispatches, not HTTP requests. Each attempt is claimed
-durably before it starts; a reserved or spawned claim keeps consuming budget.
-"none" in `network` is the only true no-egress mode; without `judgeAttempts`
-a campaign makes no model call of its own.
+`judgeAttempts` counts judge dispatches, not HTTP requests, and does not bound
+the provider requests the OpenCode run inside each trial may make. Each attempt
+is claimed durably before it starts; a reserved or spawned claim keeps
+consuming budget. "none" in `network` is the only true no-egress mode; without
+`judgeAttempts` OTC schedules no judge call of its own, and trials still
+dispatch OpenCode.
 
 Subject sources may be local paths; they are copied into
 `prepare/subjects/<armId>` before dispatch. Relative paths resolve against the
-campaign document. Symlinks escaping a source root, path collisions and
+campaign document (the full base table is in
+[`docs/schema.md`](docs/schema.md#path-bases)). Symlinks escaping a source
 unreadable inventories are refused. Only the staged payload is mounted — never
 the whole OTC repository, the complete subject repository, other cases, truth
 or rubric data.

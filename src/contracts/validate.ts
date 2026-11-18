@@ -483,6 +483,50 @@ function docsCase(
     };
 }
 
+/** Fields each case kind accepts; any other field is a configuration bug. */
+const CASE_FIELDS: Record<SuiteCase["kind"], readonly string[]> = {
+    "skill-trigger": [
+        "caseId",
+        "kind",
+        "prompt",
+        "fixture",
+        "files",
+        "targetSkillId",
+        "expected",
+        "contamination",
+        "allowMissingTarget",
+    ],
+    "docs-task": [
+        "caseId",
+        "kind",
+        "prompt",
+        "fixture",
+        "files",
+        "expectedDocs",
+        "criterion",
+        "guardrails",
+        "lakeRoot",
+        "truth",
+        "primaryCheck",
+    ],
+};
+
+/** Reject fields the declared case kind does not accept. */
+function unknownCaseFieldProblems(
+    record: Record<string, unknown>,
+    kind: SuiteCase["kind"],
+    where: string,
+    problems: string[],
+): void {
+    for (const field of Object.keys(record)) {
+        if (!CASE_FIELDS[kind].includes(field)) {
+            problems.push(
+                `${where} has unexpected field "${field}" for a ${kind} case`,
+            );
+        }
+    }
+}
+
 /** Parse one discriminated suite case. */
 function suiteCaseOf(
     value: unknown,
@@ -493,9 +537,14 @@ function suiteCaseOf(
         problems.push(`${where} must be an object`);
         return null;
     }
-    if (value.kind === "skill-trigger")
+    if (value.kind === "skill-trigger") {
+        unknownCaseFieldProblems(value, "skill-trigger", where, problems);
         return skillCase(value, where, problems);
-    if (value.kind === "docs-task") return docsCase(value, where, problems);
+    }
+    if (value.kind === "docs-task") {
+        unknownCaseFieldProblems(value, "docs-task", where, problems);
+        return docsCase(value, where, problems);
+    }
     problems.push(`${where}.kind must be "skill-trigger" or "docs-task"`);
     return null;
 }

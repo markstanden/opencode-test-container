@@ -1,5 +1,5 @@
 /**
- * Core real-container smoke suite (S01-S12).
+ * Core real-container smoke suite (S01-S13).
  *
  * Runs the installed tarball's CLI and shipped adapters against a fresh image
  * built from the packaged Containerfile. A loopback scripted provider serves
@@ -8,7 +8,13 @@
  * This command is deliberately separate from `npm test`: ordinary tests stay
  * hermetic, while this one requires rootless Podman.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+    cpSync,
+    existsSync,
+    mkdirSync,
+    readFileSync,
+    writeFileSync,
+} from "node:fs";
 import { spawn } from "node:child_process";
 import { connect } from "node:net";
 import { join } from "node:path";
@@ -1316,6 +1322,288 @@ async function s12(): Promise<string> {
     return "status blocked; closure and reporting refused the tampered record";
 }
 
+/** Start the shipped examples provider and wait until it answers health. */
+async function exampleProvider(
+    port: number,
+    planPath: string,
+): Promise<{
+    chatRequests: () => Promise<number>;
+    close: () => Promise<void>;
+}> {
+    const serverPath = join(
+        consumer,
+        "node_modules",
+        "@markstanden",
+        "opencode-test-container",
+        "examples",
+        "provider",
+        "server.mjs",
+    );
+    const child = spawn(
+        process.execPath,
+        [serverPath, "--port", String(port), "--plan", planPath],
+        { stdio: ["ignore", "pipe", "pipe"] },
+    );
+    let stderr = "";
+    child.stderr.on("data", (chunk: Buffer) => {
+        stderr += String(chunk);
+    });
+    const exited = new Promise<void>((done) => {
+        child.once("exit", () => done());
+    });
+    const deadline = Date.now() + 10_000;
+    let ready = false;
+    while (Date.now() < deadline) {
+        if (child.exitCode !== null) {
+            throw new Error(`example provider exited early: ${stderr.trim()}`);
+        }
+        try {
+            const response = await fetch(`http://127.0.0.1:${port}/health`);
+            if (response.ok) {
+                ready = true;
+                break;
+            }
+        } catch {
+            // Not listening yet; poll again.
+        }
+        await new Promise((again) => setTimeout(again, 100));
+    }
+    if (!ready) {
+        child.kill("SIGKILL");
+        throw new Error(
+            `example provider did not become ready: ${stderr.trim()}`,
+        );
+    }
+    return {
+        chatRequests: async () => {
+            const response = await fetch(`http://127.0.0.1:${port}/health`);
+            return ((await response.json()) as { chatRequests: number })
+                .chatRequests;
+        },
+        close: async () => {
+            child.kill("SIGTERM");
+            await Promise.race([
+                exited,
+                new Promise<void>((done) => setTimeout(done, 5_000)),
+            ]);
+        },
+    };
+}
+
+/** One slot's expected checked assessment from the shipped example suite. */
+async function expectExampleSlot(
+    root: string,
+    slotId: string,
+    observed: string,
+): Promise<void> {
+    const assessment = readJson<{
+        observed: string;
+        outcome: string;
+        validity: string;
+    }>(join(root, "evidence", "assessments", `${slotId}.json`));
+    expect(
+        assessment.validity === "valid",
+        `${slotId} validity was ${assessment.validity}`,
+    );
+    expect(
+        assessment.observed === observed,
+        `${slotId} observed ${assessment.observed}, expected ${observed}`,
+    );
+    expect(
+        assessment.outcome === "pass",
+        `${slotId} outcome was ${assessment.outcome}`,
+    );
+}
+
+/** The last non-null finish reason from one streamed provider response. */
+async function streamedFinish(port: number, prompt: string): Promise<string> {
+    const response = await fetch(
+        `http://127.0.0.1:${port}/v1/chat/completions`,
+        {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+                model: "probe",
+                stream: true,
+                messages: [{ role: "user", content: prompt }],
+            }),
+        },
+    );
+    const text = await response.text();
+    const reasons = [...text.matchAll(/"finish_reason":"([a-z_]+)"/g)].map(
+        (match) => match[1] ?? "",
+    );
+    return reasons.at(-1) ?? "none";
+}
+
+/** The five-slot repetition schedule used by the first S13 campaign. */
+const s13Slots = [
+    ["pos-r0", "positive-instrument", "r0"],
+    ["pos-r1", "positive-instrument", "r1"],
+    ["pos-r2", "positive-instrument", "r2"],
+    ["unrelated-r0", "negative-unrelated", "r0"],
+    ["near-r0", "negative-near-miss", "r0"],
+] as const;
+
+async function s13(): Promise<string> {
+    const base = join(work, "s13");
+    const examples = join(base, "examples");
+    cpSync(
+        join(
+            consumer,
+            "node_modules",
+            "@markstanden",
+            "opencode-test-container",
+            "examples",
+        ),
+        examples,
+        { recursive: true },
+    );
+    const skills = join(examples, "skills");
+    const campaignPath = join(skills, "campaign.json");
+    const campaign = readJson<{
+        schedule: { slots: Array<Record<string, string>> };
+        budgets: { trials: number; judgeAttempts: number };
+        runtime: {
+            image: string;
+            provider: {
+                overlay: {
+                    providers: Record<
+                        string,
+                        { settings: { baseURL: string } }
+                    >;
+                };
+            };
+        };
+    }>(campaignPath);
+    const borrowed = await heldPort();
+    const port = borrowed.port;
+    await borrowed.close();
+    const live = await exampleProvider(
+        port,
+        join(skills, "provider-plan.json"),
+    );
+    const neutral = join(base, "consumer-cwd");
+    mkdirSync(neutral, { recursive: true });
+    try {
+        // Streamed turns must close with the reason the client expects: a tool
+        // call is not a finished text answer.
+        expect(
+            (await streamedFinish(
+                port,
+                "Instrument the checkout service with OpenTelemetry spans.",
+            )) === "tool_calls",
+            "a streamed tool turn did not finish with tool_calls",
+        );
+        expect(
+            (await streamedFinish(
+                port,
+                "Rename the local variable total to subtotal.",
+            )) === "stop",
+            "a streamed text turn did not finish with stop",
+        );
+
+        campaign.runtime.image = imageTag;
+        campaign.runtime.provider.overlay.providers[
+            "zai-coding-plan"
+        ]!.settings.baseURL = `http://127.0.0.1:${port}/v1`;
+        campaign.schedule.slots = s13Slots.map(
+            ([slotId, caseId, repetitionId]) => ({
+                slotId,
+                caseId,
+                armId: "skill-only",
+                repetitionId,
+            }),
+        );
+        campaign.budgets.trials = s13Slots.length;
+        writeFileSync(
+            campaignPath,
+            `${JSON.stringify(campaign, null, 2)}\n`,
+            "utf8",
+        );
+
+        const root = join(base, "root");
+        await otcMust(
+            env,
+            binary,
+            ["prepare", "--campaign", campaignPath, "--root", root],
+            neutral,
+        );
+        await otcMust(env, binary, ["freeze", "--root", root], neutral);
+        const beforeFirst = await live.chatRequests();
+        await otcMust(env, binary, ["run", "--root", root], neutral);
+        const afterFirst = await live.chatRequests();
+        await otcMust(env, binary, ["assess", "--root", root], neutral);
+
+        for (const [slotId, caseId] of s13Slots) {
+            await expectExampleSlot(
+                root,
+                slotId,
+                caseId === "positive-instrument"
+                    ? "target-activation"
+                    : "no-invocation",
+            );
+        }
+        const fixture = readFileSync(
+            join(
+                root,
+                "evidence",
+                "trials",
+                "pos-r0",
+                "workspace",
+                "package.json",
+            ),
+            "utf8",
+        );
+        expect(
+            fixture.includes("checkout-service"),
+            "the suite-relative fixture did not reach the trial workspace",
+        );
+
+        // Every positive slot is an independent conversation: the second and
+        // third identical prompts must still start with a skill call.
+        const expectedFirst = 3 * 2 + 2;
+        const firstDelta = afterFirst - beforeFirst;
+        expect(
+            firstDelta === expectedFirst,
+            `first campaign made ${String(firstDelta)} chat requests, expected ${String(expectedFirst)}`,
+        );
+
+        // A fresh campaign against the same running provider must not inherit
+        // the first campaign's progression.
+        const secondRoot = join(base, "root-second");
+        await otcMust(
+            env,
+            binary,
+            ["prepare", "--campaign", campaignPath, "--root", secondRoot],
+            neutral,
+        );
+        await otcMust(env, binary, ["freeze", "--root", secondRoot], neutral);
+        const beforeSecond = await live.chatRequests();
+        await otcMust(
+            env,
+            binary,
+            ["run", "--root", secondRoot, "--slot", "pos-r0,unrelated-r0"],
+            neutral,
+        );
+        const afterSecond = await live.chatRequests();
+        await otcMust(env, binary, ["assess", "--root", secondRoot], neutral);
+        await expectExampleSlot(secondRoot, "pos-r0", "target-activation");
+        await expectExampleSlot(secondRoot, "unrelated-r0", "no-invocation");
+        const secondDelta = afterSecond - beforeSecond;
+        expect(
+            secondDelta === 3,
+            `second campaign made ${String(secondDelta)} chat requests, expected 3`,
+        );
+
+        const total = firstDelta + secondDelta;
+        providerUsed += total;
+        return `shipped provider served ${String(total)} chat request(s) across two campaigns: three identical positives each activated, negatives restrained, all assessed valid and passing`;
+    } finally {
+        await live.close();
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Run
 // ---------------------------------------------------------------------------
@@ -1334,6 +1622,7 @@ try {
     await testCase("S10", "timeout and cancellation cleanup", s10);
     await testCase("S11", "isolation of successive attempts", s11);
     await testCase("S12", "evidence tampering and safe reporting", s12);
+    await testCase("S13", "shipped examples end to end", s13);
 } catch (error) {
     record(
         "setup",
@@ -1388,6 +1677,6 @@ try {
     console.log(
         `smoke: ${results.length - failed.length}/${results.length} case(s) passed; ${providerUsed} scripted inference request(s); image ${imageId}`,
     );
-    const expected = wanted?.length ?? 12;
+    const expected = wanted?.length ?? 13;
     process.exit(failed.length === 0 && results.length === expected ? 0 : 1);
 }

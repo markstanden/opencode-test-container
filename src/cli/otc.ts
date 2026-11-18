@@ -103,7 +103,7 @@ Options:
   --help              This text
 
 Examples:
-  otc validate --campaign examples/skills/otel-skill-container.json
+  otc validate --campaign examples/skills/campaign.json
   otc prepare --campaign campaign.json --root /tmp/otc-run
   otc freeze --root /tmp/otc-run
   otc run --root /tmp/otc-run --dry-run

@@ -15,6 +15,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { freezeCampaign, loadFrozen } from "../../src/campaign/freeze.ts";
 import { prepareCampaign } from "../../src/campaign/prepare.ts";
+import { loadCampaignBundle } from "../../src/contracts/validate.ts";
 import { runCampaign } from "../../src/campaign/run.ts";
 import { assessCampaign } from "../../src/campaign/assess.ts";
 import { closeCampaign } from "../../src/campaign/close.ts";
@@ -197,6 +198,76 @@ describe("campaign lifecycle", () => {
             assert.deepEqual(summary.ran, ["s1", "s2", "s3"]);
             assert.equal(treeSnapshot(join(root, "evidence")), beforeRun);
         });
+    });
+
+    it("runs the documented pre-dispatch sequence in order", async () => {
+        const ordered = fixtureCampaign();
+        try {
+            const validated = loadCampaignBundle(ordered.campaignPath);
+            assert.equal(
+                validated.ok,
+                true,
+                validated.ok ? "" : validated.problems.join("; "),
+            );
+            const freshRoot = join(ordered.dir, "ordered-root");
+            const prepared = prepareCampaign(ordered.campaignPath, freshRoot);
+            assert.equal(
+                prepared.ok,
+                true,
+                prepared.ok ? "" : prepared.problems.join("; "),
+            );
+            assert.equal(
+                existsSync(
+                    join(
+                        freshRoot,
+                        "prepare",
+                        "workspaces",
+                        "positive-instrument",
+                    ),
+                ),
+                true,
+            );
+            const frozen = await freezeCampaign(freshRoot, fakeImage as never);
+            assert.equal(
+                frozen.ok,
+                true,
+                frozen.ok ? "" : frozen.problems.join("; "),
+            );
+            const dry = await runCampaign(
+                freshRoot,
+                { dryRun: true },
+                {
+                    runContainer: async () => {
+                        throw new Error("dry run started a container");
+                    },
+                },
+            );
+            assert.equal(dry.ok, true, dry.problems.join("; "));
+            const dispatched = await runCampaign(
+                freshRoot,
+                { slotIds: ["s1"] },
+                {
+                    runContainer: async (plan) => ({
+                        status: 0,
+                        signal: null,
+                        stdout: streamFor(slotOf(plan)),
+                        stderr: "",
+                        timedOut: false,
+                        error: null,
+                    }),
+                },
+            );
+            assert.equal(dispatched.ok, true, dispatched.problems.join("; "));
+            assert.equal(
+                existsSync(
+                    join(freshRoot, "evidence", "trials", "s1", "workspace"),
+                ),
+                true,
+                "the materialised trial workspace should exist after dispatch",
+            );
+        } finally {
+            rmSync(ordered.dir, { recursive: true, force: true });
+        }
     });
 
     it("runs every slot through the injected container adapter", async () => {

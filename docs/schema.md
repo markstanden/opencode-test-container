@@ -34,6 +34,32 @@ is rendered as `r<N>` only at the adapter boundary.
 `docs-task` cases may also carry `truth` (arm-blind judge context) and `primaryCheck: { id, directory, script, timeoutMs? }`. The checker directory
 is staged under `prepare/primary-checks/<caseId>`; the fixed contract is
 `node /checker/<script> /live /pristine`. It is never mounted into the trial.
+A `skill-trigger` case has no primary check: the validator rejects
+`primaryCheck` there rather than ignoring it.
+
+## Path bases
+
+Relative paths resolve against different documents by field; there is no
+single "campaign-relative" rule.
+
+| Field                                                            | Resolves against                         |
+| ---------------------------------------------------------------- | ---------------------------------------- |
+| `suite.path`                                                     | the campaign document                    |
+| subject `skills[].path`, `plugins[].path`, `instructions[].path` | the campaign document                    |
+| case `fixture`                                                   | the suite document                       |
+| `primaryCheck.directory`                                         | the suite document                       |
+| case `files` keys                                                | the trial workspace root                 |
+| instruction `as`                                                 | a destination inside the trial workspace |
+
+Trial workspace construction order is fixture, then inline `files`, then arm
+instructions. Instructions are copied last and a target that already exists is
+refused with `instruction <id> collides with <as>`. Inline `files` are written
+before the instructions, so a `files` entry cannot supersede a colliding arm
+instruction. For an arm-specific `AGENTS.md`, leave the destination out of both
+the fixture and `files` and let the instruction supply it; a fixture or inline
+`AGENTS.md` is valid only when no arm instruction targets it. A different
+filename avoids the collision but is not automatically loaded by OpenCode as
+project context.
 
 A campaign `assessment` may carry `judge: { model, timeoutMs? }` and
 `recovery` (the narrow registration in `analysis/recovery.ts`). Judge and

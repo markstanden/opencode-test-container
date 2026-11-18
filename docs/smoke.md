@@ -24,20 +24,21 @@ iterating locally.
 
 ## Cases
 
-| ID  | Scenario                           | Boundary proved                                                                   |
-| --- | ---------------------------------- | --------------------------------------------------------------------------------- |
-| S01 | Packaged build, arbitrary consumer | Installed CLI/help/version; fresh image from the packaged recipe; freeze identity |
-| S02 | Skill, instruction and plugin      | Real instruction reaches the provider; real plugin tool dispatch with options     |
-| S03 | Ordinary lifecycle                 | prepare → freeze → run → assess → idempotent assess → close → status → report     |
-| S04 | Trial filesystem policy            | Workspace/tmp writable; subjects/config/root denied; uid, caps, no-new-privileges |
-| S05 | Host filesystem isolation          | Absolute host path denied; control mount readable; escaping link refused on host  |
-| S06 | Primary-checker isolation          | Live/pristine/checker read-only; no provider credentials; no host network         |
-| S07 | Judge sandbox policy               | Packet readable, work writable, config/packet read-only, no subjects/evidence     |
-| S08 | Explicit network-none boundary     | `network: none` cannot reach a live host listener; host-network control can       |
-| S09 | Capture and provider failures      | Truncated and provider-error streams never become passing evidence                |
-| S10 | Timeout cleanup                    | Owned timed-out container removed within the grace period; control survives       |
-| S11 | Successive-attempt isolation       | A later attempt inherits no workspace canary or ambient session state             |
-| S12 | Tampering and report destinations  | Tampered assessment blocks status/close/report; protected destinations refused    |
+| ID  | Scenario                           | Boundary proved                                                                                                                                                                 |
+| --- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| S01 | Packaged build, arbitrary consumer | Installed CLI/help/version; fresh image from the packaged recipe; freeze identity                                                                                               |
+| S02 | Skill, instruction and plugin      | Real instruction reaches the provider; real plugin tool dispatch with options                                                                                                   |
+| S03 | Ordinary lifecycle                 | prepare → freeze → run → assess → idempotent assess → close → status → report                                                                                                   |
+| S04 | Trial filesystem policy            | Workspace/tmp writable; subjects/config/root denied; uid, caps, no-new-privileges                                                                                               |
+| S05 | Host filesystem isolation          | Absolute host path denied; control mount readable; escaping link refused on host                                                                                                |
+| S06 | Primary-checker isolation          | Live/pristine/checker read-only; no provider credentials; no host network                                                                                                       |
+| S07 | Judge sandbox policy               | Packet readable, work writable, config/packet read-only, no subjects/evidence                                                                                                   |
+| S08 | Explicit network-none boundary     | `network: none` cannot reach a live host listener; host-network control can                                                                                                     |
+| S09 | Capture and provider failures      | Truncated and provider-error streams never become passing evidence                                                                                                              |
+| S10 | Timeout cleanup                    | Owned timed-out container removed within the grace period; control survives                                                                                                     |
+| S11 | Successive-attempt isolation       | A later attempt inherits no workspace canary or ambient session state                                                                                                           |
+| S12 | Tampering and report destinations  | Tampered assessment blocks status/close/report; protected destinations refused                                                                                                  |
+| S13 | Shipped examples end to end        | Installed examples provider drives three identical positive slots (independent conversations), both negatives, the suite-relative fixture and a second campaign through the CLI |
 
 The suite prints one `PASS`/`FAIL` line per case and a JSON receipt (source
 SHA, working-tree state, tarball SHA-256, versions, image ID, case details and
@@ -51,7 +52,7 @@ requests, not readiness probes.
 - Host networking is not provider-only isolation. Only S08 exercises the
   explicit `network: none` boundary.
 - S04–S08 use shipped adapter-level plans and probes, not the full CLI. S01–
-  S03 and S09–S12 use the installed CLI.
+  S03 and S09–S13 use the installed CLI.
 - A cold build and a cached-layer run take different wall-clock time. The
   recipe does not claim byte-reproducible rebuilds; it records the resolved
   image ID instead.

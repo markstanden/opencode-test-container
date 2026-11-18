@@ -1,0 +1,11 @@
+{
+    "name": "checkout-service",
+    "version": "1.4.0",
+    "private": true,
+    "bin": {
+        "checkout": "./src/checkout.ts"
+    },
+    "scripts": {
+        "start": "node src/checkout.ts"
+    }
+}
