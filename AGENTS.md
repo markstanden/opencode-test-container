@@ -48,7 +48,8 @@ that claims to calculate.
 
 ## Testing
 
-- Node's runner, `node --test`; assertions from `node:assert/strict`.- Tests are `.ts` and import `src/**/*.ts` directly under Node
+- Node's runner, `node --test`; assertions from `node:assert/strict`.
+- Tests are `.ts` and import `src/**/*.ts` directly under Node
   type-stripping; `tsc` rewrites extensions only when building `dist/`.
 - Hermetic: `mkdtempSync` directories, test-owned process fixtures, no ambient
   Git config, no network, no credentials, no real Podman/OpenCode in `npm test`.
