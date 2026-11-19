@@ -32,14 +32,17 @@ import {
 import {
     CONTAINER_CONFIG_HOME,
     CONTAINER_JOURNAL,
-    CONTAINER_SUBJECTS,
     CONTAINER_WORKSPACE,
-    normaliseMounts,
     ownedContainerName,
     runContainer,
     type ContainerPlan,
-    type Mount,
 } from "../adapters/podman/container.ts";
+import {
+    buildTrialPlan,
+    type TrialPlanValues,
+} from "./plan.ts";
+export { buildTrialPlan };
+export type { TrialPlanValues };
 import type { CommandResult } from "../adapters/process.ts";
 import { deliveryCheck, loadFrozen, type FrozenRecord } from "./freeze.ts";
 import { stageTree } from "./inventory.ts";
@@ -243,40 +246,6 @@ function stageSkills(
     return problems;
 }
 
-/** The mounts for one trial. */
-function trialMounts(options: {
-    workspace: string;
-    configHome: string;
-    subjects: string;
-    journal: string | null;
-}): Mount[] {
-    const mounts: Mount[] = [
-        {
-            source: options.workspace,
-            target: CONTAINER_WORKSPACE,
-            readOnly: false,
-        },
-        {
-            source: options.configHome,
-            target: CONTAINER_CONFIG_HOME,
-            readOnly: true,
-        },
-        {
-            source: options.subjects,
-            target: CONTAINER_SUBJECTS,
-            readOnly: true,
-        },
-    ];
-    if (options.journal !== null) {
-        mounts.push({
-            source: options.journal,
-            target: CONTAINER_JOURNAL,
-            readOnly: false,
-        });
-    }
-    return normaliseMounts(mounts);
-}
-
 /** Write the 0600 trial environment file and return its names. */
 function writeTrialEnvironment(
     trialDir: string,
@@ -361,62 +330,6 @@ function stageTrialPayload(
         testCase.kind === "docs-task" ? join(trialDir, "journal") : null;
     if (journal !== null) mkdirSync(journal, { recursive: true });
     return { ok: true, workspace, configHome, journal };
-}
-
-/** The explicit values a trial plan is built from. */
-export interface TrialPlanValues {
-    /** The frozen image identity. */
-    imageId: string;
-    /** The resolved writable workspace mount. */
-    workspace: string;
-    /** The resolved read-only config home. */
-    configHome: string;
-    /** The resolved read-only subject payload. */
-    subjects: string;
-    /** The resolved writable docs journal, or null when the case has none. */
-    journal: string | null;
-    /** The container working directory. */
-    workdir: string;
-    /** The declared network mode. */
-    network: ContainerPlan["network"];
-    /** The complete opencode argument vector. */
-    argv: readonly string[];
-    /** The 0600 environment file path. */
-    envFile: string;
-    /** The environment variable names the file carries. */
-    envNames: readonly string[];
-    /** The declared timeout. */
-    timeoutMs: number;
-    /** The owned container name. */
-    name: string;
-    /** The ownership labels. */
-    labels: Record<string, string>;
-}
-
-/**
- * Build one complete trial plan from resolved values. Pure: it reads no disk,
- * environment, clock or random source, and copies every supplied collection.
- * @param values The resolved plan values.
- * @returns The container plan.
- */
-export function buildTrialPlan(values: TrialPlanValues): ContainerPlan {
-    return {
-        imageId: values.imageId,
-        mounts: trialMounts({
-            workspace: values.workspace,
-            configHome: values.configHome,
-            subjects: values.subjects,
-            journal: values.journal,
-        }),
-        workdir: values.workdir,
-        network: values.network,
-        argv: [...values.argv],
-        envNames: [...new Set(values.envNames)],
-        envFile: values.envFile,
-        timeoutMs: values.timeoutMs,
-        name: values.name,
-        labels: { ...values.labels },
-    };
 }
 
 /**

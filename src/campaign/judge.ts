@@ -32,11 +32,16 @@ import {
     writeJudgeConfigHome,
 } from "../adapters/opencode/runtime.ts";
 import {
-    normaliseMounts,
     ownedContainerName,
     runContainer,
     type ContainerPlan,
 } from "../adapters/podman/container.ts";
+import {
+    buildAttemptPlan,
+    type AttemptPlanValues,
+} from "./plan.ts";
+export { buildAttemptPlan };
+export type { AttemptPlanValues };
 import type { CommandResult } from "../adapters/process.ts";
 import type { Usage } from "../adapters/opencode/events.ts";
 import {
@@ -313,19 +318,6 @@ function publishPacket(
     return { ok: true, packet: built, sha256: sha256Bytes(built) };
 }
 
-/** The judge work mounts: packet read-only, config read-only, work writable. */
-function judgeMounts(options: {
-    packet: string;
-    configHome: string;
-    work: string;
-}): ContainerPlan["mounts"] {
-    return normaliseMounts([
-        { source: options.packet, target: "/judge/packet.md", readOnly: true },
-        { source: options.configHome, target: "/config-home", readOnly: true },
-        { source: options.work, target: "/judge/work", readOnly: false },
-    ]);
-}
-
 /** Write the 0600 judge environment file. */
 function writeJudgeEnvironment(
     attemptDir: string,
@@ -374,63 +366,6 @@ interface AttemptPlan {
     attemptDir: string;
     /** The registered packet identity. */
     packetSha256: string;
-}
-
-/** The explicit values one judge attempt's plan is built from. */
-export interface AttemptPlanValues {
-    /** The frozen image identity. */
-    imageId: string;
-    /** The blinded packet delivered on stdin. */
-    packet: string;
-    /** The resolved read-only packet file. */
-    packetFile: string;
-    /** The resolved read-only judge config home. */
-    configHome: string;
-    /** The resolved writable judge work area. */
-    work: string;
-    /** The declared network mode. */
-    network: ContainerPlan["network"];
-    /** The complete opencode argument vector. */
-    argv: readonly string[];
-    /** The 0600 environment file path. */
-    envFile: string;
-    /** The environment variable names the file carries. */
-    envNames: readonly string[];
-    /** The declared judge timeout. */
-    timeoutMs: number;
-    /** The owned container name. */
-    name: string;
-    /** The ownership labels. */
-    labels: Record<string, string>;
-}
-
-/**
- * Build one judge attempt plan from resolved values. Pure: it reads no disk,
- * environment, clock or random source, and copies every supplied collection.
- * @param values The resolved plan values.
- * @returns The container plan.
- */
-export function buildAttemptPlan(values: AttemptPlanValues): ContainerPlan {
-    return {
-        imageId: values.imageId,
-        mounts: judgeMounts({
-            packet: values.packetFile,
-            configHome: values.configHome,
-            work: values.work,
-        }),
-        workdir: "/judge/work",
-        network: values.network,
-        argv: [...values.argv],
-        // The blinded packet is the model's prompt. It travels on stdin so a
-        // packet larger than the host's per-argument limit still arrives
-        // byte for byte; it is never in the process argument vector.
-        stdin: values.packet,
-        envNames: [...new Set(values.envNames)],
-        envFile: values.envFile,
-        timeoutMs: values.timeoutMs,
-        name: values.name,
-        labels: { ...values.labels },
-    };
 }
 
 /** Build one attempt's dispatch plan without claiming or spawning. */
