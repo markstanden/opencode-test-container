@@ -128,7 +128,7 @@ export function fileSha256(path: string): string {
 }
 
 /** Copy the packable package inputs into an isolated staging tree. */
-export function stagePackage(): string {
+export function createStagedPackage(): string {
     const stage = mkdtempSync(join(tmpdir(), "otc-smoke-pack-"));
     for (const input of [
         "package.json",
@@ -222,12 +222,12 @@ export async function installedModule<T>(
 }
 
 /** A unique tag for this run. */
-export function uniqueTag(suffix: string): string {
+export function createUniqueTag(suffix: string): string {
     return `localhost/otc-smoke-${suffix}:${process.pid}-${Date.now().toString(36)}`;
 }
 
 /** One free host port, held open until the caller closes it. */
-export async function heldPort(): Promise<{
+export async function reservePort(): Promise<{
     port: number;
     close: () => Promise<void>;
 }> {
@@ -394,7 +394,7 @@ export function filesUnder(root: string): string[] {
 }
 
 /** A scratch directory owned by this suite. */
-export function scratch(): string {
+export function createScratchDirectory(): string {
     return mkdtempSync(join(tmpdir(), "otc-smoke-"));
 }
 

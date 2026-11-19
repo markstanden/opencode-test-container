@@ -75,7 +75,7 @@ function requiredLegacyInteger(
 }
 
 /** Translate one frozen schedule slot. */
-function legacySlotOf(
+function parseLegacySlot(
     entry: unknown,
     index: number,
 ): { ok: true; slot: LegacySlot } | { ok: false; problems: string[] } {
@@ -139,7 +139,7 @@ function uniqueLegacySlots(value: readonly unknown[]): {
     const problems: string[] = [];
     const stamps = new Set<string>();
     for (const [index, entry] of value.entries()) {
-        const parsed = legacySlotOf(entry, index);
+        const parsed = parseLegacySlot(entry, index);
         if (!parsed.ok) {
             problems.push(...parsed.problems);
             continue;
@@ -220,7 +220,7 @@ export interface LegacyManifest {
 }
 
 /** Translate the manifest's arms. */
-function legacyArmsOf(value: unknown): LegacyParse<LegacyArm[]> {
+function parseLegacyArms(value: unknown): LegacyParse<LegacyArm[]> {
     if (value === undefined) return { ok: true, value: [] };
     if (!Array.isArray(value)) {
         return {
@@ -245,7 +245,7 @@ function legacyArmsOf(value: unknown): LegacyParse<LegacyArm[]> {
 }
 
 /** Translate the manifest's scenarios, preserving unknown blocks. */
-function legacyScenariosOf(value: unknown): LegacyParse<LegacyScenario[]> {
+function parseLegacyScenarios(value: unknown): LegacyParse<LegacyScenario[]> {
     if (value === undefined) return { ok: true, value: [] };
     if (!Array.isArray(value)) {
         return {
@@ -299,9 +299,9 @@ export function readLegacyManifest(
     if (typeof campaignId !== "string" || campaignId === "") {
         return { ok: false, problems: ["legacy manifest has no campaign id"] };
     }
-    const arms = legacyArmsOf(value.arms);
+    const arms = parseLegacyArms(value.arms);
     if (!arms.ok) return arms;
-    const scenarios = legacyScenariosOf(value.scenarios);
+    const scenarios = parseLegacyScenarios(value.scenarios);
     if (!scenarios.ok) return scenarios;
     return {
         ok: true,

@@ -167,9 +167,16 @@ Examples:
   otc replay --manifest campaign.json --evidence-root evidence --out report
 `;
 
-/** Parse argv into a command and its options. */
+/** Environment-backed defaults for the public CLI entry point. */
+export interface CliDefaults {
+    /** The default campaign document, or null. */
+    campaign: string | null;
+    /** The default campaign root, or null. */
+    root: string | null;
+}
+
 /** Take one option's value, refusing a missing or flag-like value. */
-function optionValue(name: string, args: string[]): string {
+function takeOptionValue(name: string, args: string[]): string {
     const next = args.shift();
     if (next === undefined || next.startsWith("--")) {
         throw new UsageError(`${name} needs a value`);
@@ -207,25 +214,25 @@ function applyOption(
 ): boolean {
     switch (arg) {
         case "--campaign":
-            options.campaign = optionValue(arg, args);
+            options.campaign = takeOptionValue(arg, args);
             return true;
         case "--root":
-            options.root = optionValue(arg, args);
+            options.root = takeOptionValue(arg, args);
             return true;
         case "--out":
-            options.out = optionValue(arg, args);
+            options.out = takeOptionValue(arg, args);
             return true;
         case "--slot":
-            options.slots.push(...slotSelector(arg, optionValue(arg, args)));
+            options.slots.push(...slotSelector(arg, takeOptionValue(arg, args)));
             return true;
         case "--passthrough":
-            options.passthrough.push(optionValue(arg, args));
+            options.passthrough.push(takeOptionValue(arg, args));
             return true;
         case "--manifest":
-            options.manifest = optionValue(arg, args);
+            options.manifest = takeOptionValue(arg, args);
             return true;
         case "--evidence-root":
-            options.evidenceRoot = optionValue(arg, args);
+            options.evidenceRoot = takeOptionValue(arg, args);
             return true;
         default:
             return false;
@@ -269,15 +276,15 @@ function parseOptionLoop(options: CliOptions, args: string[]): void {
 }
 
 /**
- * Parse argv into a command and its options.
- * @param argv Arguments after the executable.
- * @returns The parsed options.
+ * The complete option set for one parse, with explicit defaults.
+ * @param defaults The campaign and root defaults.
+ * @returns A fresh, independent option set.
  */
-export function parseArgs(argv: readonly string[]): CliOptions {
-    const options: CliOptions = {
+export function defaultOptions(defaults: CliDefaults): CliOptions {
+    return {
         command: "help",
-        campaign: process.env.OTC_CAMPAIGN ?? null,
-        root: process.env.OTC_ROOT ?? null,
+        campaign: defaults.campaign,
+        root: defaults.root,
         out: null,
         slots: [],
         json: false,
@@ -290,6 +297,21 @@ export function parseArgs(argv: readonly string[]): CliOptions {
         help: false,
         provided: [],
     };
+}
+
+/**
+ * Parse argv into a command and its options using explicit defaults. The
+ * calculation never reads the environment; the public entry point supplies
+ * the environment-backed defaults.
+ * @param argv Arguments after the executable.
+ * @param defaults The campaign and root defaults.
+ * @returns The parsed options.
+ */
+export function parseArgsWithDefaults(
+    argv: readonly string[],
+    defaults: CliDefaults,
+): CliOptions {
+    const options = defaultOptions(defaults);
     const args = [...argv];
     const first = args.shift();
     if (first === undefined || first === "--help" || first === "-h") {
@@ -303,6 +325,18 @@ export function parseArgs(argv: readonly string[]): CliOptions {
     parseOptionLoop(options, args);
     assertCommandIntent(options);
     return options;
+}
+
+/**
+ * Parse argv with the environment defaults of the supported public entry point.
+ * @param argv Arguments after the executable.
+ * @returns The parsed options.
+ */
+export function parseArgs(argv: readonly string[]): CliOptions {
+    return parseArgsWithDefaults(argv, {
+        campaign: process.env.OTC_CAMPAIGN ?? null,
+        root: process.env.OTC_ROOT ?? null,
+    });
 }
 
 /** A command-line usage refusal. */

@@ -26,7 +26,7 @@ import {
     fileSha256,
     runAsync,
     filesUnder,
-    heldPort,
+    reservePort,
     installConsumer,
     installedModule,
     must,
@@ -35,9 +35,9 @@ import {
     readJson,
     remove,
     run,
-    scratch,
-    stagePackage,
-    uniqueTag,
+    createScratchDirectory,
+    createStagedPackage,
+    createUniqueTag,
     writeCampaign,
     writeDocsCampaign,
     type ChildResult,
@@ -54,7 +54,7 @@ interface CaseResult {
 const results: CaseResult[] = [];
 const ownedContainers: string[] = [];
 const retain = process.env.OTC_SMOKE_RETAIN === "1";
-const work = scratch();
+const work = createScratchDirectory();
 const receipt: Record<string, unknown> = {
     suite: "otc-smoke",
     startedAt: new Date().toISOString(),
@@ -328,7 +328,7 @@ interface PreparedManifest {
 }
 
 async function setup(): Promise<void> {
-    const stage = stagePackage();
+    const stage = createStagedPackage();
     const tarball = pack(stage, join(work, "tarball"));
     const installedConsumer = installConsumer(tarball.tarball, work);
     binary = installedConsumer.binary;
@@ -338,7 +338,7 @@ async function setup(): Promise<void> {
     mkdirSync(containerData, { recursive: true });
     process.env.XDG_DATA_HOME = containerData;
     env = cliEnv(join(work, "home"), containerData);
-    imageTag = uniqueTag("image");
+    imageTag = createUniqueTag("image");
 
     const adapters = await installedModule<typeof installed>(
         consumer,
@@ -694,7 +694,7 @@ async function s05(): Promise<string> {
 }
 
 async function s06(): Promise<string> {
-    const listener = await heldPort();
+    const listener = await reservePort();
     const live = await provider([{ kind: "text", content: "Done." }], false);
     const directory = join(work, "s06");
     mkdirSync(directory, { recursive: true });
@@ -906,7 +906,7 @@ async function s07(): Promise<string> {
 }
 
 async function s08(): Promise<string> {
-    const listener = await heldPort();
+    const listener = await reservePort();
     const scripts = join(work, "net-scripts");
     mkdirSync(scripts, { recursive: true });
     writeFileSync(join(scripts, "probe.mjs"), NET_PROBE, "utf8");
@@ -1481,7 +1481,7 @@ async function s13(): Promise<string> {
             };
         };
     }>(campaignPath);
-    const borrowed = await heldPort();
+    const borrowed = await reservePort();
     const port = borrowed.port;
     await borrowed.close();
     const live = await exampleProvider(

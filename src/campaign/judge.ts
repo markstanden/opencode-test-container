@@ -287,8 +287,8 @@ function recordedAttempts(
     return { attempts, problems };
 }
 
-/** The judge's immutable packet, writing it once or refusing a change. */
-function packetFor(
+/** Publish the judge's immutable packet once, or refuse a change. */
+function publishPacket(
     root: string,
     slotId: string,
     built: string,
@@ -1426,7 +1426,18 @@ export function buildJudgePacketForSlot(
     return buildPacket({ root, slot, testCase });
 }
 
-/** Settle a slot that already has a selection or a usable judgement. */
+/** The decision to reuse, refuse or repair an existing partially judged slot. */
+type SettlementDecision =
+    | { action: "reuse" }
+    | { action: "refuse"; problems: string[] }
+    | { action: "repair"; selectedAttemptId: string }
+    | null;
+
+/**
+ * Decide what to do with a slot that already has a selection or a usable
+ * judgement. Recording a repair is the caller's separate act, so a dry run can
+ * take the same decision without writing.
+ */
 function settleExisting(options: {
     root: string;
     manifest: PreparedManifest;
@@ -1435,7 +1446,7 @@ function settleExisting(options: {
     policy: RecoveryPolicy | null;
     dryRun: boolean;
     now: () => string;
-}): { status: "judged" | "skipped" | "refused"; problems: string[] } | null {
+}): SettlementDecision {
     const { root, slot, attempts, policy } = options;
     if (existsSync(selectionPath(root, slot.slotId))) {
         const checked = checkedSelection({
@@ -1445,21 +1456,17 @@ function settleExisting(options: {
             policy,
         });
         return checked.ok
-            ? { status: "skipped", problems: [] }
-            : { status: "refused", problems: checked.problems };
+            ? { action: "reuse" }
+            : { action: "refuse", problems: checked.problems };
     }
     const judged = attempts.filter(
         (entry) => entry.meta.judgementStatus === "judged",
     );
     if (judged.length === 0) return null;
-    if (options.dryRun) return { status: "judged", problems: [] };
-    const recorded = recordSelection({
-        ...options,
+    return {
+        action: "repair",
         selectedAttemptId: (judged[0] as RecordedAttempt).attemptId,
-    });
-    return recorded.ok
-        ? { status: "judged", problems: [] }
-        : { status: "refused", problems: recorded.problems };
+    };
 }
 
 /** Build and leak-check the judge packet for a ready slot. */
@@ -1648,7 +1655,7 @@ function ensurePacket(
     built: string,
 ): { packet: string; sha256: string } | { problem: string } {
     if (existing !== null) return existing;
-    const frozen = packetFor(root, slotId, built);
+    const frozen = publishPacket(root, slotId, built);
     return frozen.ok
         ? { packet: frozen.packet, sha256: frozen.sha256 }
         : { problem: frozen.problem };
@@ -1812,7 +1819,23 @@ async function judgeSlot(options: {
         return { status: "refused", problems: [eligibility.reason] };
     }
     const settled = settleExisting({ ...options, attempts: recorded.attempts });
-    if (settled !== null) return settled;
+    if (settled !== null) {
+        if (settled.action === "reuse") {
+            return { status: "skipped", problems: [] };
+        }
+        if (settled.action === "refuse") {
+            return { status: "refused", problems: settled.problems };
+        }
+        if (options.dryRun) return { status: "judged", problems: [] };
+        const record = recordSelection({
+            ...options,
+            attempts: recorded.attempts,
+            selectedAttemptId: settled.selectedAttemptId,
+        });
+        return record.ok
+            ? { status: "judged", problems: [] }
+            : { status: "refused", problems: record.problems };
+    }
     const ready = buildReady({ ...options, ...resolved });
     if ("problem" in ready) {
         return { status: "refused", problems: [ready.problem] };

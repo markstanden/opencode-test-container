@@ -67,8 +67,8 @@ async function inspectImageId(
     return { ok: true, id: raw.startsWith("sha256:") ? raw : `sha256:${raw}` };
 }
 
-/** Read the OpenCode version the image actually contains. */
-async function installedVersion(
+/** Read the OpenCode version the image actually contains by executing it. */
+async function readInstalledOpencodeVersion(
     imageId: string,
     run: typeof runCommand,
 ): Promise<{ ok: true; version: string } | { ok: false; problem: string }> {
@@ -111,7 +111,7 @@ export async function resolveImage(
 ): Promise<ImageResolution> {
     const inspected = await inspectImageId(image, run);
     if (!inspected.ok) return inspected;
-    const installed = await installedVersion(inspected.id, run);
+    const installed = await readInstalledOpencodeVersion(inspected.id, run);
     if (!installed.ok) return installed;
     if (installed.version !== declaredVersion) {
         return {
