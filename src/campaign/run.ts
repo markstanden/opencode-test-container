@@ -1044,9 +1044,10 @@ function dryRunPlan(options: SlotPlanning): SlotOutcome {
 }
 
 /**
- * Run an action in a freshly created directory that this call owns, removing
- * it on success, refusal and a thrown setup error alike. The action never
- * receives a path another caller owns.
+ * Run a synchronous action in a freshly created directory that this call owns,
+ * removing it on success, refusal and a thrown setup error alike. The action
+ * never receives a path another caller owns. It must not return a promise:
+ * cleanup runs when the action returns, not when an asynchronous body settles.
  * @param prefix The temp-name prefix.
  * @param action The work performed inside the owned directory.
  * @returns The action's value after cleanup.

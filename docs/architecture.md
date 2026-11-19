@@ -116,11 +116,11 @@ remain external data; OTC stages, hashes and executes them.
 ## Reads, calculations and owned effects
 
 Function names carry ownership. `parseLedger(text)` is a pure calculation;
-`readLedger(root)` is a read that returns the recorded value and the digest of
-the bytes it observed; `appendLedgerEvent(root, event)` is a command returning
-the created resource. Stored receipts are read, derived receipts are calculated
-from checked facts and explicit time, and a read never fabricates a missing
-stored receipt.
+`readLedger(root)` is a read that returns the recorded value with its explicit
+state; `appendLedgerEvent(root, event)` is a command returning the created
+resource. Stored receipts are read, derived receipts are calculated from
+checked facts and explicit time, and a read never fabricates a missing stored
+receipt.
 
 Commands that stage files own their temporaries or accept a caller-owned
 directory; previews remove what they create on success, refusal and throw.
@@ -132,7 +132,8 @@ The explicit pure-module boundary is asserted by
 literal dynamic imports, ignores erased type-only edges, and rejects ambient
 clock/random/environment/cwd access and effectful builtins. It is a static
 syntactic check, not a proof: computed dynamic imports are refused
-conservatively, and effects reached through an opaque passed function are
+conservatively, bare external modules are refused because their purity is not
+statically known, and effects reached through an opaque passed function are
 outside its view.
 
 ## Evidence, lifecycle and execution seams

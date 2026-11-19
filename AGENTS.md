@@ -33,14 +33,14 @@ executable.
 
 Name a function for what it owns. `parseLedger(text)` is a calculation; it
 cannot touch a path. `readLedger(root)` acquires one stored observation and
-returns both the recorded value and the digest of the bytes it read.
-`appendLedgerEvent(root, event)` is a command and returns the resource it
-created. A receipt is either stored (a file that is read) or derived (a value
-computed from checked facts plus explicit time); a read never invents a
-missing stored receipt. Commands may return a handle, and the caller threads
-that handle onward — a stale handle does not authorise releasing or advancing
-a newer owner's resource. A command that stages temporaries owns their
-creation and cleanup, or takes a caller-owned directory and documents it.
+returns the recorded value with its explicit state. `appendLedgerEvent(root,
+event)` is a command and returns the resource it created. A receipt is either
+stored (a file that is read) or derived (a value computed from checked facts
+plus explicit time); a read never invents a missing stored receipt. Commands
+may return a handle, and the caller threads that handle onward — a stale
+handle does not authorise releasing or advancing a newer owner's resource. A
+command that stages temporaries owns their creation and cleanup, or takes a
+caller-owned directory and documents it.
 
 Pure calculation modules are listed in `tests/unit/purity-boundary.test.ts`.
 Start there before adding clock, environment, randomness or I/O to a module

@@ -157,6 +157,33 @@ describe("claim receipt ownership", () => {
         }
     });
 
+    it("advances a handle whose diagnostic note was updated", () => {
+        // Arrange
+        const { dir, root } = workspace();
+        try {
+            const claimed = claimBudget(root, "judge", 1, {
+                stamp: "s1",
+                key: "s1/attempt-001",
+                note: "initial note",
+                at: "2026-01-01T00:00:00.000Z",
+            });
+            assert.equal(claimed.ok, true);
+            if (!claimed.ok) return;
+            advanceClaim(claimed.claim, "reserved", { note: "revised note" });
+
+            // Act
+            const advanced = advanceClaim(claimed.claim, "spawned", {
+                note: "started",
+            });
+
+            // Assert: a diagnostic note is not ownership identity.
+            assert.equal(advanced.state, "spawned");
+            assert.equal(persisted(advanced.path).state, "spawned");
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
     it("lets the current owner release an unspent claim and retry the same key", () => {
         // Arrange
         const { dir, root } = workspace();

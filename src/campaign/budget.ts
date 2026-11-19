@@ -382,8 +382,7 @@ function sameClaim(left: BudgetClaim, right: BudgetClaim): boolean {
         left.at === right.at &&
         left.stamp === right.stamp &&
         left.attemptId === right.attemptId &&
-        left.key === right.key &&
-        left.note === right.note
+        left.key === right.key
     );
 }
 

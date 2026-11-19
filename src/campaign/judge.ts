@@ -1368,7 +1368,8 @@ type SettlementDecision =
 /**
  * Apply an existing-slot settlement: reuse, refuse, or record a repair. A dry
  * run takes the same decision but never records the repair.
- */ function applySettlement(options: {
+ */
+function applySettlement(options: {
     root: string;
     manifest: PreparedManifest;
     slot: Slot;
