@@ -87,6 +87,7 @@ import {
     renderAnalysisJson,
     renderReceipt,
     renderReport,
+    type AnalysisReceipt,
     type AnalysisResult,
     type AnalysisArmReport,
     type LedgerSummary,
@@ -118,7 +119,7 @@ interface CliRun {
 }
 
 /** One evidence observation recorded at the reader boundary. */
-interface ConsumedInput {
+export interface ConsumedInput {
     /** The stable root-relative identity. */
     reference: string;
     /** Whether the observation was a file or a directory. */
@@ -130,19 +131,47 @@ interface ConsumedInput {
 }
 
 /**
+ * One replay's observation trace. The trace is owned by a single run and is
+ * keyed by kind and reference, so a file and a directory at the same path stay
+ * distinct and an equivalent repeat observation stays one entry.
+ */
+export interface ReplayTrace {
+    /** Every distinct observation, keyed by kind and reference. */
+    observations: Map<string, ConsumedInput>;
+    /** Materially different repeat observations, which must refuse publication. */
+    conflicts: string[];
+}
+
+/** A fresh trace for one replay. */
+export function newTrace(): ReplayTrace {
+    return { observations: new Map(), conflicts: [] };
+}
+
+/**
  * Record one reader observation. Files and directories are keyed separately so
- * a path probed both ways keeps both identities.
- * @param consumed The trace.
+ * a path probed both ways keeps both identities. The first observation is kept;
+ * a materially different repeat is recorded as a conflict, never substituted.
+ * @param trace The per-replay trace.
  * @param observation The observation to record.
  */
-function traceObservation(
-    consumed: Map<string, ConsumedInput>,
+export function traceObservation(
+    trace: ReplayTrace,
     observation: ConsumedInput,
 ): void {
-    consumed.set(
-        `${observation.kind}\u0000${observation.reference}`,
-        observation,
-    );
+    const key = `${observation.kind}\u0000${observation.reference}`;
+    const existing = trace.observations.get(key);
+    if (existing === undefined) {
+        trace.observations.set(key, observation);
+        return;
+    }
+    if (
+        existing.state !== observation.state ||
+        existing.sha256 !== observation.sha256
+    ) {
+        trace.conflicts.push(
+            `${observation.kind} ${observation.reference} changed between observations (${existing.state}/${existing.sha256 ?? "no digest"} then ${observation.state}/${observation.sha256 ?? "no digest"})`,
+        );
+    }
 }
 
 /**
@@ -152,13 +181,10 @@ function traceObservation(
  * SHA-256 of its sorted entries, so a missing tree and a recorded empty tree
  * cannot share a receipt entry.
  * @param root The evidence root.
- * @param consumed The trace collecting every consumed observation.
+ * @param trace The per-replay trace collecting every consumed observation.
  * @returns The reader.
  */
-function fsReader(
-    root: string,
-    consumed: Map<string, ConsumedInput>,
-): EvidenceReader {
+function fsReader(root: string, trace: ReplayTrace): EvidenceReader {
     return {
         readTextFile: (path) => {
             const full = join(root, path);
@@ -169,7 +195,7 @@ function fsReader(
                 if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
                     throw error;
                 }
-                traceObservation(consumed, {
+                traceObservation(trace, {
                     reference: path,
                     kind: "file",
                     sha256: null,
@@ -177,7 +203,7 @@ function fsReader(
                 });
                 return { state: "missing", source: path };
             }
-            traceObservation(consumed, {
+            traceObservation(trace, {
                 reference: path,
                 kind: "file",
                 sha256: sha256OfText(text),
@@ -192,7 +218,7 @@ function fsReader(
                 stats = statSync(full);
             } catch (error) {
                 if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-                    traceObservation(consumed, {
+                    traceObservation(trace, {
                         reference: path,
                         kind: "directory",
                         sha256: null,
@@ -206,7 +232,7 @@ function fsReader(
                         ],
                     };
                 }
-                traceObservation(consumed, {
+                traceObservation(trace, {
                     reference: path,
                     kind: "directory",
                     sha256: null,
@@ -217,7 +243,7 @@ function fsReader(
             // An ordinary file where a directory was expected — a README.txt
             // beside the notes, say — is a skip, never an empty directory.
             if (!stats.isDirectory()) {
-                traceObservation(consumed, {
+                traceObservation(trace, {
                     reference: path,
                     kind: "directory",
                     sha256: null,
@@ -227,7 +253,7 @@ function fsReader(
             }
             try {
                 const value = readdirSync(full).sort();
-                traceObservation(consumed, {
+                traceObservation(trace, {
                     reference: path,
                     kind: "directory",
                     sha256: sha256OfText(JSON.stringify(value)),
@@ -235,7 +261,7 @@ function fsReader(
                 });
                 return { state: "available", value, source: path };
             } catch (error) {
-                traceObservation(consumed, {
+                traceObservation(trace, {
                     reference: path,
                     kind: "directory",
                     sha256: null,
@@ -354,23 +380,35 @@ function prepareOut(options: CliOptions): string | undefined {
 }
 
 /**
- * Read and validate the manifest.
+ * Read and validate the manifest, returning the exact text that was parsed.
  * @param path The manifest path.
- * @returns The manifest, or problems.
+ * @returns The manifest and its text, or problems.
  */
-function readManifest(path: string): {
+function readManifest(
+    path: string,
+    readFile: (path: string) => string = (candidate) =>
+        readFileSync(candidate, "utf8"),
+): {
     manifest?: CampaignManifest | undefined;
+    manifestText?: string | undefined;
     problems: string[];
 } {
+    let text: string;
+    try {
+        text = readFile(path);
+    } catch (error) {
+        return { problems: [`cannot read manifest ${path}: ${String(error)}`] };
+    }
     let raw: unknown;
     try {
-        raw = JSON.parse(readFileSync(path, "utf8")) as unknown;
+        raw = JSON.parse(text) as unknown;
     } catch (error) {
         return { problems: [`cannot read manifest ${path}: ${String(error)}`] };
     }
     const parsedManifest = parseManifest(raw);
     return {
         manifest: parsedManifest.value,
+        manifestText: text,
         problems: parsedManifest.problems,
     };
 }
@@ -1479,12 +1517,12 @@ function publicTargetProblem(
  * the campaign manifest, authored interpretation and every consumed evidence
  * file.
  * @param options The CLI options.
- * @param consumed The reader trace.
+ * @param trace The reader trace.
  * @returns The protected real paths.
  */
 function protectedPathsOf(
     options: CliOptions,
-    consumed: ReadonlyMap<string, ConsumedInput>,
+    trace: ReplayTrace,
 ): Set<string> {
     const protectedPaths = new Set<string>();
     const add = (path: string): void => {
@@ -1496,8 +1534,8 @@ function protectedPathsOf(
     };
     add(options.campaign);
     add(join(options.out, "INTERPRETATION.md"));
-    for (const reference of consumed.keys()) {
-        add(join(options.evidenceRoot, reference));
+    for (const observation of trace.observations.values()) {
+        add(join(options.evidenceRoot, observation.reference));
     }
     return protectedPaths;
 }
@@ -1585,11 +1623,57 @@ function publishOutputs(
 }
 
 /**
+ * Construct one analysis receipt from the observations, policy identity and
+ * render time of a single replay. Every value is supplied: the receipt cannot
+ * observe a path again or sample its own clock.
+ * @param input The replay's observed facts.
+ * @param input.manifestSha256 The digest of the manifest bytes that were parsed.
+ * @param input.policyId The policy identity the analysis used.
+ * @param input.renderedAt The render time, sampled by the command shell.
+ * @param input.trace The per-replay observation trace.
+ * @returns The receipt in its established ordering and shape.
+ */
+export function analysisReceiptFor(input: {
+    manifestSha256: string;
+    policyId: string;
+    renderedAt: string;
+    trace: ReplayTrace;
+}): AnalysisReceipt {
+    return {
+        analyserVersion: ANALYSER_VERSION,
+        templateVersion: REPORT_TEMPLATE_VERSION,
+        manifestSha256: input.manifestSha256,
+        policyId: input.policyId,
+        renderedAt: input.renderedAt,
+        inputs: [
+            {
+                reference: "campaign-manifest",
+                kind: "file" as const,
+                sha256: input.manifestSha256,
+                state: "available" as const,
+            },
+            ...[...input.trace.observations.values()].sort(
+                (left, right) =>
+                    left.reference.localeCompare(right.reference) ||
+                    left.kind.localeCompare(right.kind),
+            ),
+        ],
+    };
+}
+
+/**
  * Run the analyser.
  * @param argv The arguments after the script path.
+ * @param deps Injected clock for deterministic receipt tests.
  * @returns The exit status and messages.
  */
-export function runAnalysis(argv: readonly string[]): CliRun {
+export function runAnalysis(
+    argv: readonly string[],
+    deps: {
+        now?: () => string;
+        readManifest?: (path: string) => string;
+    } = {},
+): CliRun {
     const parsed = parseArgs(argv);
     if (parsed.options === undefined) {
         return {
@@ -1598,8 +1682,11 @@ export function runAnalysis(argv: readonly string[]): CliRun {
         };
     }
     const options = parsed.options;
-    const manifestRead = readManifest(options.campaign);
-    if (manifestRead.manifest === undefined) {
+    const manifestRead = readManifest(options.campaign, deps.readManifest);
+    if (
+        manifestRead.manifest === undefined ||
+        manifestRead.manifestText === undefined
+    ) {
         return {
             status: 2,
             messages: manifestRead.problems.map(
@@ -1612,39 +1699,31 @@ export function runAnalysis(argv: readonly string[]): CliRun {
     if (prepared !== undefined) {
         return { status: 1, messages: [`analyse: ${prepared}`] };
     }
-    const consumed = new Map<string, ConsumedInput>();
-    const reader = fsReader(options.evidenceRoot, consumed);
+    const trace = newTrace();
+    const reader = fsReader(options.evidenceRoot, trace);
     const loaded = loadCampaign(manifest, reader, options.allowLegacyUnbound);
-    const manifestText = readFileSync(options.campaign, "utf8");
     const result = assemble(
         manifest,
-        manifestText,
+        manifestRead.manifestText,
         loaded.records,
         loaded.scored,
         reader,
     );
-    const renderedAt = new Date().toISOString();
-    const receipt = {
-        analyserVersion: ANALYSER_VERSION,
-        templateVersion: REPORT_TEMPLATE_VERSION,
+    if (trace.conflicts.length > 0) {
+        return {
+            status: 1,
+            messages: trace.conflicts.map(
+                (conflict) => `analyse: conflicting evidence observation: ${conflict}`,
+            ),
+        };
+    }
+    const receipt = analysisReceiptFor({
         manifestSha256: result.manifestSha256,
         policyId: result.policyId,
-        renderedAt,
-        inputs: [
-            {
-                reference: "campaign-manifest",
-                kind: "file" as const,
-                sha256: result.manifestSha256,
-                state: "available" as const,
-            },
-            ...[...consumed.values()].sort(
-                (left, right) =>
-                    left.reference.localeCompare(right.reference) ||
-                    left.kind.localeCompare(right.kind),
-            ),
-        ],
-    };
-    const protectedPaths = protectedPathsOf(options, consumed);
+        renderedAt: (deps.now ?? (() => new Date().toISOString()))(),
+        trace,
+    });
+    const protectedPaths = protectedPathsOf(options, trace);
     for (const name of OUTPUT_NAMES) {
         const problem = publicTargetProblem(
             join(options.out, name),
