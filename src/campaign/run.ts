@@ -1012,7 +1012,7 @@ async function liveSlot(options: {
     }
     if (options.signal !== undefined)
         planned.planned.plan.signal = options.signal;
-    advanceClaim(claimed.claim, "spawned", {
+    let claim = advanceClaim(claimed.claim, "spawned", {
         stamp: slot.slotId,
         note: "trial dispatch started",
     });
@@ -1028,7 +1028,7 @@ async function liveSlot(options: {
         now,
         ...(options.signal === undefined ? {} : { signal: options.signal }),
     });
-    advanceClaim(claimed.claim, "closed", {
+    claim = advanceClaim(claim, "closed", {
         note: "trial terminal evidence recorded",
     });
     return {
