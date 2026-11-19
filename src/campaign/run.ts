@@ -1052,28 +1052,48 @@ interface SlotPlanning {
 
 /** Plan a dry run in a disposable directory, then remove it. */
 function dryRunPlan(options: SlotPlanning): SlotOutcome {
-    const planDirectory = mkdtempSync(join(tmpdir(), "otc-plan-"));
-    const planned = planTrial({
-        root: options.root,
-        manifest: options.manifest,
-        frozen: options.frozen,
-        slot: options.slot,
-        testCase: options.testCase,
-        arm: options.arm,
-        trialDir: planDirectory,
-        ...(options.passthrough === undefined
-            ? {}
-            : { passthrough: options.passthrough }),
+    return withOwnedTempDirectory("otc-plan-", (planDirectory) => {
+        const planned = planTrial({
+            root: options.root,
+            manifest: options.manifest,
+            frozen: options.frozen,
+            slot: options.slot,
+            testCase: options.testCase,
+            arm: options.arm,
+            trialDir: planDirectory,
+            ...(options.passthrough === undefined
+                ? {}
+                : { passthrough: options.passthrough }),
+        });
+        return planned.ok
+            ? { ran: true, refused: false, problems: [], stop: false }
+            : {
+                  ran: false,
+                  refused: false,
+                  problems: planned.problems,
+                  stop: false,
+              };
     });
-    rmSync(planDirectory, { recursive: true, force: true });
-    return planned.ok
-        ? { ran: true, refused: false, problems: [], stop: false }
-        : {
-              ran: false,
-              refused: false,
-              problems: planned.problems,
-              stop: false,
-          };
+}
+
+/**
+ * Run an action in a freshly created directory that this call owns, removing
+ * it on success, refusal and a thrown setup error alike. The action never
+ * receives a path another caller owns.
+ * @param prefix The temp-name prefix.
+ * @param action The work performed inside the owned directory.
+ * @returns The action's value after cleanup.
+ */
+export function withOwnedTempDirectory<T>(
+    prefix: string,
+    action: (directory: string) => T,
+): T {
+    const directory = mkdtempSync(join(tmpdir(), prefix));
+    try {
+        return action(directory);
+    } finally {
+        rmSync(directory, { recursive: true, force: true });
+    }
 }
 
 /** Claim one trial's slot key and budget index, or report the refusal. */

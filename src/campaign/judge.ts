@@ -2062,19 +2062,32 @@ export function readSelectedJudgement(
         : null;
 }
 
+/** Options for the internal judge-sandbox plan hook. */
+export interface JudgeSandboxPlanOptions {
+    /**
+     * A directory the caller owns and cleans up. The plan's packet, config and
+     * environment files are written beneath it, so no directory is left in the
+     * system temp root. Omitted, a fresh system-temp directory is created and
+     * intentionally retained for inspection.
+     */
+    workDirectory?: string;
+}
+
 /**
  * Build a judge sandbox plan for one docs slot without claiming a budget or
  * dispatching. Internal smoke/ops hook: it uses the production mount plan and
- * packet builder, and writes only into a fresh temporary attempt directory.
+ * packet builder, and writes only into a caller-owned working directory.
  * @param root The campaign root.
  * @param slotId The scheduled docs slot.
  * @param attemptId The attempt identity to render.
+ * @param options The caller-owned working directory.
  * @returns The plan, or every refusal.
  */
 export function judgeSandboxPlanForSlot(
     root: string,
     slotId: string,
     attemptId: string,
+    options: JudgeSandboxPlanOptions = {},
 ): { ok: true; plan: ContainerPlan } | { ok: false; problems: string[] } {
     const prepared = loadPreparedManifest(root);
     if (!prepared.ok) return { ok: false, problems: [prepared.problem] };
@@ -2098,7 +2111,11 @@ export function judgeSandboxPlanForSlot(
     }
     const built = buildPacket({ root, slot, testCase });
     if (!built.ok) return built;
-    const directory = mkdtempSync(join(tmpdir(), "otc-judge-plan-"));
+    const directory =
+        options.workDirectory === undefined
+            ? mkdtempSync(join(tmpdir(), "otc-judge-plan-"))
+            : join(options.workDirectory, "judge-plan");
+    mkdirSync(directory, { recursive: true });
     const packetFile = join(directory, "packet.md");
     writeFileSync(packetFile, built.packet, "utf8");
     const planned = planAttempt({

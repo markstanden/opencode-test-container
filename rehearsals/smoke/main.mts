@@ -13,6 +13,7 @@ import {
     existsSync,
     mkdirSync,
     readFileSync,
+    rmSync,
     writeFileSync,
 } from "node:fs";
 import { spawn } from "node:child_process";
@@ -314,6 +315,7 @@ let installed: {
         root: string,
         slotId: string,
         attemptId: string,
+        options?: { workDirectory?: string },
     ) => { ok: boolean; plan?: Record<string, unknown>; problems?: string[] };
 };
 interface PreparedManifest {
@@ -859,10 +861,13 @@ async function s07(): Promise<string> {
     expect(prepared.ok, "docs root manifest is unreadable");
     const manifest = prepared.manifest as PreparedManifest;
     const slotId = manifest.campaign.schedule.slots[0]!.slotId;
+    const planDirectory = join(work, "judge-plan-s07");
+    rmSync(planDirectory, { recursive: true, force: true });
     const planned = installed.judgeSandboxPlanForSlot(
         docsRoot,
         slotId,
         "attempt-001",
+        { workDirectory: planDirectory },
     );
     expect(
         planned.ok,

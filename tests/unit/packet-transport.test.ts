@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { cpSync, mkdtempSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -98,6 +98,7 @@ describe("judge packet transport", () => {
                 root,
                 "restraint",
                 "attempt-001",
+                { workDirectory: join(dir, "judge-plan") },
             );
 
             // Assert
@@ -107,6 +108,14 @@ describe("judge packet transport", () => {
                 built.ok ? "" : built.problems.join("; "),
             );
             if (!built.ok) return;
+            for (const mount of built.plan.mounts) {
+                assert.equal(
+                    mount.source.startsWith(join(dir, "judge-plan")),
+                    true,
+                    `mount ${mount.target} escapes the caller-owned directory`,
+                );
+                assert.equal(existsSync(mount.source), true, mount.source);
+            }
             const packet = built.plan.stdin;
             assert.equal(typeof packet, "string");
             assert.equal((packet ?? "").length > 200 * 1024, true);
