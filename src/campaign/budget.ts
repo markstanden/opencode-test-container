@@ -441,7 +441,11 @@ export function advanceClaim(
 ): BudgetClaim {
     const locked = withClaimLock(claim.path, () => {
         const current = currentClaim(claim);
-        if (current === null || !sameClaim(claim, current)) {
+        if (
+            current === null ||
+            current.state !== claim.state ||
+            !sameClaim(claim, current)
+        ) {
             throw new Error(
                 `claim ${claim.path} changed ownership; refusing to advance a stale handle`,
             );

@@ -93,7 +93,7 @@ describe("prepare observes each original document once", () => {
         }
     });
 
-    it("accepts a declared raw suite digest and withholds a mismatching one", () => {
+    it("accepts a declared raw suite digest", () => {
         // Arrange
         const { dir, campaignPath } = workspace();
         const suiteBytes = readFileSync(join(dir, "suite.json"));
@@ -112,21 +112,26 @@ describe("prepare observes each original document once", () => {
                 true,
                 accepted.ok ? "" : accepted.problems.join("; "),
             );
-            if (accepted.ok) {
-                assert.equal(
-                    accepted.manifest.suiteSha256,
-                    sha256Bytes(suiteBytes),
-                );
-            }
-
-            // Arrange: a digest that does not name the observed bytes.
-            declared.suite.sha256 = "0".repeat(64);
-            writeFileSync(
-                campaignPath,
-                `${JSON.stringify(declared, null, 2)}\n`,
+            if (!accepted.ok) return;
+            assert.equal(
+                accepted.manifest.suiteSha256,
+                sha256Bytes(suiteBytes),
             );
-            const refusedRoot = join(dir, "refused");
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
 
+    it("refuses a declared suite digest that does not name the observed bytes", () => {
+        // Arrange
+        const { dir, campaignPath } = workspace();
+        const declared = JSON.parse(readFileSync(campaignPath, "utf8")) as {
+            suite: { path: string; sha256?: string };
+        };
+        declared.suite.sha256 = "0".repeat(64);
+        writeFileSync(campaignPath, `${JSON.stringify(declared, null, 2)}\n`);
+        const refusedRoot = join(dir, "refused");
+        try {
             // Act
             const refused = prepareCampaign(campaignPath, refusedRoot);
 

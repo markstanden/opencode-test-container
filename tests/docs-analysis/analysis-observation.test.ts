@@ -160,7 +160,7 @@ describe("analysis replay observations", () => {
         }
     });
 
-    it("keeps equivalent repeat observations and records conflicts without replacing them", () => {
+    it("keeps an equivalent repeat observation as one entry", () => {
         // Arrange
         const trace = newTrace();
         const first: ConsumedInput = {
@@ -169,7 +169,29 @@ describe("analysis replay observations", () => {
             sha256: "a".repeat(64),
             state: "available",
         };
-        const equivalent: ConsumedInput = { ...first };
+
+        // Act
+        traceObservation(trace, first);
+        traceObservation(trace, { ...first });
+
+        // Assert
+        assert.equal(trace.observations.size, 1);
+        assert.deepEqual(trace.conflicts, []);
+        assert.equal(
+            trace.observations.get("directory\u0000a/lake")?.sha256,
+            first.sha256,
+        );
+    });
+
+    it("records a conflicting observation without replacing the first", () => {
+        // Arrange
+        const trace = newTrace();
+        const first: ConsumedInput = {
+            reference: "a/lake",
+            kind: "directory",
+            sha256: "a".repeat(64),
+            state: "available",
+        };
         const conflicting: ConsumedInput = {
             ...first,
             sha256: "b".repeat(64),
@@ -177,10 +199,9 @@ describe("analysis replay observations", () => {
 
         // Act
         traceObservation(trace, first);
-        traceObservation(trace, equivalent);
         traceObservation(trace, conflicting);
 
-        // Assert: one entry, the first observation, and one conflict.
+        // Assert
         assert.equal(trace.observations.size, 1);
         assert.equal(trace.conflicts.length, 1);
         assert.match(trace.conflicts[0] ?? "", /a\/lake changed/);

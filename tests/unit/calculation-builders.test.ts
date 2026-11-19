@@ -1,4 +1,4 @@
-import { describe, it } from "node:test";
+import { after, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { cpSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -106,7 +106,7 @@ describe("report calculation", () => {
             closedAt: "2026-11-17T00:00:00.000Z",
             imageId: IMAGE_ID,
             generatedAt: "2026-11-18T00:00:00.000Z",
-            assessed: 3,
+            assessed: 4,
             slots,
         };
 
@@ -116,7 +116,7 @@ describe("report calculation", () => {
         // Assert
         assert.deepEqual(report.denominators, {
             scheduled: 5,
-            assessed: 3,
+            assessed: 4,
             valid: 2,
             invalid: 1,
             unknown: 1,
@@ -168,62 +168,70 @@ describe("report calculation", () => {
 });
 
 describe("freeze calculation", () => {
+    const made: string[] = [];
+    const rootOf = async (label: string): Promise<string> => {
+        const dir = mkdtempSync(join(tmpdir(), `otc-freeze-${label}-`));
+        made.push(dir);
+        cpSync(FIXTURE, dir, { recursive: true });
+        const root = join(dir, "root");
+        const prepared = prepareCampaign(join(dir, "campaign.json"), root);
+        assert.equal(
+            prepared.ok,
+            true,
+            prepared.ok ? "" : prepared.problems.join("; "),
+        );
+        return root;
+    };
+
+    after(() => {
+        for (const dir of made) rmSync(dir, { recursive: true, force: true });
+    });
+
     it("produces the same receipt for fixed inputs and time", async () => {
         // Arrange
-        const made: string[] = [];
-        const rootOf = async (label: string): Promise<string> => {
-            const dir = mkdtempSync(join(tmpdir(), `otc-freeze-${label}-`));
-            made.push(dir);
-            cpSync(FIXTURE, dir, { recursive: true });
-            const root = join(dir, "root");
-            const prepared = prepareCampaign(join(dir, "campaign.json"), root);
-            assert.equal(
-                prepared.ok,
-                true,
-                prepared.ok ? "" : prepared.problems.join("; "),
-            );
-            return root;
-        };
         const now = () => "2026-11-19T00:00:00.000Z";
-        try {
-            const firstRoot = await rootOf("one");
-            const secondRoot = await rootOf("two");
+        const firstRoot = await rootOf("equal-one");
+        const secondRoot = await rootOf("equal-two");
 
-            // Act
-            const first = await freezeCampaign(
-                firstRoot,
-                fakeImage as never,
-                now,
-            );
-            const second = await freezeCampaign(
-                secondRoot,
-                fakeImage as never,
-                now,
-            );
+        // Act
+        const first = await freezeCampaign(firstRoot, fakeImage as never, now);
+        const second = await freezeCampaign(
+            secondRoot,
+            fakeImage as never,
+            now,
+        );
 
-            // Assert
-            assert.equal(first.ok, true);
-            assert.equal(second.ok, true);
-            if (!first.ok || !second.ok) return;
-            assert.deepEqual(first.record, second.record);
-            assert.equal(first.record.frozenAt, now());
+        // Assert
+        assert.equal(first.ok, true);
+        assert.equal(second.ok, true);
+        if (!first.ok || !second.ok) return;
+        assert.deepEqual(first.record, second.record);
+        assert.equal(first.record.frozenAt, now());
+    });
 
-            // Act: a second freeze converges on the stored winner.
-            const again = await freezeCampaign(
-                firstRoot,
-                fakeImage as never,
-                () => "2026-11-20T00:00:00.000Z",
-            );
+    it("converges on the stored winner when another freeze is already there", async () => {
+        // Arrange
+        const root = await rootOf("converge");
+        const first = await freezeCampaign(
+            root,
+            fakeImage as never,
+            () => "2026-11-19T00:00:00.000Z",
+        );
+        assert.equal(first.ok, true);
+        if (!first.ok) return;
 
-            // Assert
-            assert.equal(again.ok, true);
-            if (!again.ok) return;
-            assert.equal(again.alreadyFrozen, true);
-            assert.deepEqual(again.record, first.record);
-        } finally {
-            for (const dir of made)
-                rmSync(dir, { recursive: true, force: true });
-        }
+        // Act
+        const again = await freezeCampaign(
+            root,
+            fakeImage as never,
+            () => "2026-11-20T00:00:00.000Z",
+        );
+
+        // Assert
+        assert.equal(again.ok, true);
+        if (!again.ok) return;
+        assert.equal(again.alreadyFrozen, true);
+        assert.deepEqual(again.record, first.record);
     });
 });
 

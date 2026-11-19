@@ -119,6 +119,32 @@ describe("claim receipt ownership", () => {
         }
     });
 
+    it("refuses to advance a retained handle after the claim changed", () => {
+        // Arrange
+        const { dir, root } = workspace();
+        try {
+            const claimed = claimBudget(root, "trial", 1, {
+                stamp: "s1",
+                key: "slot:s1",
+                at: "2026-01-01T00:00:00.000Z",
+            });
+            assert.equal(claimed.ok, true);
+            if (!claimed.ok) return;
+            advanceClaim(claimed.claim, "spawned", {
+                note: "dispatch started",
+            });
+
+            // Act / Assert
+            assert.throws(
+                () => advanceClaim(claimed.claim, "closed", { note: "closed" }),
+                /changed ownership/,
+            );
+            assert.equal(persisted(claimed.claim.path).state, "spawned");
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
     it("cannot release a newer owner's reservation at a reused index", () => {
         // Arrange
         const { dir, root } = workspace();

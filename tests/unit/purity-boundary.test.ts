@@ -42,40 +42,55 @@ describe("architecture purity boundary", () => {
         assert.deepEqual(problems, []);
     });
 
-    it("rejects direct clock and environment access", () => {
-        // Arrange
-        const space = fixture({
-            "clock.ts": "export const t = new Date().toISOString();\n",
-            "env.ts": "export const home = process.env.HOME;\n",
-            "random.ts": "export const n = Math.random();\n",
-        });
-        try {
-            // Act
-            const problems = purityProblems([
-                { file: space.file("clock.ts") },
-                { file: space.file("env.ts") },
-                { file: space.file("random.ts") },
-            ]);
+    const ambientRows = [
+        {
+            name: "the ambient clock",
+            source: "export const t = new Date().toISOString();\n",
+            expected: "ambient clock",
+        },
+        {
+            name: "process environment state",
+            source: "export const home = process.env.HOME;\n",
+            expected: "ambient process state",
+        },
+        {
+            name: "the process working directory",
+            source: "export const cwd = process.cwd();\n",
+            expected: "ambient process state",
+        },
+        {
+            name: "the ambient random source",
+            source: "export const n = Math.random();\n",
+            expected: "ambient random",
+        },
+        {
+            name: "cryptographic randomness",
+            source: 'import { randomBytes } from "node:crypto";\nexport const n = randomBytes(8);\n',
+            expected: "non-deterministic randomBytes",
+        },
+    ] as const;
 
-            // Assert
-            assert.equal(
-                problems.some((problem) => problem.includes("ambient clock")),
-                true,
-            );
-            assert.equal(
-                problems.some((problem) =>
-                    problem.includes("ambient process state"),
-                ),
-                true,
-            );
-            assert.equal(
-                problems.some((problem) => problem.includes("ambient random")),
-                true,
-            );
-        } finally {
-            rmSync(space.dir, { recursive: true, force: true });
-        }
-    });
+    for (const row of ambientRows) {
+        it(`rejects ${row.name}`, () => {
+            // Arrange
+            const space = fixture({ "entry.ts": row.source });
+            try {
+                // Act
+                const problems = purityProblems([
+                    { file: space.file("entry.ts") },
+                ]);
+
+                // Assert
+                assert.equal(
+                    problems.some((problem) => problem.includes(row.expected)),
+                    true,
+                    problems.join("; "),
+                );
+            } finally {
+                rmSync(space.dir, { recursive: true, force: true });
+            }
+        });
+    }
 
     it("rejects an indirect I/O import through a wrapper and a barrel", () => {
         // Arrange
@@ -90,18 +105,10 @@ describe("architecture purity boundary", () => {
             const problems = purityProblems([{ file: space.file("entry.ts") }]);
 
             // Assert
-            assert.equal(
-                problems.some((problem) => problem.includes("node:fs")),
-                true,
-            );
-            assert.equal(
-                problems.some(
-                    (problem) =>
-                        problem.includes("chain") ||
-                        problem.includes("entry.ts"),
-                ),
-                true,
-            );
+            assert.equal(problems.length, 1, problems.join("; "));
+            assert.match(problems[0] ?? "", /entry\.ts -> .*wrapper\.ts/);
+            assert.match(problems[0] ?? "", /wrapper\.ts -> .*io\.ts/);
+            assert.match(problems[0] ?? "", /node:fs/);
         } finally {
             rmSync(space.dir, { recursive: true, force: true });
         }
@@ -143,32 +150,47 @@ describe("architecture purity boundary", () => {
         }
     });
 
-    it("rejects dynamic loading that cannot be resolved", () => {
+    it("rejects a dynamic import that cannot be resolved", () => {
         // Arrange
         const space = fixture({
             "dynamic.ts":
                 "export function load(name: string): Promise<unknown> {\n    return import(name);\n}\n",
+        });
+        try {
+            // Act
+            const problems = purityProblems([
+                { file: space.file("dynamic.ts") },
+            ]);
+
+            // Assert
+            assert.equal(
+                problems.some((problem) =>
+                    problem.includes("unresolvable dynamic import"),
+                ),
+                true,
+                problems.join("; "),
+            );
+        } finally {
+            rmSync(space.dir, { recursive: true, force: true });
+        }
+    });
+
+    it("rejects a literal dynamic import of an effectful module", () => {
+        // Arrange
+        const space = fixture({
             "literal.ts": 'export const load = () => import("node:fs");\n',
         });
         try {
             // Act
-            const unresolved = purityProblems([
-                { file: space.file("dynamic.ts") },
-            ]);
-            const literal = purityProblems([
+            const problems = purityProblems([
                 { file: space.file("literal.ts") },
             ]);
 
             // Assert
             assert.equal(
-                unresolved.some((problem) =>
-                    problem.includes("unresolvable dynamic import"),
-                ),
+                problems.some((problem) => problem.includes("node:fs")),
                 true,
-            );
-            assert.equal(
-                literal.some((problem) => problem.includes("node:fs")),
-                true,
+                problems.join("; "),
             );
         } finally {
             rmSync(space.dir, { recursive: true, force: true });
