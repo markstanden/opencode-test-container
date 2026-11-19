@@ -44,17 +44,14 @@ function unsettledClaims(root: string): string[] {
 function unresolvedJudgements(
     root: string,
     manifest: PreparedManifest,
-    ledger: ReturnType<typeof readLedger>,
     completed: ReadonlySet<string>,
     policy: RecoveryPolicy | null,
+    assessmentBySlot: ReadonlyMap<
+        string,
+        ReturnType<typeof checkedAssessments>["records"][number]
+    >,
 ): string[] {
     if (manifest.campaign.assessment.judge === undefined) return [];
-    const assessments = new Map(
-        checkedAssessments({ root, manifest, ledger }).records.map((entry) => [
-            entry.slotId,
-            entry,
-        ]),
-    );
     return manifest.campaign.schedule.slots.flatMap((slot) => {
         if (!completed.has(slot.slotId)) return [];
         const selection = checkedSelection({
@@ -67,7 +64,7 @@ function unresolvedJudgements(
             manifest,
             slot,
             trialRecorded: true,
-            assessment: assessments.get(slot.slotId),
+            assessment: assessmentBySlot.get(slot.slotId),
             selectionPresent: existsSync(selectionPath(root, slot.slotId)),
             selection: selection.ok
                 ? { ok: true, problems: [] }
@@ -91,9 +88,9 @@ export type CloseResult =
 function closureRefusals(
     root: string,
     manifest: PreparedManifest,
-    ledger: ReturnType<typeof readLedger>,
     starts: ReturnType<typeof trialStarts>,
     ended: ReadonlySet<string>,
+    assessments: ReturnType<typeof checkedAssessments>,
 ): string[] {
     const unresolved = starts
         .map((event) => (typeof event.slotId === "string" ? event.slotId : ""))
@@ -109,9 +106,7 @@ function closureRefusals(
             `unsettled spend: ${claims.join("; ")}; closure would hide an unknown outcome`,
         ];
     }
-    const assessments = checkedAssessments({ root, manifest, ledger });
-    if (assessments.problems.length > 0) {
-        return [
+    if (assessments.problems.length > 0) {        return [
             "assessment evidence is not trustworthy",
             ...assessments.problems,
         ];
@@ -151,9 +146,11 @@ function closureRefusals(
     const judgementConflicts = unresolvedJudgements(
         root,
         manifest,
-        ledger,
         ended,
         policy.policy,
+        new Map(
+            assessments.records.map((entry) => [entry.slotId, entry]),
+        ),
     );
     return judgementConflicts.length > 0
         ? ["judgement evidence is unresolved", ...judgementConflicts]
@@ -201,21 +198,21 @@ export function closeCampaign(
                     typeof event.slotId === "string" ? [event.slotId] : [],
                 ),
         );
-        const refusals = closureRefusals(
-            root,
-            prepared.manifest,
-            ledger,
-            starts,
-            ended,
-        );
-        if (refusals.length > 0) {
-            return { kind: "refuse" as const, problems: refusals };
-        }
         const assessments = checkedAssessments({
             root,
             manifest: prepared.manifest,
             ledger,
         });
+        const refusals = closureRefusals(
+            root,
+            prepared.manifest,
+            starts,
+            ended,
+            assessments,
+        );
+        if (refusals.length > 0) {
+            return { kind: "refuse" as const, problems: refusals };
+        }
         const closedAt = now();
         appendLedgerEvent(
             root,

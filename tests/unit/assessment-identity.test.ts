@@ -457,6 +457,40 @@ console.log(JSON.stringify(result));
         );
     });
 
+    it("returns the original closure time and appends one close event", async () => {
+        // Arrange
+        const root = await rootOf();
+        await run(root);
+        assessCampaign(root);
+
+        // Act
+        const first = closeCampaign(
+            root,
+            () => "2026-11-17T00:00:00.000Z",
+        );
+        const second = closeCampaign(
+            root,
+            () => "2026-11-18T00:00:00.000Z",
+        );
+
+        // Assert
+        assert.equal(first.ok, true, first.ok ? "" : first.problems.join("; "));
+        assert.equal(
+            second.ok,
+            true,
+            second.ok ? "" : second.problems.join("; "),
+        );
+        if (!first.ok || !second.ok) return;
+        assert.equal(first.alreadyClosed, false);
+        assert.equal(second.alreadyClosed, true);
+        assert.equal(second.closedAt, "2026-11-17T00:00:00.000Z");
+        const closes = readLedger(root).events.filter(
+            (event) => event.event === "close",
+        );
+        assert.equal(closes.length, 1);
+        assert.equal(closes[0]?.assessments, 3);
+    });
+
     it("treats a post-close identical assessment as a read-only result", async () => {
         // Arrange
         const root = await rootOf();
