@@ -35,11 +35,16 @@ export interface BlindnessIdentity {
     caseIds: readonly string[];
 }
 
+/** One side's lake observation, or the refusal. */
+export type LakeRead =
+    | { ok: true; documents: LakeDocument[] }
+    | { ok: false; problem: string };
+
+/** A contained lake reader; injectable by tests that count observations. */
+export type LakeReader = (workspace: string, lakeRoot: string) => LakeRead;
+
 /** Read every Markdown document under one contained workspace lake. */
-function lakeDocuments(
-    workspace: string,
-    lakeRoot: string,
-): { ok: true; documents: LakeDocument[] } | { ok: false; problem: string } {
+export function lakeDocuments(workspace: string, lakeRoot: string): LakeRead {
     const read = readContainedDocuments(workspace, lakeRoot, (name) =>
         name.endsWith(".md"),
     );
@@ -51,6 +56,65 @@ function lakeDocuments(
             path: document.path.slice(prefix.length),
             contents: document.contents,
         })),
+    };
+}
+
+/** The observed pristine/live lakes and their change, from one read per side. */
+interface LakeObservation {
+    /** The pristine documents. */
+    before: LakeDocument[];
+    /** The live documents. */
+    after: LakeDocument[];
+    /** The change between them. */
+    change: ReturnType<typeof docChanges>;
+}
+
+/**
+ * Observe each side of one lake exactly once and derive the change from those
+ * same collections. A caller that needs both the packet and the mutation state
+ * therefore cannot mix two observations of the same side.
+ * @param pristine The pristine workspace root.
+ * @param live The live workspace root.
+ * @param lakeRoot The lake path within each workspace.
+ * @param readLakes The contained lake reader.
+ * @returns The observation, or every unreadable side.
+ */
+function observeLakes(
+    pristine: string,
+    live: string,
+    lakeRoot: string,
+    readLakes: LakeReader,
+): { ok: true; value: LakeObservation } | { ok: false; problems: string[] } {
+    const beforeDocs = readLakes(pristine, lakeRoot);
+    const afterDocs = readLakes(live, lakeRoot);
+    if (!beforeDocs.ok) {
+        return {
+            ok: false,
+            problems: [`pristine lake ${lakeRoot}: ${beforeDocs.problem}`],
+        };
+    }
+    if (!afterDocs.ok) {
+        return {
+            ok: false,
+            problems: [`live lake ${lakeRoot}: ${afterDocs.problem}`],
+        };
+    }
+    return {
+        ok: true,
+        value: {
+            before: beforeDocs.documents,
+            after: afterDocs.documents,
+            change: docChanges(beforeDocs.documents, afterDocs.documents),
+        },
+    };
+}
+
+/** The reported mutation state for one observed change. */
+function stateOfChange(change: ReturnType<typeof docChanges>): DocState {
+    return {
+        documentsChanged: change.documentsChanged,
+        createdPaths: change.createdPaths,
+        modifiedPaths: change.modifiedPaths,
     };
 }
 
@@ -104,82 +168,58 @@ function primaryEvidence(trialDir: string): {
  * @param root The campaign root.
  * @param slot The scheduled slot.
  * @param testCase The docs case definition.
+ * @param readLakes The contained lake reader.
  * @returns The mutation state, or every unreadable lake.
  */
 export function docStateFor(
     root: string,
     slot: Slot,
     testCase: DocsTaskCase,
+    readLakes: LakeReader = lakeDocuments,
 ): { ok: true; state: DocState } | { ok: false; problems: string[] } {
     const lakeRoot = testCase.lakeRoot ?? "docs";
-    const beforeDocs = lakeDocuments(
+    const observed = observeLakes(
         join(root, "prepare", "workspaces", testCase.caseId),
-        lakeRoot,
-    );
-    const afterDocs = lakeDocuments(
         join(trialDirectory(root, slot.slotId), "workspace"),
         lakeRoot,
+        readLakes,
     );
-    if (!beforeDocs.ok) {
-        return {
-            ok: false,
-            problems: [`pristine lake ${lakeRoot}: ${beforeDocs.problem}`],
-        };
-    }
-    if (!afterDocs.ok) {
-        return {
-            ok: false,
-            problems: [`live lake ${lakeRoot}: ${afterDocs.problem}`],
-        };
-    }
-    const change = docChanges(beforeDocs.documents, afterDocs.documents);
-    return {
-        ok: true,
-        state: {
-            documentsChanged: change.documentsChanged,
-            createdPaths: change.createdPaths,
-            modifiedPaths: change.modifiedPaths,
-        },
-    };
+    return observed.ok
+        ? { ok: true, state: stateOfChange(observed.value.change) }
+        : observed;
 }
 
 /**
  * Build one slot's blinded packet and the mutation state it must agree with.
- * @param options The campaign root, slot and docs case.
+ * @param options The campaign root, slot, docs case and lake reader.
  * @returns The packet and state, or every refusal.
  * @param options.root The campaign root.
  * @param options.slot The scheduled slot.
  * @param options.testCase The docs case definition.
+ * @param options.lakeReader The contained lake reader; counted by tests.
  */
 export function buildPacket(options: {
     root: string;
     slot: Slot;
     testCase: DocsTaskCase;
+    lakeReader?: LakeReader;
 }):
     | { ok: true; packet: string; state: DocState }
     | { ok: false; problems: string[] } {
     const { root, slot, testCase } = options;
+    const readLakes = options.lakeReader ?? lakeDocuments;
     const trialDir = trialDirectory(root, slot.slotId);
     const lakeRoot = testCase.lakeRoot ?? "docs";
     const pristine = join(root, "prepare", "workspaces", testCase.caseId);
-    const beforeDocs = lakeDocuments(pristine, lakeRoot);
-    const afterDocs = lakeDocuments(join(trialDir, "workspace"), lakeRoot);
-    if (!beforeDocs.ok) {
-        return {
-            ok: false,
-            problems: [`pristine lake ${lakeRoot}: ${beforeDocs.problem}`],
-        };
-    }
-    if (!afterDocs.ok) {
-        return {
-            ok: false,
-            problems: [`live lake ${lakeRoot}: ${afterDocs.problem}`],
-        };
-    }
+    const observed = observeLakes(
+        pristine,
+        join(trialDir, "workspace"),
+        lakeRoot,
+        readLakes,
+    );
+    if (!observed.ok) return observed;
     const changed = changedPaths(pristine, join(trialDir, "workspace"));
     if (!changed.ok) return changed;
-    const state = docStateFor(root, slot, testCase);
-    if (!state.ok) return state;
     const answer = readContainedFile(trialDir, "answer.md");
     if (!answer.ok) {
         return { ok: false, problems: [`trial answer: ${answer.problem}`] };
@@ -191,14 +231,18 @@ export function buildPacket(options: {
         ),
         standingPermission: textOf(join(pristine, "AGENTS.md")),
         scenarioTruth: testCase.truth ?? "",
-        beforeDocs: beforeDocs.documents,
-        afterDocs: afterDocs.documents,
+        beforeDocs: observed.value.before,
+        afterDocs: observed.value.after,
         changedPaths: changed.paths,
         primary: primaryEvidence(trialDir),
         docsOperations: operations.lines,
         answer: answer.text,
     });
-    return { ok: true, packet, state: state.state };
+    return {
+        ok: true,
+        packet,
+        state: stateOfChange(observed.value.change),
+    };
 }
 
 /** Escape one identifier for a literal RegExp. */
