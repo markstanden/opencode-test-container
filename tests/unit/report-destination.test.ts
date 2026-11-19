@@ -144,7 +144,11 @@ describe("report destination containment", () => {
         );
 
         // Assert
-        assert.equal(result.ok, true, result.ok ? "" : result.problems.join("; "));
+        assert.equal(
+            result.ok,
+            true,
+            result.ok ? "" : result.problems.join("; "),
+        );
         if (!result.ok) return;
         const report = JSON.parse(
             readFileSync(join(out, "report.json"), "utf8"),
@@ -157,7 +161,8 @@ describe("report destination containment", () => {
         assert.equal(report.generatedAt, "2026-11-19T00:00:00.000Z");
     });
 
-    it("refuses a direct evidence child", async () => {        // Arrange
+    it("refuses a direct evidence child", async () => {
+        // Arrange
         const root = await closed();
         const out = join(root, "evidence", "review-output");
 
