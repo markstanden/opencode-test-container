@@ -14,7 +14,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { prepareCampaign } from "../../src/campaign/prepare.ts";
 import { freezeCampaign } from "../../src/campaign/freeze.ts";
-import { runCampaign } from "../../src/campaign/run.ts";
+import { runCampaign, withOwnedTempDirectory } from "../../src/campaign/run.ts";
 import { readClaims } from "../../src/campaign/budget.ts";
 import { readLedger } from "../../src/campaign/ledger.ts";
 import type { CommandResult } from "../../src/adapters/process.ts";
@@ -177,9 +177,44 @@ describe("cancellation boundaries", () => {
 });
 
 describe("budget preview", () => {
+    it("removes every preview directory it owns, on success and on a throw", () => {
+        // Arrange: no preview directory survives a completed or throwing body.
+        const owned = (): string[] =>
+            readdirSync(tmpdir()).filter((name) =>
+                name.startsWith("otc-plan-"),
+            );
+        const before = owned();
+
+        // Act: success.
+        const value = withOwnedTempDirectory("otc-plan-test-", (directory) => {
+            writeFileSync(join(directory, "staged.txt"), "evidence");
+            return directory;
+        });
+
+        // Assert
+        assert.equal(existsSync(value), false);
+        assert.deepEqual(owned(), before);
+
+        // Act: a setup error after files were written.
+        assert.throws(() =>
+            withOwnedTempDirectory("otc-plan-test-", (directory) => {
+                writeFileSync(join(directory, "staged.txt"), "evidence");
+                throw new Error("setup failed");
+            }),
+        );
+
+        // Assert: the partial tree is gone too.
+        assert.deepEqual(owned(), before);
+    });
+
     it("reports one admissible slot and the remaining refusals without claiming", async () => {
         // Arrange
         const { dir, root } = await campaignRoot({ trials: 1 });
+        const owned = (): string[] =>
+            readdirSync(tmpdir()).filter((name) =>
+                name.startsWith("otc-plan-"),
+            );
+        const before = owned();
         try {
             // Act
             const summary = await runCampaign(root, { dryRun: true });
@@ -203,6 +238,7 @@ describe("budget preview", () => {
             assert.deepEqual(readClaims(join(root, "evidence"), "trial"), []);
             assert.equal(existsSync(join(root, "evidence", "trials")), false);
             assert.deepEqual(readLedger(root).events, []);
+            assert.deepEqual(owned(), before);
         } finally {
             rmSync(dir, { recursive: true, force: true });
         }

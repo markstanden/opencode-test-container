@@ -13,13 +13,16 @@
 
 import { createHash } from "node:crypto";
 import {
+    closeSync,
     mkdirSync,
+    openSync,
     readFileSync,
     readdirSync,
     unlinkSync,
     writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
+import { sleepSync } from "../contracts/sleep.ts";
 
 /** The spend kinds with independent ceilings. */
 export type BudgetKind = "trial" | "judge" | "recovery";
@@ -235,23 +238,24 @@ function createClaim(
     identity: ClaimIdentity,
 ): BudgetClaim | undefined {
     const path = join(dir, claimFileName(kind, index));
+    const at = identity.at ?? new Date().toISOString();
     const claim: BudgetClaim = {
         kind,
         index,
         path,
         state: "reserved",
-        at: identity.at ?? null,
+        at,
         stamp: identity.stamp ?? null,
         attemptId: identity.attemptId ?? null,
         note: identity.note ?? null,
         key: identity.key ?? null,
     };
     try {
-        writeFileSync(path, claimBytes(claim, new Date().toISOString()), {
+        writeFileSync(path, claimBytes(claim, at), {
             encoding: "utf8",
             flag: "wx",
         });
-        return { ...claim, at: identity.at ?? new Date().toISOString() };
+        return claim;
     } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
         return undefined;
@@ -311,54 +315,157 @@ function releaseKeyLock(dir: string, kind: BudgetKind, key: string): void {
 }
 
 /**
+ * Run one claim mutation under that claim's exclusive lock.
+ *
+ * Creation uses `wx` and needs no lock; every later read-modify-write or
+ * unlink takes this lock, so a stale handle cannot observe one state and then
+ * remove or overwrite a newer one. The lock is never removed by another
+ * process; a crashed holder fails closed until an operator removes it.
+ * @param path The claim file path.
+ * @param action The mutation body.
+ * @returns The body's value, or the lock refusal.
+ */
+function withClaimLock<T>(
+    path: string,
+    action: () => T,
+): { ok: true; value: T } | { ok: false; reason: string } {
+    const lock = `${path}.lock`;
+    let fd: number | null = null;
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+        try {
+            fd = openSync(lock, "wx", 0o600);
+            break;
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+                return {
+                    ok: false,
+                    reason: `claim lock failed: ${error instanceof Error ? error.message : String(error)}`,
+                };
+            }
+            sleepSync(5);
+        }
+    }
+    if (fd === null) {
+        return { ok: false, reason: `claim lock ${lock} is held` };
+    }
+    closeSync(fd);
+    try {
+        return { ok: true, value: action() };
+    } finally {
+        try {
+            unlinkSync(lock);
+        } catch {
+            // Only the lock this call created is released.
+        }
+    }
+}
+
+/** Read the claim currently persisted at a handle's path. */
+function currentClaim(claim: BudgetClaim): BudgetClaim | null {
+    try {
+        return claimOf(
+            claim.kind,
+            claim.index,
+            claim.path,
+            readFileSync(claim.path, "utf8"),
+        );
+    } catch {
+        return null;
+    }
+}
+
+/** Whether a handle names the same logical, owned claim as a persisted one. */
+function sameClaim(left: BudgetClaim, right: BudgetClaim): boolean {
+    return (
+        left.kind === right.kind &&
+        left.index === right.index &&
+        left.at === right.at &&
+        left.stamp === right.stamp &&
+        left.attemptId === right.attemptId &&
+        left.key === right.key
+    );
+}
+
+/**
  * Release a reservation that provably dispatched nothing.
  *
- * Only a `reserved` claim may be released: a spawned claim's call may have
- * begun and must keep consuming the ceiling.
+ * Only the same owned, still-`reserved` claim may be released. The state and
+ * identity are re-read under the claim's lock, so a retained pre-spawn handle
+ * cannot remove a claim another operation has advanced, and a stale handle
+ * cannot release a newer owner's reservation at a reused index.
  * @param claim The claim to release.
- * @returns Whether the claim and its logical lock were removed.
+ * @returns Whether this call removed the still-reserved owned claim.
  */
 export function releaseClaim(claim: BudgetClaim): boolean {
     if (claim.state !== "reserved") return false;
-    try {
-        unlinkSync(claim.path);
-    } catch {
-        return false;
-    }
-    if (claim.key !== null) {
-        releaseKeyLock(dirname(claim.path), claim.kind, claim.key);
-    }
-    return true;
+    const locked = withClaimLock(claim.path, () => {
+        const current = currentClaim(claim);
+        if (
+            current === null ||
+            current.state !== "reserved" ||
+            !sameClaim(claim, current)
+        ) {
+            return false;
+        }
+        try {
+            unlinkSync(claim.path);
+        } catch {
+            return false;
+        }
+        if (current.key !== null) {
+            releaseKeyLock(dirname(claim.path), claim.kind, current.key);
+        }
+        return true;
+    });
+    return locked.ok ? locked.value : false;
 }
 
 /**
  * Advance one claim's durable state.
+ *
+ * The update is a read-modify-write under the claim's lock. A handle that no
+ * longer matches the persisted claim is a stale owner, never an invitation to
+ * overwrite a newer state.
  * @param claim The claim to update.
  * @param state The new lifecycle state.
  * @param patch Extra identity fields to record.
  * @param patch.note The new note.
  * @param patch.stamp The stamp to record.
  * @param patch.attemptId The attempt id to record.
- * @returns The updated claim.
+ * @returns The updated claim, which callers must thread onward.
  */
 export function advanceClaim(
     claim: BudgetClaim,
     state: ClaimState,
     patch: { note?: string; stamp?: string; attemptId?: string } = {},
 ): BudgetClaim {
-    const updated: BudgetClaim = {
-        ...claim,
-        state,
-        stamp: patch.stamp ?? claim.stamp,
-        attemptId: patch.attemptId ?? claim.attemptId,
-        note: patch.note ?? claim.note,
-    };
-    writeFileSync(
-        updated.path,
-        claimBytes(updated, new Date().toISOString()),
-        "utf8",
-    );
-    return updated;
+    const locked = withClaimLock(claim.path, () => {
+        const current = currentClaim(claim);
+        if (
+            current === null ||
+            current.state !== claim.state ||
+            !sameClaim(claim, current)
+        ) {
+            throw new Error(
+                `claim ${claim.path} changed ownership; refusing to advance a stale handle`,
+            );
+        }
+        const updated: BudgetClaim = {
+            ...current,
+            state,
+            stamp: patch.stamp ?? current.stamp,
+            attemptId: patch.attemptId ?? current.attemptId,
+            note: patch.note ?? current.note,
+        };
+        writeFileSync(
+            updated.path,
+            claimBytes(updated, new Date().toISOString()),
+            "utf8",
+        );
+        return updated;
+    });
+    if (!locked.ok) throw new Error(locked.reason);
+    return locked.value;
 }
 
 /** Per-state claim counts. */

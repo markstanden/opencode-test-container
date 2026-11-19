@@ -32,11 +32,13 @@ import {
     writeJudgeConfigHome,
 } from "../adapters/opencode/runtime.ts";
 import {
-    normaliseMounts,
     ownedContainerName,
     runContainer,
     type ContainerPlan,
 } from "../adapters/podman/container.ts";
+import { buildAttemptPlan, type AttemptPlanValues } from "./plan.ts";
+export { buildAttemptPlan };
+export type { AttemptPlanValues };
 import type { CommandResult } from "../adapters/process.ts";
 import type { Usage } from "../adapters/opencode/events.ts";
 import {
@@ -287,8 +289,8 @@ function recordedAttempts(
     return { attempts, problems };
 }
 
-/** The judge's immutable packet, writing it once or refusing a change. */
-function packetFor(
+/** Publish the judge's immutable packet once, or refuse a change. */
+function publishPacket(
     root: string,
     slotId: string,
     built: string,
@@ -311,19 +313,6 @@ function packetFor(
     });
     writeFileSync(path, built, "utf8");
     return { ok: true, packet: built, sha256: sha256Bytes(built) };
-}
-
-/** The judge work mounts: packet read-only, config read-only, work writable. */
-function judgeMounts(options: {
-    packet: string;
-    configHome: string;
-    work: string;
-}): ContainerPlan["mounts"] {
-    return normaliseMounts([
-        { source: options.packet, target: "/judge/packet.md", readOnly: true },
-        { source: options.configHome, target: "/config-home", readOnly: true },
-        { source: options.work, target: "/judge/work", readOnly: false },
-    ]);
 }
 
 /** Write the 0600 judge environment file. */
@@ -382,6 +371,7 @@ function planAttempt(options: {
     campaign: Campaign;
     slot: Slot;
     attemptId: string;
+    imageId: string;
     packet: string;
     packetSha256: string;
     packetFile: string;
@@ -402,14 +392,13 @@ function planAttempt(options: {
     const environment = writeJudgeEnvironment(attemptDir, options.campaign);
     if (!environment.ok) return environment;
     const { envFile, names } = environment;
-    const plan: ContainerPlan = {
-        imageId: "",
-        mounts: judgeMounts({
-            packet: options.packetFile,
-            configHome,
-            work,
-        }),
-        workdir: "/judge/work",
+    const printLogs = process.env.OTC_PRINT_LOGS === "1";
+    const plan = buildAttemptPlan({
+        imageId: options.imageId,
+        packet: options.packet,
+        packetFile: options.packetFile,
+        configHome,
+        work,
         network: options.campaign.runtime.network,
         argv: [
             "opencode",
@@ -419,15 +408,11 @@ function planAttempt(options: {
                 // slot, arm or attempt identity in it.
                 title: `otc-judge-${sha256Bytes(options.attemptId).slice(0, 12)}`,
                 prompt: null,
-                printLogs: process.env.OTC_PRINT_LOGS === "1",
+                printLogs,
             }),
         ],
-        // The blinded packet is the model's prompt. It travels on stdin so a
-        // packet larger than the host's per-argument limit still arrives
-        // byte for byte; it is never in the process argument vector.
-        stdin: options.packet,
-        envNames: [...new Set(names)],
         envFile,
+        envNames: names,
         timeoutMs:
             options.campaign.assessment.judge?.timeoutMs ??
             options.campaign.runtime.timeoutMs,
@@ -443,7 +428,7 @@ function planAttempt(options: {
             "otc.slot": options.slot.slotId,
             "otc.attempt": options.attemptId,
         },
-    };
+    });
     return {
         ok: true,
         plan,
@@ -748,6 +733,7 @@ async function dispatchAttempt(options: {
             campaign: options.manifest.campaign,
             slot: options.slot,
             attemptId: options.attemptId,
+            imageId: options.frozen.imageId,
             packet: options.packet,
             packetSha256: options.packetSha256,
             packetFile: packetPath(options.root, options.slot.slotId),
@@ -768,7 +754,6 @@ async function dispatchAttempt(options: {
             problem: `judge environment is not valid: ${planned.problems.join("; ")}`,
         };
     }
-    planned.plan.imageId = options.frozen.imageId;
     const startedAt = options.now();
     const startedMeta: JudgeAttemptMeta = {
         schemaVersion: 1,
@@ -1373,8 +1358,18 @@ export function buildJudgePacketForSlot(
     return buildPacket({ root, slot, testCase });
 }
 
-/** Settle a slot that already has a selection or a usable judgement. */
-function settleExisting(options: {
+/** The decision to reuse, refuse or repair an existing partially judged slot. */
+type SettlementDecision =
+    | { action: "reuse" }
+    | { action: "refuse"; problems: string[] }
+    | { action: "repair"; selectedAttemptId: string }
+    | null;
+
+/**
+ * Apply an existing-slot settlement: reuse, refuse, or record a repair. A dry
+ * run takes the same decision but never records the repair.
+ */
+function applySettlement(options: {
     root: string;
     manifest: PreparedManifest;
     slot: Slot;
@@ -1383,6 +1378,37 @@ function settleExisting(options: {
     dryRun: boolean;
     now: () => string;
 }): { status: "judged" | "skipped" | "refused"; problems: string[] } | null {
+    const settled = settleExisting(options);
+    if (settled === null) return null;
+    if (settled.action === "reuse") {
+        return { status: "skipped", problems: [] };
+    }
+    if (settled.action === "refuse") {
+        return { status: "refused", problems: settled.problems };
+    }
+    if (options.dryRun) return { status: "judged", problems: [] };
+    const record = recordSelection({
+        ...options,
+        selectedAttemptId: settled.selectedAttemptId,
+    });
+    return record.ok
+        ? { status: "judged", problems: [] }
+        : { status: "refused", problems: record.problems };
+}
+
+/**
+ * Decide what to do with a slot that already has a selection or a usable
+ * judgement. Recording a repair is the caller's separate act.
+ */
+function settleExisting(options: {
+    root: string;
+    manifest: PreparedManifest;
+    slot: Slot;
+    attempts: RecordedAttempt[];
+    policy: RecoveryPolicy | null;
+    dryRun: boolean;
+    now: () => string;
+}): SettlementDecision {
     const { root, slot, attempts, policy } = options;
     if (existsSync(selectionPath(root, slot.slotId))) {
         const checked = checkedSelection({
@@ -1392,21 +1418,17 @@ function settleExisting(options: {
             policy,
         });
         return checked.ok
-            ? { status: "skipped", problems: [] }
-            : { status: "refused", problems: checked.problems };
+            ? { action: "reuse" }
+            : { action: "refuse", problems: checked.problems };
     }
     const judged = attempts.filter(
         (entry) => entry.meta.judgementStatus === "judged",
     );
     if (judged.length === 0) return null;
-    if (options.dryRun) return { status: "judged", problems: [] };
-    const recorded = recordSelection({
-        ...options,
+    return {
+        action: "repair",
         selectedAttemptId: (judged[0] as RecordedAttempt).attemptId,
-    });
-    return recorded.ok
-        ? { status: "judged", problems: [] }
-        : { status: "refused", problems: recorded.problems };
+    };
 }
 
 /** Build and leak-check the judge packet for a ready slot. */
@@ -1595,7 +1617,7 @@ function ensurePacket(
     built: string,
 ): { packet: string; sha256: string } | { problem: string } {
     if (existing !== null) return existing;
-    const frozen = packetFor(root, slotId, built);
+    const frozen = publishPacket(root, slotId, built);
     return frozen.ok
         ? { packet: frozen.packet, sha256: frozen.sha256 }
         : { problem: frozen.problem };
@@ -1758,7 +1780,10 @@ async function judgeSlot(options: {
     ) {
         return { status: "refused", problems: [eligibility.reason] };
     }
-    const settled = settleExisting({ ...options, attempts: recorded.attempts });
+    const settled = applySettlement({
+        ...options,
+        attempts: recorded.attempts,
+    });
     if (settled !== null) return settled;
     const ready = buildReady({ ...options, ...resolved });
     if ("problem" in ready) {
@@ -2062,57 +2087,93 @@ export function readSelectedJudgement(
         : null;
 }
 
+/** Options for the internal judge-sandbox plan hook. */
+export interface JudgeSandboxPlanOptions {
+    /**
+     * A directory the caller owns and cleans up. The plan's packet, config and
+     * environment files are written beneath it, so no directory is left in the
+     * system temp root. Omitted, a fresh system-temp directory is created and
+     * intentionally retained for inspection.
+     */
+    workDirectory?: string;
+}
+
+/** Resolve the docs case and judge model for one sandbox plan. */
+function resolveSandboxCase(
+    manifest: PreparedManifest,
+    slotId: string,
+):
+    | { ok: true; slot: Slot; testCase: DocsTaskCase; judgeModel: string }
+    | { ok: false; problems: string[] } {
+    const slot = manifest.campaign.schedule.slots.find(
+        (entry) => entry.slotId === slotId,
+    );
+    const testCase = manifest.suite.cases.find(
+        (entry) => entry.caseId === slot?.caseId,
+    );
+    if (slot === undefined || testCase?.kind !== "docs-task") {
+        return { ok: false, problems: [`slot ${slotId} has no docs case`] };
+    }
+    const judgeModel = manifest.campaign.assessment.judge?.model;
+    return judgeModel === undefined
+        ? {
+              ok: false,
+              problems: ["the campaign declares no judge model"],
+          }
+        : { ok: true, slot, testCase, judgeModel };
+}
+
+/** The caller-owned or disposable directory a sandbox plan writes into. */
+function sandboxDirectory(options: JudgeSandboxPlanOptions): string {
+    return options.workDirectory === undefined
+        ? mkdtempSync(join(tmpdir(), "otc-judge-plan-"))
+        : join(options.workDirectory, "judge-plan");
+}
+
 /**
  * Build a judge sandbox plan for one docs slot without claiming a budget or
  * dispatching. Internal smoke/ops hook: it uses the production mount plan and
- * packet builder, and writes only into a fresh temporary attempt directory.
+ * packet builder, and writes only into a caller-owned working directory.
  * @param root The campaign root.
  * @param slotId The scheduled docs slot.
  * @param attemptId The attempt identity to render.
+ * @param options The caller-owned working directory.
  * @returns The plan, or every refusal.
  */
 export function judgeSandboxPlanForSlot(
     root: string,
     slotId: string,
     attemptId: string,
+    options: JudgeSandboxPlanOptions = {},
 ): { ok: true; plan: ContainerPlan } | { ok: false; problems: string[] } {
     const prepared = loadPreparedManifest(root);
     if (!prepared.ok) return { ok: false, problems: [prepared.problem] };
     const frozen = loadFrozen(root);
     if (!frozen.ok) return { ok: false, problems: [frozen.problem] };
-    const slot = prepared.manifest.campaign.schedule.slots.find(
-        (entry) => entry.slotId === slotId,
-    );
-    const testCase = prepared.manifest.suite.cases.find(
-        (entry) => entry.caseId === slot?.caseId,
-    );
-    const judgeModel = prepared.manifest.campaign.assessment.judge?.model;
-    if (slot === undefined || testCase?.kind !== "docs-task") {
-        return { ok: false, problems: [`slot ${slotId} has no docs case`] };
-    }
-    if (judgeModel === undefined) {
-        return {
-            ok: false,
-            problems: ["the campaign declares no judge model"],
-        };
-    }
-    const built = buildPacket({ root, slot, testCase });
+    const resolved = resolveSandboxCase(prepared.manifest, slotId);
+    if (!resolved.ok) return resolved;
+    const built = buildPacket({
+        root,
+        slot: resolved.slot,
+        testCase: resolved.testCase,
+    });
     if (!built.ok) return built;
-    const directory = mkdtempSync(join(tmpdir(), "otc-judge-plan-"));
+    const directory = sandboxDirectory(options);
+    mkdirSync(directory, { recursive: true });
     const packetFile = join(directory, "packet.md");
     writeFileSync(packetFile, built.packet, "utf8");
     const planned = planAttempt({
         root,
         campaign: prepared.manifest.campaign,
-        slot,
+        slot: resolved.slot,
         attemptId,
+        imageId: frozen.record.imageId,
         packet: built.packet,
         packetSha256: sha256Bytes(built.packet),
         packetFile,
-        judgeModel,
+        judgeModel: resolved.judgeModel,
         attemptDirOverride: directory,
     });
     if (!planned.ok) return planned;
-    planned.plan.imageId = frozen.record.imageId;
     return { ok: true, plan: planned.plan };
 }

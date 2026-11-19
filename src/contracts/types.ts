@@ -276,6 +276,23 @@ export interface CampaignBundle {
     declaredSuiteSha256: string | null;
 }
 
+/**
+ * A validated bundle together with the exact campaign and suite bytes that
+ * were observed. Consumers that stage or receipt an original document must use
+ * these values instead of reading the path again, so one preparation cannot mix
+ * two source versions.
+ */
+export interface ObservedCampaignBundle extends CampaignBundle {
+    /** The exact campaign document text that was parsed and validated. */
+    campaignText: string;
+    /** The exact suite document text that was parsed and validated. */
+    suiteText: string;
+    /** SHA-256 of the campaign document bytes. */
+    campaignSha256: string;
+    /** SHA-256 of the raw suite document bytes, before canonicalisation. */
+    suiteSha256: string;
+}
+
 /** The finite lifecycle states derived from evidence. */
 export type LifecycleState =
     "prepared" | "frozen" | "running" | "assessed" | "closed" | "blocked";

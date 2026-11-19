@@ -20,7 +20,12 @@ import { freezeCampaign } from "../../src/campaign/freeze.ts";
 import { runCampaign } from "../../src/campaign/run.ts";
 import { assessCampaign } from "../../src/campaign/assess.ts";
 import { closeCampaign } from "../../src/campaign/close.ts";
-import { analyseCampaign } from "../../src/reporting/report.ts";
+import {
+    analyseCampaign,
+    reportIntact,
+    reportMarkdown,
+    type Report,
+} from "../../src/reporting/report.ts";
 import { runCommand, type CommandResult } from "../../src/adapters/process.ts";
 import type { ContainerPlan } from "../../src/adapters/podman/container.ts";
 
@@ -124,6 +129,36 @@ describe("report destination containment", () => {
 
     after(() => {
         for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
+    });
+
+    it("renders Markdown from the same report value it publishes as JSON", async () => {
+        // Arrange
+        const root = await closed();
+        const out = join(root, "reports", "parity");
+
+        // Act
+        const result = analyseCampaign(
+            root,
+            out,
+            () => "2026-11-19T00:00:00.000Z",
+        );
+
+        // Assert
+        assert.equal(
+            result.ok,
+            true,
+            result.ok ? "" : result.problems.join("; "),
+        );
+        if (!result.ok) return;
+        const report = JSON.parse(
+            readFileSync(join(out, "report.json"), "utf8"),
+        ) as Report;
+        assert.equal(reportIntact(report), true);
+        assert.equal(
+            readFileSync(join(out, "report.md"), "utf8"),
+            reportMarkdown(report),
+        );
+        assert.equal(report.generatedAt, "2026-11-19T00:00:00.000Z");
     });
 
     it("refuses a direct evidence child", async () => {

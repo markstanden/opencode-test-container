@@ -32,14 +32,14 @@ import {
 import {
     CONTAINER_CONFIG_HOME,
     CONTAINER_JOURNAL,
-    CONTAINER_SUBJECTS,
     CONTAINER_WORKSPACE,
-    normaliseMounts,
     ownedContainerName,
     runContainer,
     type ContainerPlan,
-    type Mount,
 } from "../adapters/podman/container.ts";
+import { buildTrialPlan, type TrialPlanValues } from "./plan.ts";
+export { buildTrialPlan };
+export type { TrialPlanValues };
 import type { CommandResult } from "../adapters/process.ts";
 import { deliveryCheck, loadFrozen, type FrozenRecord } from "./freeze.ts";
 import { stageTree } from "./inventory.ts";
@@ -243,40 +243,6 @@ function stageSkills(
     return problems;
 }
 
-/** The mounts for one trial. */
-function trialMounts(options: {
-    workspace: string;
-    configHome: string;
-    subjects: string;
-    journal: string | null;
-}): Mount[] {
-    const mounts: Mount[] = [
-        {
-            source: options.workspace,
-            target: CONTAINER_WORKSPACE,
-            readOnly: false,
-        },
-        {
-            source: options.configHome,
-            target: CONTAINER_CONFIG_HOME,
-            readOnly: true,
-        },
-        {
-            source: options.subjects,
-            target: CONTAINER_SUBJECTS,
-            readOnly: true,
-        },
-    ];
-    if (options.journal !== null) {
-        mounts.push({
-            source: options.journal,
-            target: CONTAINER_JOURNAL,
-            readOnly: false,
-        });
-    }
-    return normaliseMounts(mounts);
-}
-
 /** Write the 0600 trial environment file and return its names. */
 function writeTrialEnvironment(
     trialDir: string,
@@ -365,7 +331,9 @@ function stageTrialPayload(
 
 /**
  * Build the container plan for one trial without dispatching it. Dry runs and
- * tests use the same plan the real runner executes.
+ * tests use the same plan the real runner executes. This command stages files
+ * (workspace, config home, journal and a 0600 env file) and then delegates the
+ * calculation to {@link buildTrialPlan}.
  * @param options The resolved trial inputs.
  * @returns The validated plan, or the problems found while staging.
  * @param options.root The root value.
@@ -417,13 +385,14 @@ export function planTrial(options: {
             problems: [`prompt for ${testCase.caseId} is missing`],
         };
     }
+    const printLogs = process.env.OTC_PRINT_LOGS === "1";
     const argv = [
         "opencode",
         ...opencodeRunArgs({
             model: campaign.runtime.provider.model,
             title: `otc-${campaign.campaignId}-${slot.slotId}`,
             prompt,
-            printLogs: process.env.OTC_PRINT_LOGS === "1",
+            printLogs,
         }),
     ];
     const passthrough = [
@@ -438,19 +407,17 @@ export function planTrial(options: {
     );
     if (!environment.ok) return environment;
     const { envFile, names } = environment;
-    const plan: ContainerPlan = {
+    const plan = buildTrialPlan({
         imageId: frozen.imageId,
-        mounts: trialMounts({
-            workspace,
-            configHome,
-            subjects: join(root, "prepare", "subjects", arm.armId),
-            journal,
-        }),
+        workspace,
+        configHome,
+        subjects: join(root, "prepare", "subjects", arm.armId),
+        journal,
         workdir: CONTAINER_WORKSPACE,
         network: campaign.runtime.network,
         argv,
-        envNames: [...new Set(names)],
         envFile,
+        envNames: names,
         timeoutMs: campaign.runtime.timeoutMs,
         name: ownedContainerName(
             campaign.campaignId,
@@ -462,7 +429,7 @@ export function planTrial(options: {
             "otc.campaign": campaign.campaignId,
             "otc.slot": slot.slotId,
         },
-    };
+    });
     return { ok: true, plan, argv, configSha256 };
 }
 
@@ -955,7 +922,7 @@ async function liveSlot(options: {
     }
     if (options.signal !== undefined)
         planned.planned.plan.signal = options.signal;
-    advanceClaim(claimed.claim, "spawned", {
+    const claim = advanceClaim(claimed.claim, "spawned", {
         stamp: slot.slotId,
         note: "trial dispatch started",
     });
@@ -971,7 +938,7 @@ async function liveSlot(options: {
         now,
         ...(options.signal === undefined ? {} : { signal: options.signal }),
     });
-    advanceClaim(claimed.claim, "closed", {
+    advanceClaim(claim, "closed", {
         note: "trial terminal evidence recorded",
     });
     return {
@@ -1052,28 +1019,49 @@ interface SlotPlanning {
 
 /** Plan a dry run in a disposable directory, then remove it. */
 function dryRunPlan(options: SlotPlanning): SlotOutcome {
-    const planDirectory = mkdtempSync(join(tmpdir(), "otc-plan-"));
-    const planned = planTrial({
-        root: options.root,
-        manifest: options.manifest,
-        frozen: options.frozen,
-        slot: options.slot,
-        testCase: options.testCase,
-        arm: options.arm,
-        trialDir: planDirectory,
-        ...(options.passthrough === undefined
-            ? {}
-            : { passthrough: options.passthrough }),
+    return withOwnedTempDirectory("otc-plan-", (planDirectory) => {
+        const planned = planTrial({
+            root: options.root,
+            manifest: options.manifest,
+            frozen: options.frozen,
+            slot: options.slot,
+            testCase: options.testCase,
+            arm: options.arm,
+            trialDir: planDirectory,
+            ...(options.passthrough === undefined
+                ? {}
+                : { passthrough: options.passthrough }),
+        });
+        return planned.ok
+            ? { ran: true, refused: false, problems: [], stop: false }
+            : {
+                  ran: false,
+                  refused: false,
+                  problems: planned.problems,
+                  stop: false,
+              };
     });
-    rmSync(planDirectory, { recursive: true, force: true });
-    return planned.ok
-        ? { ran: true, refused: false, problems: [], stop: false }
-        : {
-              ran: false,
-              refused: false,
-              problems: planned.problems,
-              stop: false,
-          };
+}
+
+/**
+ * Run a synchronous action in a freshly created directory that this call owns,
+ * removing it on success, refusal and a thrown setup error alike. The action
+ * never receives a path another caller owns. It must not return a promise:
+ * cleanup runs when the action returns, not when an asynchronous body settles.
+ * @param prefix The temp-name prefix.
+ * @param action The work performed inside the owned directory.
+ * @returns The action's value after cleanup.
+ */
+export function withOwnedTempDirectory<T>(
+    prefix: string,
+    action: (directory: string) => T,
+): T {
+    const directory = mkdtempSync(join(tmpdir(), prefix));
+    try {
+        return action(directory);
+    } finally {
+        rmSync(directory, { recursive: true, force: true });
+    }
 }
 
 /** Claim one trial's slot key and budget index, or report the refusal. */

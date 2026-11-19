@@ -9,6 +9,7 @@ import {
     readFileSync,
     readdirSync,
     rmSync,
+    unlinkSync,
     writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -834,6 +835,41 @@ describe("blind docs judge", () => {
             existsSync(join(root, "evidence", "judgements", "useful-write")),
             false,
         );
+    });
+
+    it("does not record a repair during a dry run", async () => {
+        // Arrange: a usable judgement with its selection removed.
+        const { dir, root } = await campaignRoot();
+        dirs.push(dir);
+        const judged = await judgeCampaign(
+            root,
+            { slotIds: ["useful-write"] },
+            {
+                runContainer: container({}),
+                now: () => "2026-11-15T00:10:00.000Z",
+            },
+        );
+        assert.equal(judged.ok, true, judged.problems.join("; "));
+        const directory = join(root, "evidence", "judgements", "useful-write");
+        const selection = join(directory, "selection.json");
+        assert.equal(existsSync(selection), true);
+        unlinkSync(selection);
+        const before = readdirSync(directory).sort();
+
+        // Act
+        const summary = await judgeCampaign(
+            root,
+            { slotIds: ["useful-write"], dryRun: true },
+            {
+                runContainer: container({}),
+                now: () => "2026-11-15T00:20:00.000Z",
+            },
+        );
+
+        // Assert: the dry run decided a repair was possible but wrote nothing.
+        assert.equal(summary.ok, true, summary.problems.join("; "));
+        assert.equal(existsSync(selection), false);
+        assert.deepEqual(readdirSync(directory).sort(), before);
     });
 
     it("records a process failure without recovering", async () => {

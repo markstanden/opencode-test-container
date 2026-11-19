@@ -19,7 +19,7 @@ import {
     toolIdentityProblems,
     type ToolIdentity,
 } from "../contracts/version.ts";
-import { readClaims } from "./budget.ts";
+import { readClaims, type BudgetClaim, type BudgetKind } from "./budget.ts";
 import { trialDirectory } from "./run.ts";
 import type { PreparedManifest } from "./prepare.ts";
 
@@ -185,6 +185,8 @@ function judgementOf(
     manifest: StatusManifest,
     ledger: ReturnType<typeof readLedger>,
     assessments: ReturnType<typeof checkedAssessments>["records"],
+    trialClaims: readonly BudgetClaim[],
+    claimsOf: (root: string, kind: BudgetKind) => BudgetClaim[],
 ): StatusReport["judgement"] {
     if (manifest.campaign.assessment.judge === undefined) return null;
     const policy = policyOf(manifest);
@@ -212,9 +214,9 @@ function judgementOf(
     const unsettled = ["trial", "judge", "recovery"].reduce(
         (sum, kind) =>
             sum +
-            readClaims(
-                join(root, "evidence"),
-                kind as "trial" | "judge" | "recovery",
+            (kind === "trial"
+                ? trialClaims
+                : claimsOf(join(root, "evidence"), kind as "judge" | "recovery")
             ).filter((claim) => claim.state !== "closed").length,
         0,
     );
@@ -260,6 +262,8 @@ function nextActionsOf(options: {
     starts: number;
     completed: number;
     assessments: number;
+    /** Trial claims observed for this same status response. */
+    used: number;
     judgement: StatusReport["judgement"];
 }): NextAction[] {
     const quoted = JSON.stringify(options.root);
@@ -280,8 +284,7 @@ function nextActionsOf(options: {
         ];
     }
     const slots = options.manifest.campaign.schedule.slots;
-    const used = readClaims(join(options.root, "evidence"), "trial").length;
-    const remaining = options.manifest.campaign.budgets.trials - used;
+    const remaining = options.manifest.campaign.budgets.trials - options.used;
     const unstarted = slots.length - options.starts;
     const actions: NextAction[] = [];
     if (unstarted > 0 && remaining > 0) {
@@ -466,11 +469,20 @@ function countsOf(
 
 /**
  * Observe a campaign root without writing, building, probing or dispatching.
- * Every next action is derived from the manifest and checked evidence.
+ * Every next action is derived from the manifest and checked evidence observed
+ * for this one response.
  * @param root The campaign root.
+ * @param deps Claim reader, injected by consistency tests.
+ * @param deps.claims Reads the claims of one kind for this response.
  * @returns The status document.
  */
-export function statusOf(root: string): StatusReport {
+export function statusOf(
+    root: string,
+    deps: {
+        claims?: (root: string, kind: BudgetKind) => BudgetClaim[];
+    } = {},
+): StatusReport {
+    const claimsOf = deps.claims ?? readClaims;
     const prepared = loadPreparedManifest(root);
     if (!prepared.ok) return blockedDocument(root, [prepared.problem]);
     const manifest = prepared.manifest;
@@ -485,7 +497,15 @@ export function statusOf(root: string): StatusReport {
     );
     const assessments = assessmentView(root, manifest, ledger);
     const frozen = frozenView(root);
-    const judgement = judgementOf(root, manifest, ledger, assessments.records);
+    const trialClaims = claimsOf(join(root, "evidence"), "trial");
+    const judgement = judgementOf(
+        root,
+        manifest,
+        ledger,
+        assessments.records,
+        trialClaims,
+        claimsOf,
+    );
     const problems = [
         ...(ledger.state === "malformed" ? ledger.problems : []),
         ...assessments.problems,
@@ -507,7 +527,7 @@ export function statusOf(root: string): StatusReport {
         ),
         blocked,
     });
-    const used = readClaims(join(root, "evidence"), "trial").length;
+    const used = trialClaims.length;
     return {
         schemaVersion: 1,
         state,
@@ -540,6 +560,7 @@ export function statusOf(root: string): StatusReport {
                   starts: starts.length,
                   completed: completed.size,
                   assessments: assessments.valid.length,
+                  used,
                   judgement,
               }),
         problems,

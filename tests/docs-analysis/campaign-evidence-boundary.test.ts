@@ -196,6 +196,21 @@ describe("operations-journal verification", () => {
         assert.deepEqual(result.rejected, []);
     });
 
+    it("keeps one-to-one host matching when a journal line is duplicated", () => {
+        // Arrange
+        const lines = [signed(), signed()];
+        const before = [...lines];
+
+        // Act
+        const result = verify(lines);
+
+        // Assert: the second identical line cannot reuse the one dispatch.
+        assert.equal(result.credited.length, 1);
+        assert.equal(result.rejected.length, 1);
+        assert.equal(result.rejected[0]?.reason, "no-host-dispatch");
+        assert.deepEqual(lines, before);
+    });
+
     it("signs only when the MAC covers exactly the record body", () => {
         // Arrange
         const body = JSON.parse(signed()) as Record<string, unknown>;

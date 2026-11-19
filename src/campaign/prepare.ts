@@ -17,6 +17,7 @@ import type {
     Arm,
     Campaign,
     CampaignBundle,
+    ObservedCampaignBundle,
     Suite,
     SuiteCase,
 } from "../contracts/types.ts";
@@ -605,9 +606,10 @@ function stageBundle(
 
 /** The manifest for one fully staged bundle. */
 function manifestFor(
-    bundle: CampaignBundle,
+    bundle: ObservedCampaignBundle,
     subjects: StagedArm[],
     cases: PreparedCase[],
+    tool: ToolIdentity,
 ): PreparedManifest {
     const primaryCheckEntries = cases.flatMap((testCase) =>
         testCase.primaryCheck === undefined
@@ -619,8 +621,8 @@ function manifestFor(
         inventoryVersion: 2,
         campaignId: bundle.campaign.campaignId,
         suiteId: bundle.suite.suiteId,
-        campaignSha256: sha256Bytes(readFileSync(bundle.campaignPath)),
-        suiteSha256: sha256Bytes(readFileSync(bundle.suitePath)),
+        campaignSha256: bundle.campaignSha256,
+        suiteSha256: bundle.suiteSha256,
         suiteCanonicalSha256: sha256Of(bundle.suite),
         scheduleSha256: sha256Of(bundle.campaign.schedule.slots),
         subjectsSha256: sha256Of(
@@ -642,7 +644,7 @@ function manifestFor(
             ),
         ),
         primaryChecksSha256: sha256Of(Object.fromEntries(primaryCheckEntries)),
-        tool: toolIdentity(),
+        tool,
         suite: bundle.suite,
         campaign: normaliseCampaign(bundle),
         subjects,
@@ -680,6 +682,17 @@ function refuseCreated(root: string, problems: string[]): PrepareResult {
     return { ok: false, problems };
 }
 
+/** Preparation's optional observation and attribution seams. */
+export interface PrepareOptions {
+    /**
+     * Reads one original campaign or suite document. Injected by read-count
+     * tests; production uses `readFileSync`.
+     */
+    readDocument?: (path: string) => Buffer;
+    /** The recorded tool identity; sampled once when omitted. */
+    tool?: ToolIdentity;
+}
+
 /**
  * Validate a campaign, then stage an immutable root: suite, prompts, pristine
  * workspaces and subject payloads. Truth never enters a workspace.
@@ -690,15 +703,21 @@ function refuseCreated(root: string, problems: string[]): PrepareResult {
  * same path.
  * @param campaignPath The campaign document.
  * @param root The fresh campaign root.
+ * @param options Observation and attribution seams for deterministic tests.
  * @returns The prepared manifest, or actionable problems.
  */
 export function prepareCampaign(
     campaignPath: string,
     root: string,
+    options: PrepareOptions = {},
 ): PrepareResult {
-    const loaded = loadCampaignBundle(campaignPath);
+    const loaded = loadCampaignBundle(
+        campaignPath,
+        options.readDocument ?? readFileSync,
+    );
     if (!loaded.ok) return { ok: false, problems: loaded.problems };
     const bundle = loaded.value;
+    const tool = options.tool ?? toolIdentity();
     const overlap = overlapProblems(root, stagedInputs(bundle));
     if (overlap.length > 0) {
         return {
@@ -713,15 +732,17 @@ export function prepareCampaign(
             join(root, "prepare", "suite.json"),
             `${JSON.stringify(bundle.suite, null, 2)}\n`,
         );
-        write(
-            join(root, "prepare", "campaign.json"),
-            readFileSync(bundle.campaignPath, "utf8"),
-        );
+        write(join(root, "prepare", "campaign.json"), bundle.campaignText);
         const staged = stageBundle(bundle, root);
         if (staged.problems.length > 0) {
             return refuseCreated(root, staged.problems);
         }
-        const manifest = manifestFor(bundle, staged.subjects, staged.cases);
+        const manifest = manifestFor(
+            bundle,
+            staged.subjects,
+            staged.cases,
+            tool,
+        );
         write(
             join(root, "prepare", "manifest.json"),
             `${JSON.stringify(manifest, null, 2)}\n`,

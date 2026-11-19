@@ -1,14 +1,23 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { cpSync, mkdtempSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { prepareCampaign } from "../../src/campaign/prepare.ts";
+import {
+    loadPreparedManifest,
+    prepareCampaign,
+} from "../../src/campaign/prepare.ts";
 import { freezeCampaign } from "../../src/campaign/freeze.ts";
 import { runCampaign } from "../../src/campaign/run.ts";
 import { assessCampaign } from "../../src/campaign/assess.ts";
 import { judgeSandboxPlanForSlot } from "../../src/campaign/judge.ts";
+import {
+    buildPacket,
+    lakeDocuments,
+} from "../../src/evaluators/docs/packet.ts";
+import type { DocsTaskCase, Slot } from "../../src/contracts/types.ts";
+import type { PreparedManifest } from "../../src/campaign/prepare.ts";
 import { containerArgv } from "../../src/adapters/podman/container.ts";
 import type { CommandResult } from "../../src/adapters/process.ts";
 import type { ContainerPlan } from "../../src/adapters/podman/container.ts";
@@ -98,6 +107,7 @@ describe("judge packet transport", () => {
                 root,
                 "restraint",
                 "attempt-001",
+                { workDirectory: join(dir, "judge-plan") },
             );
 
             // Assert
@@ -107,6 +117,14 @@ describe("judge packet transport", () => {
                 built.ok ? "" : built.problems.join("; "),
             );
             if (!built.ok) return;
+            for (const mount of built.plan.mounts) {
+                assert.equal(
+                    mount.source.startsWith(join(dir, "judge-plan")),
+                    true,
+                    `mount ${mount.target} escapes the caller-owned directory`,
+                );
+                assert.equal(existsSync(mount.source), true, mount.source);
+            }
             const packet = built.plan.stdin;
             assert.equal(typeof packet, "string");
             assert.equal((packet ?? "").length > 200 * 1024, true);
@@ -127,6 +145,76 @@ describe("judge packet transport", () => {
                     "an argument exceeds the host's single-argument limit",
                 );
             }
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
+    it("builds the packet and state from one lake observation per side", async () => {
+        // Arrange: a docs trial whose lake the judge will observe.
+        const { dir, root } = await largeRoot(1);
+        try {
+            const prepared = loadPreparedManifest(root);
+            assert.equal(prepared.ok, true);
+            if (!prepared.ok) return;
+            const manifest = prepared.manifest as PreparedManifest;
+            const slot = manifest.campaign.schedule.slots.find(
+                (entry) => entry.slotId === "restraint",
+            ) as Slot;
+            const testCase = manifest.suite.cases.find(
+                (entry) => entry.caseId === slot.caseId,
+            ) as DocsTaskCase;
+            const reads: string[] = [];
+            let liveReads = 0;
+            const normal = buildPacket({ root, slot, testCase });
+            assert.equal(
+                normal.ok,
+                true,
+                normal.ok ? "" : normal.problems.join("; "),
+            );
+            if (!normal.ok) return;
+
+            // Act: a reader that would change its answer on a second call.
+            const changing = buildPacket({
+                root,
+                slot,
+                testCase,
+                lakeReader: (workspace, lakeRoot) => {
+                    const read = lakeDocuments(workspace, lakeRoot);
+                    reads.push(workspace);
+                    if (
+                        !workspace.includes(join("prepare", "workspaces")) &&
+                        read.ok
+                    ) {
+                        liveReads += 1;
+                        if (liveReads > 1) {
+                            return {
+                                ok: true,
+                                documents: read.documents.map((document) => ({
+                                    ...document,
+                                    contents: "SUBSTITUTED ON A SECOND READ",
+                                })),
+                            };
+                        }
+                    }
+                    return read;
+                },
+            });
+
+            // Assert: exactly one read per side; packet and state are unchanged.
+            assert.equal(
+                changing.ok,
+                true,
+                changing.ok ? "" : changing.problems.join("; "),
+            );
+            if (!changing.ok) return;
+            assert.equal(reads.length, 2);
+            assert.equal(changing.packet, normal.packet);
+            assert.deepEqual(changing.state, normal.state);
+            assert.equal(
+                changing.packet.includes("SUBSTITUTED ON A SECOND READ"),
+                false,
+            );
         } finally {
             rmSync(dir, { recursive: true, force: true });
         }

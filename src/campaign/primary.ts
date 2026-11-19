@@ -24,6 +24,13 @@ import {
 } from "../adapters/podman/container.ts";
 import type { CommandResult } from "../adapters/process.ts";
 import type { PreparedCase } from "./prepare.ts";
+import {
+    primaryRecordFor,
+    type PrimaryRecordFacts,
+    type PrimaryRecordOutcome,
+} from "./primary-record.ts";
+export { primaryRecordFor };
+export type { PrimaryRecordFacts, PrimaryRecordOutcome };
 
 /** One recorded primary-check outcome, kept distinct from task failure. */
 export interface PrimaryCheckRecord {
@@ -217,13 +224,7 @@ export async function executePrimaryCheck(options: {
             "status" | "exit" | "signal" | "reason" | "stdout" | "stderr"
         >,
     ): { ok: boolean; record: PrimaryCheckRecord; problem: string | null } => {
-        const record: PrimaryCheckRecord = {
-            ...base,
-            durationMs: Date.now() - started,
-            ...patch,
-            stdout: patch.stdout.slice(0, 16_000),
-            stderr: patch.stderr.slice(0, 16_000),
-        };
+        const record = primaryRecordFor(base, Date.now() - started, patch);
         writeFileSync(
             join(options.trialDir, "primary-check.json"),
             `${JSON.stringify(record, null, 2)}\n`,

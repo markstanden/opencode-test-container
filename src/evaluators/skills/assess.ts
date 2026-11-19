@@ -237,15 +237,62 @@ export function assessSkillTrial(options: {
         targetSkillId: testCase.targetSkillId,
         expected: testCase.expected,
     };
-    const capture = checkCapture(trialDir, {
-        campaignId: options.campaignId,
-        slotId: options.slotId,
-    });
+    return skillAssessmentFromFacts(
+        base,
+        testCase,
+        {
+            capture: checkCapture(trialDir, {
+                campaignId: options.campaignId,
+                slotId: options.slotId,
+            }),
+            usage: readUsage(join(trialDir, "usage.json")),
+        },
+        options.assessedAt,
+    );
+}
+
+/** The checked capture and usage facts one skill decision consumes. */
+export interface SkillEvidenceFacts {
+    /** The checked capture, including its decoded trail. */
+    capture: ReturnType<typeof checkCapture>;
+    /** The trial's usage record, or null when absent or malformed. */
+    usage: Usage | null;
+}
+
+/**
+ * Decide one skill assessment from checked capture, source and usage facts.
+ * Pure: it performs no filesystem acquisition. The caller supplies the
+ * identity base and the observed facts.
+ * @param base The assessment identity fields, including source identity.
+ * @param testCase The skill-trigger case definition.
+ * @param facts The checked capture and usage facts.
+ * @param assessedAt The injected assessment time.
+ * @returns The assessment.
+ */
+export function skillAssessmentFromFacts(
+    base: Omit<
+        SkillAssessment,
+        | "validity"
+        | "observed"
+        | "outcome"
+        | "counts"
+        | "bodyRoutes"
+        | "contaminated"
+        | "reasons"
+        | "usage"
+        | "answered"
+        | "assessedAt"
+    >,
+    testCase: Extract<SuiteCase, { kind: "skill-trigger" }>,
+    facts: SkillEvidenceFacts,
+    assessedAt: string,
+): SkillAssessment {
+    const { capture, usage } = facts;
     if (capture.state === "unrun") {
         return unrunAssessment(
             base,
             capture.problems[0] ?? "trial evidence is missing",
-            options.assessedAt,
+            assessedAt,
         );
     }
     const trail = capture.trail;
@@ -270,9 +317,9 @@ export function assessSkillTrial(options: {
             bodyRoutes: routes,
             contaminated: contamination,
             reasons: unsafeReasons,
-            usage: readUsage(join(trialDir, "usage.json")),
+            usage,
             answered: trail.text.trim() !== "",
-            assessedAt: options.assessedAt,
+            assessedAt,
         };
     }
     if (capture.state === "invalid") {
@@ -285,9 +332,9 @@ export function assessSkillTrial(options: {
             bodyRoutes: routes,
             contaminated: contamination,
             reasons: capture.problems,
-            usage: readUsage(join(trialDir, "usage.json")),
+            usage,
             answered: trail.text.trim() !== "",
-            assessedAt: options.assessedAt,
+            assessedAt,
         };
     }
     if (contamination && testCase.contamination !== "record") {
@@ -305,9 +352,9 @@ export function assessSkillTrial(options: {
             reasons: [
                 `the target body was reached through ${routes.join(", ")}, not a skill-tool activation`,
             ],
-            usage: readUsage(join(trialDir, "usage.json")),
+            usage,
             answered: trail.text.trim() !== "",
-            assessedAt: options.assessedAt,
+            assessedAt,
         };
     }
     if (counts.failedTarget > 0) {
@@ -322,9 +369,9 @@ export function assessSkillTrial(options: {
             reasons: [
                 "the target skill load failed; successful activation is unknown",
             ],
-            usage: readUsage(join(trialDir, "usage.json")),
+            usage,
             answered: trail.text.trim() !== "",
-            assessedAt: options.assessedAt,
+            assessedAt,
         };
     }
     const observed = observationOf(counts);
@@ -338,8 +385,8 @@ export function assessSkillTrial(options: {
         bodyRoutes: routes,
         contaminated: contamination,
         reasons: [],
-        usage: readUsage(join(trialDir, "usage.json")),
+        usage,
         answered: trail.text.trim() !== "",
-        assessedAt: options.assessedAt,
+        assessedAt,
     };
 }

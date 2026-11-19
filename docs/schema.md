@@ -175,6 +175,12 @@ claim the same slot key. A claim counts from `reserved` onward:
 is never silently refunded. Only a claim that provably never staged or
 dispatched is released.
 
+Later claim mutations (advance and release) take a per-claim
+`<claim>.lock` created with `wx`, then re-read the persisted identity while
+holding it. A retained pre-spawn handle therefore cannot remove an advanced
+claim, and a stale handle cannot release a newer owner's reservation at a
+reused index. A crashed lock holder fails closed, like the admission lock.
+
 Closure is the final mutation boundary. It refuses unresolved trial launches,
 any non-closed claim, untrustworthy assessments, and completed trials with no
 checked assessment. A never-started slot is legitimate `unrun` state and may be

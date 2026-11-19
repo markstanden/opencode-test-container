@@ -25,6 +25,9 @@ import {
     readSelectedJudgement,
 } from "../campaign/judge.ts";
 import { trialDirectory } from "../campaign/run.ts";
+import { reportFor, type ReportValues } from "./report-calculation.ts";
+export { reportFor };
+export type { ReportValues };
 
 /** The derived report document. */
 export interface Report {
@@ -443,31 +446,15 @@ export function analyseCampaign(
     if (!assessed.ok) return { ok: false, problems: assessed.problems };
     const assessmentBySlot = assessed.bySlot;
     const slots = slotRecords(root, state.prepared.manifest, assessmentBySlot);
-    const body = {
-        schemaVersion: 1 as const,
+    const report = reportFor({
         campaignId: state.prepared.manifest.campaignId,
         suiteId: state.prepared.manifest.suiteId,
         closedAt: state.ledger.closedAt,
         imageId: state.frozen.record.imageId,
         generatedAt: now(),
-        denominators: {
-            scheduled: slots.length,
-            assessed: assessmentBySlot.size,
-            valid: slots.filter((slot) => slot.validity === "valid").length,
-            invalid: slots.filter((slot) => slot.validity === "invalid").length,
-            unknown: slots.filter((slot) => slot.validity === "unknown").length,
-            unrun: slots.filter((slot) => slot.validity === "unrun").length,
-            judged: slots.filter((slot) => slot.judgement !== null).length,
-            unjudged: slots.filter((slot) => slot.judgement === null).length,
-        },
-        totals: {
-            pass: slots.filter((slot) => slot.outcome === "pass").length,
-            fail: slots.filter((slot) => slot.outcome === "fail").length,
-            unknown: slots.filter((slot) => slot.outcome === "unknown").length,
-        },
+        assessed: assessmentBySlot.size,
         slots,
-    };
-    const report: Report = { ...body, reportSha256: sha256Of(body) };
+    });
     const markdown = markdownOf(report);
     const staging = `${outDir}.tmp-${randomBytes(6).toString("hex")}`;
     try {
@@ -523,4 +510,13 @@ export function reportIdentity(report: Report): string {
 /** Ensure a report's identity still matches its content. */
 export function reportIntact(report: Report): boolean {
     return reportIdentity(report) === report.reportSha256;
+}
+
+/**
+ * Render one report's Markdown from the same structured value its JSON uses.
+ * @param report The derived report.
+ * @returns The Markdown document.
+ */
+export function reportMarkdown(report: Report): string {
+    return markdownOf(report);
 }

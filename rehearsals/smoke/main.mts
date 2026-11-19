@@ -13,6 +13,7 @@ import {
     existsSync,
     mkdirSync,
     readFileSync,
+    rmSync,
     writeFileSync,
 } from "node:fs";
 import { spawn } from "node:child_process";
@@ -25,7 +26,7 @@ import {
     fileSha256,
     runAsync,
     filesUnder,
-    heldPort,
+    reservePort,
     installConsumer,
     installedModule,
     must,
@@ -34,9 +35,9 @@ import {
     readJson,
     remove,
     run,
-    scratch,
-    stagePackage,
-    uniqueTag,
+    createScratchDirectory,
+    createStagedPackage,
+    createUniqueTag,
     writeCampaign,
     writeDocsCampaign,
     type ChildResult,
@@ -53,7 +54,7 @@ interface CaseResult {
 const results: CaseResult[] = [];
 const ownedContainers: string[] = [];
 const retain = process.env.OTC_SMOKE_RETAIN === "1";
-const work = scratch();
+const work = createScratchDirectory();
 const receipt: Record<string, unknown> = {
     suite: "otc-smoke",
     startedAt: new Date().toISOString(),
@@ -314,6 +315,7 @@ let installed: {
         root: string,
         slotId: string,
         attemptId: string,
+        options?: { workDirectory?: string },
     ) => { ok: boolean; plan?: Record<string, unknown>; problems?: string[] };
 };
 interface PreparedManifest {
@@ -326,7 +328,7 @@ interface PreparedManifest {
 }
 
 async function setup(): Promise<void> {
-    const stage = stagePackage();
+    const stage = createStagedPackage();
     const tarball = pack(stage, join(work, "tarball"));
     const installedConsumer = installConsumer(tarball.tarball, work);
     binary = installedConsumer.binary;
@@ -336,7 +338,7 @@ async function setup(): Promise<void> {
     mkdirSync(containerData, { recursive: true });
     process.env.XDG_DATA_HOME = containerData;
     env = cliEnv(join(work, "home"), containerData);
-    imageTag = uniqueTag("image");
+    imageTag = createUniqueTag("image");
 
     const adapters = await installedModule<typeof installed>(
         consumer,
@@ -692,7 +694,7 @@ async function s05(): Promise<string> {
 }
 
 async function s06(): Promise<string> {
-    const listener = await heldPort();
+    const listener = await reservePort();
     const live = await provider([{ kind: "text", content: "Done." }], false);
     const directory = join(work, "s06");
     mkdirSync(directory, { recursive: true });
@@ -859,10 +861,13 @@ async function s07(): Promise<string> {
     expect(prepared.ok, "docs root manifest is unreadable");
     const manifest = prepared.manifest as PreparedManifest;
     const slotId = manifest.campaign.schedule.slots[0]!.slotId;
+    const planDirectory = join(work, "judge-plan-s07");
+    rmSync(planDirectory, { recursive: true, force: true });
     const planned = installed.judgeSandboxPlanForSlot(
         docsRoot,
         slotId,
         "attempt-001",
+        { workDirectory: planDirectory },
     );
     expect(
         planned.ok,
@@ -901,7 +906,7 @@ async function s07(): Promise<string> {
 }
 
 async function s08(): Promise<string> {
-    const listener = await heldPort();
+    const listener = await reservePort();
     const scripts = join(work, "net-scripts");
     mkdirSync(scripts, { recursive: true });
     writeFileSync(join(scripts, "probe.mjs"), NET_PROBE, "utf8");
@@ -1476,7 +1481,7 @@ async function s13(): Promise<string> {
             };
         };
     }>(campaignPath);
-    const borrowed = await heldPort();
+    const borrowed = await reservePort();
     const port = borrowed.port;
     await borrowed.close();
     const live = await exampleProvider(

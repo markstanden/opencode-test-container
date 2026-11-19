@@ -89,8 +89,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** Parse one journal line, or undefined when it is not a JSON object. */
-function parseLine(line: string): Record<string, unknown> | undefined {
+/** Consume one journal line, or undefined when it is not a JSON object. */
+function consumeJournalLine(line: string): Record<string, unknown> | undefined {
     try {
         const value: unknown = JSON.parse(line);
         return isRecord(value) ? value : undefined;
@@ -422,7 +422,7 @@ function verifyLine(
     host: HostDispatches,
 ): { credited?: CreditedJournalRecord; rejected?: RejectedJournalRecord } {
     if (line.trim() === "") return {};
-    const record = parseLine(line);
+    const record = consumeJournalLine(line);
     if (record === undefined)
         return { rejected: { index, reason: "not-json" } };
     if (!isServedRecord(record)) {

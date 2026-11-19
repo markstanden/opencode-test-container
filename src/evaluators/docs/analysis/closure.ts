@@ -238,7 +238,11 @@ export function deriveClosure(input: ClosureInput): ClosureReport {
     ];
     const recordedTrials = observed.filter((slot) => slot.recorded).length;
     problems.push(
-        ...closureProblems(input.closed, observed.length, recordedTrials),
+        ...calculateClosureProblems(
+            input.closed,
+            observed.length,
+            recordedTrials,
+        ),
     );
     return {
         state: input.closed ? "closed" : "open",
@@ -401,7 +405,7 @@ function observationProblems(observed: readonly SlotObservation[]): string[] {
 }
 
 /** A closed campaign with an observed but unrecorded slot. */
-function closureProblems(
+function calculateClosureProblems(
     closed: boolean,
     observed: number,
     recorded: number,
