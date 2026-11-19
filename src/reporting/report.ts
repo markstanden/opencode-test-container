@@ -410,6 +410,68 @@ function reportAssessments(
         : { ok: true, bySlot };
 }
 
+/** The explicit values one report is calculated from. */
+export interface ReportValues {
+    /** The campaign identity. */
+    campaignId: string;
+    /** The suite identity. */
+    suiteId: string;
+    /** The recorded closure time, or null. */
+    closedAt: string | null;
+    /** The frozen image identity. */
+    imageId: string;
+    /** The injected generation time. */
+    generatedAt: string;
+    /** The number of slots with a checked assessment. */
+    assessed: number;
+    /** The checked per-slot rows. */
+    slots: Report["slots"];
+}
+
+/**
+ * Calculate one report from checked rows, the assessed count and metadata.
+ * Pure: it reads no disk or clock, and reuses the canonical identity over the
+ * same body the Markdown renderer consumes.
+ * @param values The checked rows and metadata.
+ * @returns The derived report.
+ */
+export function reportFor(values: ReportValues): Report {
+    const body = {
+        schemaVersion: 1 as const,
+        campaignId: values.campaignId,
+        suiteId: values.suiteId,
+        closedAt: values.closedAt,
+        imageId: values.imageId,
+        generatedAt: values.generatedAt,
+        denominators: {
+            scheduled: values.slots.length,
+            assessed: values.assessed,
+            valid: values.slots.filter((slot) => slot.validity === "valid")
+                .length,
+            invalid: values.slots.filter(
+                (slot) => slot.validity === "invalid",
+            ).length,
+            unknown: values.slots.filter(
+                (slot) => slot.validity === "unknown",
+            ).length,
+            unrun: values.slots.filter((slot) => slot.validity === "unrun")
+                .length,
+            judged: values.slots.filter((slot) => slot.judgement !== null)
+                .length,
+            unjudged: values.slots.filter((slot) => slot.judgement === null)
+                .length,
+        },
+        totals: {
+            pass: values.slots.filter((slot) => slot.outcome === "pass").length,
+            fail: values.slots.filter((slot) => slot.outcome === "fail").length,
+            unknown: values.slots.filter((slot) => slot.outcome === "unknown")
+                .length,
+        },
+        slots: values.slots,
+    };
+    return { ...body, reportSha256: sha256Of(body) };
+}
+
 /**
  * Render the final analysis from checked evidence. Requires a closed ledger
  * and writes only to a fresh output directory outside the evidence tree.
@@ -443,31 +505,15 @@ export function analyseCampaign(
     if (!assessed.ok) return { ok: false, problems: assessed.problems };
     const assessmentBySlot = assessed.bySlot;
     const slots = slotRecords(root, state.prepared.manifest, assessmentBySlot);
-    const body = {
-        schemaVersion: 1 as const,
+    const report = reportFor({
         campaignId: state.prepared.manifest.campaignId,
         suiteId: state.prepared.manifest.suiteId,
         closedAt: state.ledger.closedAt,
         imageId: state.frozen.record.imageId,
         generatedAt: now(),
-        denominators: {
-            scheduled: slots.length,
-            assessed: assessmentBySlot.size,
-            valid: slots.filter((slot) => slot.validity === "valid").length,
-            invalid: slots.filter((slot) => slot.validity === "invalid").length,
-            unknown: slots.filter((slot) => slot.validity === "unknown").length,
-            unrun: slots.filter((slot) => slot.validity === "unrun").length,
-            judged: slots.filter((slot) => slot.judgement !== null).length,
-            unjudged: slots.filter((slot) => slot.judgement === null).length,
-        },
-        totals: {
-            pass: slots.filter((slot) => slot.outcome === "pass").length,
-            fail: slots.filter((slot) => slot.outcome === "fail").length,
-            unknown: slots.filter((slot) => slot.outcome === "unknown").length,
-        },
+        assessed: assessmentBySlot.size,
         slots,
-    };
-    const report: Report = { ...body, reportSha256: sha256Of(body) };
+    });
     const markdown = markdownOf(report);
     const staging = `${outDir}.tmp-${randomBytes(6).toString("hex")}`;
     try {
@@ -523,4 +569,13 @@ export function reportIdentity(report: Report): string {
 /** Ensure a report's identity still matches its content. */
 export function reportIntact(report: Report): boolean {
     return reportIdentity(report) === report.reportSha256;
+}
+
+/**
+ * Render one report's Markdown from the same structured value its JSON uses.
+ * @param report The derived report.
+ * @returns The Markdown document.
+ */
+export function reportMarkdown(report: Report): string {
+    return markdownOf(report);
 }

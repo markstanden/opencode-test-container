@@ -370,10 +370,11 @@ function freezePreflight(
 }
 
 /** The complete receipt for one resolved image. */
-function receiptFor(
+export function receiptFor(
     manifest: PreparedManifest,
     current: ToolIdentity,
     image: ResolvedImage,
+    frozenAt: string,
 ): FrozenRecord {
     const identity: FreezeIdentity = {
         schemaVersion: 1,
@@ -400,7 +401,7 @@ function receiptFor(
     return {
         ...identity,
         freezeSha256: freezeIdentity(identity),
-        frozenAt: new Date().toISOString(),
+        frozenAt,
     };
 }
 
@@ -443,11 +444,13 @@ function convergeFreeze(
  * verify the CLI version it contains, and record all input identities.
  * @param root The prepared campaign root.
  * @param run Process adapter, injected for tests.
+ * @param now Injected clock for the recorded frozenAt.
  * @returns The receipt, or every refusal.
  */
 export async function freezeCampaign(
     root: string,
     run: typeof runCommand = runCommand,
+    now: () => string = () => new Date().toISOString(),
 ): Promise<FreezeResult> {
     const preflight = freezePreflight(root);
     if (!preflight.ok) return preflight;
@@ -466,7 +469,7 @@ export async function freezeCampaign(
     );
     if (!resolved.ok) return { ok: false, problems: [resolved.problem] };
     const image = resolved.image;
-    const record = receiptFor(manifest, current, image);
+    const record = receiptFor(manifest, current, image, now());
     const published = publishFrozen(root, record);
     if (published.kind === "refused") {
         return { ok: false, problems: [published.problem] };

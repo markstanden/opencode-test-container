@@ -73,6 +73,47 @@ function statusOf(result: CommandResult): PrimaryCheckRecord["status"] {
     return result.status === 0 ? "pass" : "fail";
 }
 
+/** The fixed facts a primary-check record is calculated from. */
+export type PrimaryRecordFacts = Pick<
+    PrimaryCheckRecord,
+    | "schemaVersion"
+    | "id"
+    | "script"
+    | "sourceHash"
+    | "command"
+    | "args"
+    | "timeoutMs"
+    | "startedAt"
+>;
+
+/** The mutable outcome facts a primary-check record is calculated from. */
+export type PrimaryRecordOutcome = Pick<
+    PrimaryCheckRecord,
+    "status" | "exit" | "signal" | "reason" | "stdout" | "stderr"
+>;
+
+/**
+ * Calculate one primary-check record from observed inputs and the elapsed
+ * time. Pure: it reads no disk and bounds the captured streams.
+ * @param facts The fixed checker identity and start time.
+ * @param elapsedMs The observed duration.
+ * @param outcome The process outcome.
+ * @returns The complete record.
+ */
+export function primaryRecordFor(
+    facts: PrimaryRecordFacts,
+    elapsedMs: number,
+    outcome: PrimaryRecordOutcome,
+): PrimaryCheckRecord {
+    return {
+        ...facts,
+        durationMs: elapsedMs,
+        ...outcome,
+        stdout: outcome.stdout.slice(0, 16_000),
+        stderr: outcome.stderr.slice(0, 16_000),
+    };
+}
+
 /** Write the checker's minimal environment file. */
 function writeCheckerEnvironment(directory: string): string {
     mkdirSync(directory, { recursive: true });
@@ -217,13 +258,11 @@ export async function executePrimaryCheck(options: {
             "status" | "exit" | "signal" | "reason" | "stdout" | "stderr"
         >,
     ): { ok: boolean; record: PrimaryCheckRecord; problem: string | null } => {
-        const record: PrimaryCheckRecord = {
-            ...base,
-            durationMs: Date.now() - started,
-            ...patch,
-            stdout: patch.stdout.slice(0, 16_000),
-            stderr: patch.stderr.slice(0, 16_000),
-        };
+        const record = primaryRecordFor(
+            base,
+            Date.now() - started,
+            patch,
+        );
         writeFileSync(
             join(options.trialDir, "primary-check.json"),
             `${JSON.stringify(record, null, 2)}\n`,
