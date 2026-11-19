@@ -223,7 +223,9 @@ function applyOption(
             options.out = takeOptionValue(arg, args);
             return true;
         case "--slot":
-            options.slots.push(...slotSelector(arg, takeOptionValue(arg, args)));
+            options.slots.push(
+                ...slotSelector(arg, takeOptionValue(arg, args)),
+            );
             return true;
         case "--passthrough":
             options.passthrough.push(takeOptionValue(arg, args));

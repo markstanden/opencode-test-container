@@ -34,9 +34,7 @@ function fixture(files: Record<string, string>): {
 describe("architecture purity boundary", () => {
     it("keeps the initial calculation modules free of ambient effects", () => {
         // Act
-        const problems = purityProblems(
-            PURE_MODULES.map((file) => ({ file })),
-        );
+        const problems = purityProblems(PURE_MODULES.map((file) => ({ file })));
 
         // Assert
         assert.deepEqual(problems, []);
@@ -69,9 +67,7 @@ describe("architecture purity boundary", () => {
                 true,
             );
             assert.equal(
-                problems.some((problem) =>
-                    problem.includes("ambient random"),
-                ),
+                problems.some((problem) => problem.includes("ambient random")),
                 true,
             );
         } finally {
@@ -84,25 +80,23 @@ describe("architecture purity boundary", () => {
         const space = fixture({
             "entry.ts": 'export { read } from "./wrapper.ts";\n',
             "wrapper.ts": 'export { read } from "./io.ts";\n',
-            "io.ts": 'import { readFileSync } from "node:fs";\nexport const read = () => readFileSync("/tmp/x", "utf8");\n',
+            "io.ts":
+                'import { readFileSync } from "node:fs";\nexport const read = () => readFileSync("/tmp/x", "utf8");\n',
         });
         try {
             // Act
-            const problems = purityProblems([
-                { file: space.file("entry.ts") },
-            ]);
+            const problems = purityProblems([{ file: space.file("entry.ts") }]);
 
             // Assert
             assert.equal(
-                problems.some((problem) =>
-                    problem.includes("node:fs"),
-                ),
+                problems.some((problem) => problem.includes("node:fs")),
                 true,
             );
             assert.equal(
-                problems.some((problem) =>
-                    problem.includes("chain") ||
-                    problem.includes("entry.ts"),
+                problems.some(
+                    (problem) =>
+                        problem.includes("chain") ||
+                        problem.includes("entry.ts"),
                 ),
                 true,
             );
@@ -114,14 +108,14 @@ describe("architecture purity boundary", () => {
     it("accepts a type-only import from an effectful module", () => {
         // Arrange
         const space = fixture({
-            "entry.ts": 'import type { Shape } from "./effectful.ts";\nexport const value: Shape = { n: 1 };\n',
-            "effectful.ts": 'import { readFileSync } from "node:fs";\nexport interface Shape { n: number }\nexport const read = () => readFileSync("/tmp/x", "utf8");\n',
+            "entry.ts":
+                'import type { Shape } from "./effectful.ts";\nexport const value: Shape = { n: 1 };\n',
+            "effectful.ts":
+                'import { readFileSync } from "node:fs";\nexport interface Shape { n: number }\nexport const read = () => readFileSync("/tmp/x", "utf8");\n',
         });
         try {
             // Act
-            const problems = purityProblems([
-                { file: space.file("entry.ts") },
-            ]);
+            const problems = purityProblems([{ file: space.file("entry.ts") }]);
 
             // Assert
             assert.deepEqual(problems, []);
@@ -138,9 +132,7 @@ describe("architecture purity boundary", () => {
         });
         try {
             // Act
-            const problems = purityProblems([
-                { file: space.file("hash.ts") },
-            ]);
+            const problems = purityProblems([{ file: space.file("hash.ts") }]);
 
             // Assert
             assert.deepEqual(problems, []);

@@ -7,7 +7,8 @@ import { fileURLToPath } from "node:url";
 import {
     loadPreparedManifest,
     prepareCampaign,
-} from "../../src/campaign/prepare.ts";import { freezeCampaign } from "../../src/campaign/freeze.ts";
+} from "../../src/campaign/prepare.ts";
+import { freezeCampaign } from "../../src/campaign/freeze.ts";
 import { runCampaign } from "../../src/campaign/run.ts";
 import { assessCampaign } from "../../src/campaign/assess.ts";
 import { judgeSandboxPlanForSlot } from "../../src/campaign/judge.ts";
@@ -182,9 +183,7 @@ describe("judge packet transport", () => {
                     const read = lakeDocuments(workspace, lakeRoot);
                     reads.push(workspace);
                     if (
-                        !workspace.includes(
-                            join("prepare", "workspaces"),
-                        ) &&
+                        !workspace.includes(join("prepare", "workspaces")) &&
                         read.ok
                     ) {
                         liveReads += 1;

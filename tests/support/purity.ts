@@ -19,30 +19,18 @@ export interface PurityTarget {
     file: string;
 }
 
+/** Resolve one module specifier for a problem report. */
+type Classify = (
+    from: string,
+    specifier: string,
+    chain: readonly string[],
+) => void;
+
+/** Report one problem at a source location. */
+type Report = (node: ts.Node, message: string) => void;
+
 /** Builtins with no ambient effect that a pure calculation may use. */
 const ALLOWED_BUILTINS = new Set(["node:path", "node:util", "node:crypto"]);
-
-/** Builtins that reach the clock, randomness, environment or an external effect. */
-const FORBIDDEN_BUILTINS = new Set([
-    "node:fs",
-    "node:fs/promises",
-    "node:child_process",
-    "node:net",
-    "node:http",
-    "node:https",
-    "node:tls",
-    "node:dns",
-    "node:os",
-    "node:process",
-    "node:worker_threads",
-    "node:cluster",
-    "node:vm",
-    "node:module",
-    "node:readline",
-    "node:stream",
-    "node:zlib",
-    "node:timers",
-]);
 
 /** Calls that reach an ambient source or an external effect. */
 const FORBIDDEN_CALLS = new Set([
@@ -70,11 +58,7 @@ const FORBIDDEN_CRYPTO = new Set([
 /** Resolve one relative module specifier to a TypeScript source file. */
 function resolveSource(from: string, specifier: string): string | null {
     const base = resolve(dirname(from), specifier);
-    for (const candidate of [
-        base,
-        `${base}.ts`,
-        resolve(base, "index.ts"),
-    ]) {
+    for (const candidate of [base, `${base}.ts`, resolve(base, "index.ts")]) {
         if (existsSync(candidate) && extname(candidate) === ".ts") {
             return candidate;
         }
@@ -96,15 +80,104 @@ function isTypeOnlyImport(node: ts.ImportDeclaration): boolean {
 /** Whether an export declaration is fully erased at runtime. */
 function isTypeOnlyExport(node: ts.ExportDeclaration): boolean {
     if (node.isTypeOnly) return true;
-    return node.exportClause !== undefined && ts.isNamedExports(node.exportClause)
+    return node.exportClause !== undefined &&
+        ts.isNamedExports(node.exportClause)
         ? node.exportClause.elements.every((element) => element.isTypeOnly)
         : false;
 }
 
-/** The identifier a call or new expression names, when it is a simple name. */
+/** The simple identifier a call expression names, if any. */
 function calledName(expression: ts.Expression): string | null {
-    if (ts.isIdentifier(expression)) return expression.text;
-    return null;
+    return ts.isIdentifier(expression) ? expression.text : null;
+}
+
+/** Report a dynamic import that cannot be resolved statically. */
+function checkDynamicImport(
+    node: ts.CallExpression,
+    classify: Classify,
+    from: string,
+    chain: readonly string[],
+    report: Report,
+): void {
+    const argument = node.arguments[0];
+    if (argument !== undefined && ts.isStringLiteralLike(argument)) {
+        classify(from, argument.text, chain);
+        return;
+    }
+    report(node, "unresolvable dynamic import in a pure module");
+}
+
+/** Report ambient and random calls named directly. */
+function checkNamedCall(
+    name: string,
+    node: ts.CallExpression,
+    report: Report,
+): void {
+    if (FORBIDDEN_CALLS.has(name)) {
+        report(node, `calls ambient or effectful function ${name}`);
+    }
+    if (FORBIDDEN_CRYPTO.has(name)) {
+        report(node, `calls non-deterministic ${name}`);
+    }
+}
+
+/** Report `Date.now()` and `Math.random()` on a member call. */
+function checkMemberCall(
+    expression: ts.PropertyAccessExpression,
+    node: ts.CallExpression,
+    report: Report,
+): void {
+    const owner = expression.expression;
+    if (!ts.isIdentifier(owner)) return;
+    if (owner.text === "Date" && expression.name.text === "now") {
+        report(node, "reads the ambient clock");
+    }
+    if (owner.text === "Math" && expression.name.text === "random") {
+        report(node, "reads the ambient random source");
+    }
+}
+
+/** Report one call expression's ambient or effectful access. */
+function checkCall(
+    node: ts.CallExpression,
+    classify: Classify,
+    from: string,
+    chain: readonly string[],
+    report: Report,
+): void {
+    if (node.expression.kind === ts.SyntaxKind.ImportKeyword) {
+        checkDynamicImport(node, classify, from, chain, report);
+        return;
+    }
+    const name = calledName(node.expression);
+    if (name !== null) checkNamedCall(name, node, report);
+    if (ts.isPropertyAccessExpression(node.expression)) {
+        checkMemberCall(node.expression, node, report);
+    }
+}
+
+/** Report an argument-less `new Date()`. */
+function checkNew(node: ts.NewExpression, report: Report): void {
+    if (
+        ts.isIdentifier(node.expression) &&
+        node.expression.text === "Date" &&
+        (node.arguments === undefined || node.arguments.length === 0)
+    ) {
+        report(node, "reads the ambient clock");
+    }
+}
+
+/** Report any read of ambient process state. */
+function checkProcessAccess(
+    node: ts.PropertyAccessExpression,
+    report: Report,
+): void {
+    if (
+        ts.isIdentifier(node.expression) &&
+        node.expression.text === "process"
+    ) {
+        report(node, `reads ambient process state (${node.name.text})`);
+    }
 }
 
 /**
@@ -115,41 +188,6 @@ function calledName(expression: ts.Expression): string | null {
 export function purityProblems(targets: readonly PurityTarget[]): string[] {
     const problems: string[] = [];
     const visited = new Set<string>();
-
-    const classify = (
-        from: string,
-        specifier: string,
-        chain: readonly string[],
-    ): string | null => {
-        if (specifier.startsWith(".")) {
-            const resolved = resolveSource(from, specifier);
-            if (resolved === null) {
-                problems.push(
-                    `${chain.join(" -> ")}: cannot resolve import ${specifier}`,
-                );
-                return null;
-            }
-            visit(resolved, [...chain, resolved]);
-            return null;
-        }
-        if (specifier.startsWith("node:")) {
-            if (ALLOWED_BUILTINS.has(specifier)) return null;
-            problems.push(
-                `${chain.join(" -> ")}: imports effectful or ambient builtin ${specifier}`,
-            );
-            return null;
-        }
-        if (FORBIDDEN_BUILTINS.has(specifier)) {
-            problems.push(
-                `${chain.join(" -> ")}: imports effectful builtin ${specifier}`,
-            );
-            return null;
-        }
-        problems.push(
-            `${chain.join(" -> ")}: imports external module ${specifier}; purity is not statically known`,
-        );
-        return null;
-    };
 
     const visit = (file: string, chain: readonly string[]): void => {
         if (visited.has(file)) return;
@@ -170,95 +208,59 @@ export function purityProblems(targets: readonly PurityTarget[]): string[] {
             true,
             ts.ScriptKind.TS,
         );
-        const at = (node: ts.Node): string => {
+        const report: Report = (node, message) => {
             const line =
                 source.getLineAndCharacterOfPosition(node.getStart(source))
                     .line + 1;
-            return `${chain.join(" -> ")}:${line}`;
+            problems.push(`${[...chain, `${line}`].join(":")}: ${message}`);
+        };
+        const classify: Classify = (from, specifier, at) => {
+            if (specifier.startsWith(".")) {
+                const resolved = resolveSource(from, specifier);
+                if (resolved === null) {
+                    problems.push(
+                        `${at.join(" -> ")}: cannot resolve import ${specifier}`,
+                    );
+                    return;
+                }
+                visit(resolved, [...at, resolved]);
+                return;
+            }
+            if (specifier.startsWith("node:")) {
+                if (ALLOWED_BUILTINS.has(specifier)) return;
+                problems.push(
+                    `${at.join(" -> ")}: imports effectful or ambient builtin ${specifier}`,
+                );
+                return;
+            }
+            problems.push(
+                `${at.join(" -> ")}: imports external module ${specifier}; purity is not statically known`,
+            );
         };
 
         const walk = (node: ts.Node): void => {
-            if (ts.isImportDeclaration(node)) {
-                if (!isTypeOnlyImport(node)) {
-                    classify(
-                        file,
-                        (node.moduleSpecifier as ts.StringLiteral).text,
-                        chain,
-                    );
-                }
-            } else if (ts.isExportDeclaration(node)) {
-                if (!isTypeOnlyExport(node) && node.moduleSpecifier) {
-                    classify(
-                        file,
-                        (node.moduleSpecifier as ts.StringLiteral).text,
-                        chain,
-                    );
-                }
+            if (ts.isImportDeclaration(node) && !isTypeOnlyImport(node)) {
+                classify(
+                    file,
+                    (node.moduleSpecifier as ts.StringLiteral).text,
+                    chain,
+                );
+            } else if (
+                ts.isExportDeclaration(node) &&
+                !isTypeOnlyExport(node) &&
+                node.moduleSpecifier !== undefined
+            ) {
+                classify(
+                    file,
+                    (node.moduleSpecifier as ts.StringLiteral).text,
+                    chain,
+                );
             } else if (ts.isCallExpression(node)) {
-                if (node.expression.kind === ts.SyntaxKind.ImportKeyword) {
-                    const argument = node.arguments[0];
-                    if (
-                        argument !== undefined &&
-                        ts.isStringLiteralLike(argument)
-                    ) {
-                        classify(file, argument.text, chain);
-                    } else {
-                        problems.push(
-                            `${at(node)}: unresolvable dynamic import in a pure module`,
-                        );
-                    }
-                } else {
-                    const name = calledName(node.expression);
-                    if (name !== null && FORBIDDEN_CALLS.has(name)) {
-                        problems.push(
-                            `${at(node)}: calls ambient or effectful function ${name}`,
-                        );
-                    }
-                    if (name !== null && FORBIDDEN_CRYPTO.has(name)) {
-                        problems.push(
-                            `${at(node)}: calls non-deterministic ${name}`,
-                        );
-                    }
-                    if (ts.isPropertyAccessExpression(node.expression)) {
-                        const owner = node.expression.expression;
-                        if (
-                            ts.isIdentifier(owner) &&
-                            owner.text === "Date" &&
-                            node.expression.name.text === "now"
-                        ) {
-                            problems.push(
-                                `${at(node)}: reads the ambient clock`,
-                            );
-                        }
-                        if (
-                            ts.isIdentifier(owner) &&
-                            owner.text === "Math" &&
-                            node.expression.name.text === "random"
-                        ) {
-                            problems.push(
-                                `${at(node)}: reads the ambient random source`,
-                            );
-                        }
-                    }
-                }
+                checkCall(node, classify, file, chain, report);
             } else if (ts.isNewExpression(node)) {
-                if (
-                    ts.isIdentifier(node.expression) &&
-                    node.expression.text === "Date" &&
-                    (node.arguments === undefined ||
-                        node.arguments.length === 0)
-                ) {
-                    problems.push(`${at(node)}: reads the ambient clock`);
-                }
+                checkNew(node, report);
             } else if (ts.isPropertyAccessExpression(node)) {
-                if (
-                    ts.isIdentifier(node.expression) &&
-                    node.expression.text === "process"
-                ) {
-                    problems.push(
-                        `${at(node)}: reads ambient process state (${node.name.text})`,
-                    );
-                }
+                checkProcessAccess(node, report);
             }
             ts.forEachChild(node, walk);
         };

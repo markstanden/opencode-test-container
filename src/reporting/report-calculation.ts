@@ -44,12 +44,10 @@ export function reportFor(values: ReportValues): Report {
             assessed: values.assessed,
             valid: values.slots.filter((slot) => slot.validity === "valid")
                 .length,
-            invalid: values.slots.filter(
-                (slot) => slot.validity === "invalid",
-            ).length,
-            unknown: values.slots.filter(
-                (slot) => slot.validity === "unknown",
-            ).length,
+            invalid: values.slots.filter((slot) => slot.validity === "invalid")
+                .length,
+            unknown: values.slots.filter((slot) => slot.validity === "unknown")
+                .length,
             unrun: values.slots.filter((slot) => slot.validity === "unrun")
                 .length,
             judged: values.slots.filter((slot) => slot.judgement !== null)

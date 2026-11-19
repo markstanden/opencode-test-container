@@ -1,6 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { COMMANDS, USAGE, parseArgs, parseArgsWithDefaults } from "../../src/cli/otc.ts";
+import {
+    COMMANDS,
+    USAGE,
+    parseArgs,
+    parseArgsWithDefaults,
+} from "../../src/cli/otc.ts";
 
 describe("CLI source surface", () => {
     it("parses repeatable and comma-separated slot selectors", () => {

@@ -152,9 +152,8 @@ describe("analysis replay observations", () => {
             assert.equal(receipt.renderedAt, now());
             assert.deepEqual(
                 receipt.inputs,
-                json<Receipt>(
-                    join(PARITY, "expected", "analysis-receipt.json"),
-                ).inputs,
+                json<Receipt>(join(PARITY, "expected", "analysis-receipt.json"))
+                    .inputs,
             );
         } finally {
             rmSync(dir, { recursive: true, force: true });

@@ -37,8 +37,7 @@ export interface BlindnessIdentity {
 
 /** One side's lake observation, or the refusal. */
 export type LakeRead =
-    | { ok: true; documents: LakeDocument[] }
-    | { ok: false; problem: string };
+    { ok: true; documents: LakeDocument[] } | { ok: false; problem: string };
 
 /** A contained lake reader; injectable by tests that count observations. */
 export type LakeReader = (workspace: string, lakeRoot: string) => LakeRead;

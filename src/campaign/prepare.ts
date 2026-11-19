@@ -732,10 +732,7 @@ export function prepareCampaign(
             join(root, "prepare", "suite.json"),
             `${JSON.stringify(bundle.suite, null, 2)}\n`,
         );
-        write(
-            join(root, "prepare", "campaign.json"),
-            bundle.campaignText,
-        );
+        write(join(root, "prepare", "campaign.json"), bundle.campaignText);
         const staged = stageBundle(bundle, root);
         if (staged.problems.length > 0) {
             return refuseCreated(root, staged.problems);

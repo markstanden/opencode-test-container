@@ -1661,24 +1661,58 @@ export function analysisReceiptFor(input: {
     };
 }
 
-/**
- * Run the analyser.
- * @param argv The arguments after the script path.
- * @param deps Injected clock for deterministic receipt tests.
- * @returns The exit status and messages.
- */
-export function runAnalysis(
+/** Refuse the first output name that is unsafe to publish. */
+function outputTargetProblem(
+    options: CliOptions,
+    trace: ReplayTrace,
+): string | undefined {
+    const protectedPaths = protectedPathsOf(options, trace);
+    for (const name of OUTPUT_NAMES) {
+        const problem = publicTargetProblem(
+            join(options.out, name),
+            protectedPaths,
+        );
+        if (problem !== undefined) return problem;
+    }
+    return undefined;
+}
+
+/** The refusal for a replay that observed the same input two different ways. */
+function conflictResult(trace: ReplayTrace): CliRun | null {
+    return trace.conflicts.length === 0
+        ? null
+        : {
+              status: 1,
+              messages: trace.conflicts.map(
+                  (conflict) =>
+                      `analyse: conflicting evidence observation: ${conflict}`,
+              ),
+          };
+}
+
+/** Validated inputs of one analyser run. */
+type AnalysisInput =
+    | {
+          ok: true;
+          options: CliOptions;
+          manifest: CampaignManifest;
+          manifestText: string;
+      }
+    | { ok: false; run: CliRun };
+
+/** Parse arguments, read the manifest once and prepare the output directory. */
+function resolveAnalysisInput(
     argv: readonly string[],
-    deps: {
-        now?: () => string;
-        readManifest?: (path: string) => string;
-    } = {},
-): CliRun {
+    deps: { readManifest?: (path: string) => string },
+): AnalysisInput {
     const parsed = parseArgs(argv);
     if (parsed.options === undefined) {
         return {
-            status: 2,
-            messages: [`analyse: ${parsed.error ?? "bad arguments"}`],
+            ok: false,
+            run: {
+                status: 2,
+                messages: [`analyse: ${parsed.error ?? "bad arguments"}`],
+            },
         };
     }
     const options = parsed.options;
@@ -1688,50 +1722,65 @@ export function runAnalysis(
         manifestRead.manifestText === undefined
     ) {
         return {
-            status: 2,
-            messages: manifestRead.problems.map(
-                (problem) => `manifest: ${problem}`,
-            ),
+            ok: false,
+            run: {
+                status: 2,
+                messages: manifestRead.problems.map(
+                    (problem) => `manifest: ${problem}`,
+                ),
+            },
         };
     }
-    const manifest = manifestRead.manifest;
     const prepared = prepareOut(options);
-    if (prepared !== undefined) {
-        return { status: 1, messages: [`analyse: ${prepared}`] };
-    }
+    return prepared !== undefined
+        ? { ok: false, run: { status: 1, messages: [`analyse: ${prepared}`] } }
+        : {
+              ok: true,
+              options,
+              manifest: manifestRead.manifest,
+              manifestText: manifestRead.manifestText,
+          };
+}
+
+/**
+ * Run the analyser.
+ * @param argv The arguments after the script path.
+ * @param deps Injected clock for deterministic receipt tests.
+ * @param deps.now The render time sampler.
+ * @param deps.readManifest Reads the manifest text once.
+ * @returns The exit status and messages.
+ */
+export function runAnalysis(
+    argv: readonly string[],
+    deps: {
+        now?: () => string;
+        readManifest?: (path: string) => string;
+    } = {},
+): CliRun {
+    const input = resolveAnalysisInput(argv, deps);
+    if (!input.ok) return input.run;
+    const { options, manifest, manifestText } = input;
     const trace = newTrace();
     const reader = fsReader(options.evidenceRoot, trace);
     const loaded = loadCampaign(manifest, reader, options.allowLegacyUnbound);
     const result = assemble(
         manifest,
-        manifestRead.manifestText,
+        manifestText,
         loaded.records,
         loaded.scored,
         reader,
     );
-    if (trace.conflicts.length > 0) {
-        return {
-            status: 1,
-            messages: trace.conflicts.map(
-                (conflict) => `analyse: conflicting evidence observation: ${conflict}`,
-            ),
-        };
-    }
+    const conflict = conflictResult(trace);
+    if (conflict !== null) return conflict;
     const receipt = analysisReceiptFor({
         manifestSha256: result.manifestSha256,
         policyId: result.policyId,
         renderedAt: (deps.now ?? (() => new Date().toISOString()))(),
         trace,
     });
-    const protectedPaths = protectedPathsOf(options, trace);
-    for (const name of OUTPUT_NAMES) {
-        const problem = publicTargetProblem(
-            join(options.out, name),
-            protectedPaths,
-        );
-        if (problem !== undefined) {
-            return { status: 1, messages: [`analyse: ${problem}`] };
-        }
+    const targetProblem = outputTargetProblem(options, trace);
+    if (targetProblem !== undefined) {
+        return { status: 1, messages: [`analyse: ${targetProblem}`] };
     }
     publishOutputs(
         options.out,

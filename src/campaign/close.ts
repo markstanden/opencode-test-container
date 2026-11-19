@@ -106,7 +106,8 @@ function closureRefusals(
             `unsettled spend: ${claims.join("; ")}; closure would hide an unknown outcome`,
         ];
     }
-    if (assessments.problems.length > 0) {        return [
+    if (assessments.problems.length > 0) {
+        return [
             "assessment evidence is not trustworthy",
             ...assessments.problems,
         ];
@@ -148,9 +149,7 @@ function closureRefusals(
         manifest,
         ended,
         policy.policy,
-        new Map(
-            assessments.records.map((entry) => [entry.slotId, entry]),
-        ),
+        new Map(assessments.records.map((entry) => [entry.slotId, entry])),
     );
     return judgementConflicts.length > 0
         ? ["judgement evidence is unresolved", ...judgementConflicts]

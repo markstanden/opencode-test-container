@@ -60,11 +60,9 @@ describe("prepare observes each original document once", () => {
         );
         try {
             // Act
-            const prepared = prepareCampaign(
-                campaignPath,
-                join(dir, "root"),
-                { readDocument: changed.read },
-            );
+            const prepared = prepareCampaign(campaignPath, join(dir, "root"), {
+                readDocument: changed.read,
+            });
 
             // Assert
             assert.equal(
@@ -99,9 +97,9 @@ describe("prepare observes each original document once", () => {
         // Arrange
         const { dir, campaignPath } = workspace();
         const suiteBytes = readFileSync(join(dir, "suite.json"));
-        const declared = JSON.parse(
-            readFileSync(campaignPath, "utf8"),
-        ) as { suite: { path: string; sha256?: string } };
+        const declared = JSON.parse(readFileSync(campaignPath, "utf8")) as {
+            suite: { path: string; sha256?: string };
+        };
         declared.suite.sha256 = sha256Bytes(suiteBytes);
         writeFileSync(campaignPath, `${JSON.stringify(declared, null, 2)}\n`);
         try {
@@ -159,10 +157,7 @@ describe("prepare observes each original document once", () => {
             // Assert
             assert.equal(spaced.ok, true);
             if (!spaced.ok) return;
-            assert.notEqual(
-                spaced.value.suiteSha256,
-                plain.value.suiteSha256,
-            );
+            assert.notEqual(spaced.value.suiteSha256, plain.value.suiteSha256);
             assert.equal(
                 sha256Of(spaced.value.suite),
                 sha256Of(plain.value.suite),
@@ -176,9 +171,9 @@ describe("prepare observes each original document once", () => {
         // Arrange
         const { dir, campaignPath } = workspace();
         const suitePath = join(dir, "suite.json");
-        const campaignA = JSON.parse(
-            readFileSync(campaignPath, "utf8"),
-        ) as { campaignId: string };
+        const campaignA = JSON.parse(readFileSync(campaignPath, "utf8")) as {
+            campaignId: string;
+        };
         const campaignB = { ...campaignA, campaignId: "skill-basic-other" };
         const suiteA = JSON.parse(readFileSync(suitePath, "utf8")) as {
             suiteId: string;
@@ -203,11 +198,9 @@ describe("prepare observes each original document once", () => {
         };
         try {
             // Act
-            const prepared = prepareCampaign(
-                campaignPath,
-                join(dir, "root"),
-                { readDocument: read },
-            );
+            const prepared = prepareCampaign(campaignPath, join(dir, "root"), {
+                readDocument: read,
+            });
 
             // Assert: the first observation is the only one used.
             assert.equal(
@@ -220,10 +213,7 @@ describe("prepare observes each original document once", () => {
             if (!prepared.ok) return;
             assert.equal(prepared.manifest.campaignId, "skill-basic-local");
             assert.equal(prepared.manifest.suiteId, "skill-basic");
-            assert.equal(
-                prepared.manifest.campaignSha256,
-                sha256Bytes(bytesA),
-            );
+            assert.equal(prepared.manifest.campaignSha256, sha256Bytes(bytesA));
             assert.equal(
                 prepared.manifest.suiteSha256,
                 sha256Bytes(suiteBytesA),

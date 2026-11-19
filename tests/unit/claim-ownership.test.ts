@@ -12,12 +12,12 @@ import {
 
 /** Run a body with a clock that advances on every sample. */
 function withAdvancingClock<T>(body: () => T): T {
-    const RealDate = globalThis.Date;
+    const realDate = globalThis.Date;
     let tick = 0;
-    class AdvancingDate extends RealDate {
+    class AdvancingDate extends realDate {
         constructor(value?: string | number | Date) {
             if (arguments.length === 0) {
-                super(RealDate.UTC(2026, 10, 19, 0, 0, tick));
+                super(realDate.UTC(2026, 10, 19, 0, 0, tick));
                 tick += 1;
                 return;
             }
@@ -28,7 +28,7 @@ function withAdvancingClock<T>(body: () => T): T {
     try {
         return body();
     } finally {
-        globalThis.Date = RealDate;
+        globalThis.Date = realDate;
     }
 }
 

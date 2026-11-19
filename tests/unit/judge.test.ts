@@ -872,7 +872,8 @@ describe("blind docs judge", () => {
         assert.deepEqual(readdirSync(directory).sort(), before);
     });
 
-    it("records a process failure without recovering", async () => {        // Arrange
+    it("records a process failure without recovering", async () => {
+        // Arrange
         const { dir, root } = await campaignRoot();
         dirs.push(dir);
         const dispatches: string[] = [];

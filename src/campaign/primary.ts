@@ -224,11 +224,7 @@ export async function executePrimaryCheck(options: {
             "status" | "exit" | "signal" | "reason" | "stdout" | "stderr"
         >,
     ): { ok: boolean; record: PrimaryCheckRecord; problem: string | null } => {
-        const record = primaryRecordFor(
-            base,
-            Date.now() - started,
-            patch,
-        );
+        const record = primaryRecordFor(base, Date.now() - started, patch);
         writeFileSync(
             join(options.trialDir, "primary-check.json"),
             `${JSON.stringify(record, null, 2)}\n`,

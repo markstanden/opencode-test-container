@@ -464,14 +464,8 @@ console.log(JSON.stringify(result));
         assessCampaign(root);
 
         // Act
-        const first = closeCampaign(
-            root,
-            () => "2026-11-17T00:00:00.000Z",
-        );
-        const second = closeCampaign(
-            root,
-            () => "2026-11-18T00:00:00.000Z",
-        );
+        const first = closeCampaign(root, () => "2026-11-17T00:00:00.000Z");
+        const second = closeCampaign(root, () => "2026-11-18T00:00:00.000Z");
 
         // Assert
         assert.equal(first.ok, true, first.ok ? "" : first.problems.join("; "));

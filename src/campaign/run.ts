@@ -37,10 +37,7 @@ import {
     runContainer,
     type ContainerPlan,
 } from "../adapters/podman/container.ts";
-import {
-    buildTrialPlan,
-    type TrialPlanValues,
-} from "./plan.ts";
+import { buildTrialPlan, type TrialPlanValues } from "./plan.ts";
 export { buildTrialPlan };
 export type { TrialPlanValues };
 import type { CommandResult } from "../adapters/process.ts";
@@ -925,7 +922,7 @@ async function liveSlot(options: {
     }
     if (options.signal !== undefined)
         planned.planned.plan.signal = options.signal;
-    let claim = advanceClaim(claimed.claim, "spawned", {
+    const claim = advanceClaim(claimed.claim, "spawned", {
         stamp: slot.slotId,
         note: "trial dispatch started",
     });
@@ -941,7 +938,7 @@ async function liveSlot(options: {
         now,
         ...(options.signal === undefined ? {} : { signal: options.signal }),
     });
-    claim = advanceClaim(claim, "closed", {
+    advanceClaim(claim, "closed", {
         note: "trial terminal evidence recorded",
     });
     return {

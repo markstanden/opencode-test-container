@@ -216,10 +216,7 @@ function judgementOf(
             sum +
             (kind === "trial"
                 ? trialClaims
-                : claimsOf(
-                      join(root, "evidence"),
-                      kind as "judge" | "recovery",
-                  )
+                : claimsOf(join(root, "evidence"), kind as "judge" | "recovery")
             ).filter((claim) => claim.state !== "closed").length,
         0,
     );
@@ -476,6 +473,7 @@ function countsOf(
  * for this one response.
  * @param root The campaign root.
  * @param deps Claim reader, injected by consistency tests.
+ * @param deps.claims Reads the claims of one kind for this response.
  * @returns The status document.
  */
 export function statusOf(

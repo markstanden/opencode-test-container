@@ -1,21 +1,13 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import {
-    cpSync,
-    mkdtempSync,
-    readFileSync,
-    rmSync,
-} from "node:fs";
+import { cpSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { prepareCampaign } from "../../src/campaign/prepare.ts";
 import { freezeCampaign } from "../../src/campaign/freeze.ts";
 import { statusOf } from "../../src/campaign/status.ts";
-import {
-    claimBudget,
-    type BudgetClaim,
-} from "../../src/campaign/budget.ts";
+import { claimBudget, type BudgetClaim } from "../../src/campaign/budget.ts";
 import type { CommandResult } from "../../src/adapters/process.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -130,8 +122,8 @@ describe("status observes one budget snapshot", () => {
                 remaining: 2,
             });
             assert.equal(
-                status.nextActions.some(
-                    (action) => action.reason.includes("2 trial(s) budgeted"),
+                status.nextActions.some((action) =>
+                    action.reason.includes("2 trial(s) budgeted"),
                 ),
                 true,
             );

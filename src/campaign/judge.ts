@@ -36,10 +36,7 @@ import {
     runContainer,
     type ContainerPlan,
 } from "../adapters/podman/container.ts";
-import {
-    buildAttemptPlan,
-    type AttemptPlanValues,
-} from "./plan.ts";
+import { buildAttemptPlan, type AttemptPlanValues } from "./plan.ts";
 export { buildAttemptPlan };
 export type { AttemptPlanValues };
 import type { CommandResult } from "../adapters/process.ts";
@@ -1369,9 +1366,38 @@ type SettlementDecision =
     | null;
 
 /**
+ * Apply an existing-slot settlement: reuse, refuse, or record a repair. A dry
+ * run takes the same decision but never records the repair.
+ */ function applySettlement(options: {
+    root: string;
+    manifest: PreparedManifest;
+    slot: Slot;
+    attempts: RecordedAttempt[];
+    policy: RecoveryPolicy | null;
+    dryRun: boolean;
+    now: () => string;
+}): { status: "judged" | "skipped" | "refused"; problems: string[] } | null {
+    const settled = settleExisting(options);
+    if (settled === null) return null;
+    if (settled.action === "reuse") {
+        return { status: "skipped", problems: [] };
+    }
+    if (settled.action === "refuse") {
+        return { status: "refused", problems: settled.problems };
+    }
+    if (options.dryRun) return { status: "judged", problems: [] };
+    const record = recordSelection({
+        ...options,
+        selectedAttemptId: settled.selectedAttemptId,
+    });
+    return record.ok
+        ? { status: "judged", problems: [] }
+        : { status: "refused", problems: record.problems };
+}
+
+/**
  * Decide what to do with a slot that already has a selection or a usable
- * judgement. Recording a repair is the caller's separate act, so a dry run can
- * take the same decision without writing.
+ * judgement. Recording a repair is the caller's separate act.
  */
 function settleExisting(options: {
     root: string;
@@ -1753,24 +1779,11 @@ async function judgeSlot(options: {
     ) {
         return { status: "refused", problems: [eligibility.reason] };
     }
-    const settled = settleExisting({ ...options, attempts: recorded.attempts });
-    if (settled !== null) {
-        if (settled.action === "reuse") {
-            return { status: "skipped", problems: [] };
-        }
-        if (settled.action === "refuse") {
-            return { status: "refused", problems: settled.problems };
-        }
-        if (options.dryRun) return { status: "judged", problems: [] };
-        const record = recordSelection({
-            ...options,
-            attempts: recorded.attempts,
-            selectedAttemptId: settled.selectedAttemptId,
-        });
-        return record.ok
-            ? { status: "judged", problems: [] }
-            : { status: "refused", problems: record.problems };
-    }
+    const settled = applySettlement({
+        ...options,
+        attempts: recorded.attempts,
+    });
+    if (settled !== null) return settled;
     const ready = buildReady({ ...options, ...resolved });
     if ("problem" in ready) {
         return { status: "refused", problems: [ready.problem] };
@@ -2084,6 +2097,38 @@ export interface JudgeSandboxPlanOptions {
     workDirectory?: string;
 }
 
+/** Resolve the docs case and judge model for one sandbox plan. */
+function resolveSandboxCase(
+    manifest: PreparedManifest,
+    slotId: string,
+):
+    | { ok: true; slot: Slot; testCase: DocsTaskCase; judgeModel: string }
+    | { ok: false; problems: string[] } {
+    const slot = manifest.campaign.schedule.slots.find(
+        (entry) => entry.slotId === slotId,
+    );
+    const testCase = manifest.suite.cases.find(
+        (entry) => entry.caseId === slot?.caseId,
+    );
+    if (slot === undefined || testCase?.kind !== "docs-task") {
+        return { ok: false, problems: [`slot ${slotId} has no docs case`] };
+    }
+    const judgeModel = manifest.campaign.assessment.judge?.model;
+    return judgeModel === undefined
+        ? {
+              ok: false,
+              problems: ["the campaign declares no judge model"],
+          }
+        : { ok: true, slot, testCase, judgeModel };
+}
+
+/** The caller-owned or disposable directory a sandbox plan writes into. */
+function sandboxDirectory(options: JudgeSandboxPlanOptions): string {
+    return options.workDirectory === undefined
+        ? mkdtempSync(join(tmpdir(), "otc-judge-plan-"))
+        : join(options.workDirectory, "judge-plan");
+}
+
 /**
  * Build a judge sandbox plan for one docs slot without claiming a budget or
  * dispatching. Internal smoke/ops hook: it uses the production mount plan and
@@ -2104,41 +2149,28 @@ export function judgeSandboxPlanForSlot(
     if (!prepared.ok) return { ok: false, problems: [prepared.problem] };
     const frozen = loadFrozen(root);
     if (!frozen.ok) return { ok: false, problems: [frozen.problem] };
-    const slot = prepared.manifest.campaign.schedule.slots.find(
-        (entry) => entry.slotId === slotId,
-    );
-    const testCase = prepared.manifest.suite.cases.find(
-        (entry) => entry.caseId === slot?.caseId,
-    );
-    const judgeModel = prepared.manifest.campaign.assessment.judge?.model;
-    if (slot === undefined || testCase?.kind !== "docs-task") {
-        return { ok: false, problems: [`slot ${slotId} has no docs case`] };
-    }
-    if (judgeModel === undefined) {
-        return {
-            ok: false,
-            problems: ["the campaign declares no judge model"],
-        };
-    }
-    const built = buildPacket({ root, slot, testCase });
+    const resolved = resolveSandboxCase(prepared.manifest, slotId);
+    if (!resolved.ok) return resolved;
+    const built = buildPacket({
+        root,
+        slot: resolved.slot,
+        testCase: resolved.testCase,
+    });
     if (!built.ok) return built;
-    const directory =
-        options.workDirectory === undefined
-            ? mkdtempSync(join(tmpdir(), "otc-judge-plan-"))
-            : join(options.workDirectory, "judge-plan");
+    const directory = sandboxDirectory(options);
     mkdirSync(directory, { recursive: true });
     const packetFile = join(directory, "packet.md");
     writeFileSync(packetFile, built.packet, "utf8");
     const planned = planAttempt({
         root,
         campaign: prepared.manifest.campaign,
-        slot,
+        slot: resolved.slot,
         attemptId,
         imageId: frozen.record.imageId,
         packet: built.packet,
         packetSha256: sha256Bytes(built.packet),
         packetFile,
-        judgeModel,
+        judgeModel: resolved.judgeModel,
         attemptDirOverride: directory,
     });
     if (!planned.ok) return planned;

@@ -238,7 +238,11 @@ export function deriveClosure(input: ClosureInput): ClosureReport {
     ];
     const recordedTrials = observed.filter((slot) => slot.recorded).length;
     problems.push(
-        ...calculateClosureProblems(input.closed, observed.length, recordedTrials),
+        ...calculateClosureProblems(
+            input.closed,
+            observed.length,
+            recordedTrials,
+        ),
     );
     return {
         state: input.closed ? "closed" : "open",

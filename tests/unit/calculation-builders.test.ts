@@ -69,11 +69,36 @@ describe("report calculation", () => {
     it("keeps unrun, invalid, unknown and unjudged denominators distinct", () => {
         // Arrange
         const slots = [
-            row({ slotId: "unrun", validity: "unrun", outcome: "unknown", judged: false }),
-            row({ slotId: "invalid", validity: "invalid", outcome: "unknown", judged: false }),
-            row({ slotId: "unknown", validity: "unknown", outcome: "unknown", judged: false }),
-            row({ slotId: "pass", validity: "valid", outcome: "pass", judged: false }),
-            row({ slotId: "fail", validity: "valid", outcome: "fail", judged: true }),
+            row({
+                slotId: "unrun",
+                validity: "unrun",
+                outcome: "unknown",
+                judged: false,
+            }),
+            row({
+                slotId: "invalid",
+                validity: "invalid",
+                outcome: "unknown",
+                judged: false,
+            }),
+            row({
+                slotId: "unknown",
+                validity: "unknown",
+                outcome: "unknown",
+                judged: false,
+            }),
+            row({
+                slotId: "pass",
+                validity: "valid",
+                outcome: "pass",
+                judged: false,
+            }),
+            row({
+                slotId: "fail",
+                validity: "valid",
+                outcome: "fail",
+                judged: true,
+            }),
         ];
         const values = {
             campaignId: "campaign",
@@ -114,8 +139,18 @@ describe("report calculation", () => {
             generatedAt: "2026-11-18T00:00:00.000Z",
             assessed: 2,
             slots: [
-                row({ slotId: "a", validity: "valid", outcome: "pass", judged: false }),
-                row({ slotId: "b", validity: "unrun", outcome: "unknown", judged: false }),
+                row({
+                    slotId: "a",
+                    validity: "valid",
+                    outcome: "pass",
+                    judged: false,
+                }),
+                row({
+                    slotId: "b",
+                    validity: "unrun",
+                    outcome: "unknown",
+                    judged: false,
+                }),
             ],
         };
 
@@ -186,7 +221,8 @@ describe("freeze calculation", () => {
             assert.equal(again.alreadyFrozen, true);
             assert.deepEqual(again.record, first.record);
         } finally {
-            for (const dir of made) rmSync(dir, { recursive: true, force: true });
+            for (const dir of made)
+                rmSync(dir, { recursive: true, force: true });
         }
     });
 });
