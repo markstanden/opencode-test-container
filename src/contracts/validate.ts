@@ -11,6 +11,7 @@ import type {
     DocsTaskCase,
     ExpectedDocs,
     InstructionSubject,
+    ObservedCampaignBundle,
     PluginSubject,
     ProviderRoute,
     RecoveryDeclaration,
@@ -1439,17 +1440,27 @@ export function validateBundle(
 
 /**
  * Read and validate a campaign and its suite from disk.
+ *
+ * Each original document is read exactly once. The returned bundle carries the
+ * observed text and raw digests so staging and receipts bind to the same bytes
+ * that were parsed, never to a later observation of the path.
  * @param campaignPath The campaign document path.
- * @returns The bundle, or actionable problems including unreadable files.
+ * @param readDocument Reads one document's complete bytes; injectable so a test
+ * can prove that a changing file cannot mix two source versions.
+ * @returns The observed bundle, or actionable problems including unreadable files.
  */
 export function loadCampaignBundle(
     campaignPath: string,
-): Parsed<CampaignBundle> {
+    readDocument: (path: string) => Buffer = readFileSync,
+): Parsed<ObservedCampaignBundle> {
     const resolvedCampaign = resolve(campaignPath);
-    const campaignJson = readJson(resolvedCampaign);
-    if (!campaignJson.ok) {
-        return { ok: false, problems: [campaignJson.problem] };
-    }
+    const campaignRead = readCampaignDocument(resolvedCampaign, readDocument);
+    if (!campaignRead.ok) return campaignRead;
+    const campaignJson = parseCampaignText(
+        resolvedCampaign,
+        campaignRead.value.text,
+    );
+    if (!campaignJson.ok) return campaignJson;
     const parsed = validateCampaign(
         campaignJson.value,
         dirname(resolvedCampaign),
@@ -1461,27 +1472,82 @@ export function loadCampaignBundle(
         dirname(resolvedCampaign),
         parsed.value.suite.path,
     );
-    const suiteJson = readJson(suitePath);
-    if (!suiteJson.ok) {
-        return { ok: false, problems: [suiteJson.problem] };
-    }
+    const suiteRead = readCampaignDocument(suitePath, readDocument);
+    if (!suiteRead.ok) return suiteRead;
+    const suiteJson = parseCampaignText(suitePath, suiteRead.value.text);
+    if (!suiteJson.ok) return suiteJson;
+    const suiteSha256 = sha256Bytes(suiteRead.value.bytes);
     if (parsed.value.suite.sha256 !== undefined) {
-        const observed = sha256Bytes(readFileSync(suitePath));
-        if (observed !== parsed.value.suite.sha256) {
+        if (suiteSha256 !== parsed.value.suite.sha256) {
             return {
                 ok: false,
                 problems: [
-                    `suite sha256 mismatch: declared ${parsed.value.suite.sha256}, observed ${observed}`,
+                    `suite sha256 mismatch: declared ${parsed.value.suite.sha256}, observed ${suiteSha256}`,
                 ],
             };
         }
     }
-    return validateBundle(
+    const bundle = validateBundle(
         campaignJson.value,
         suiteJson.value,
         resolvedCampaign,
         suitePath,
     );
+    return bundle.ok
+        ? {
+              ok: true,
+              value: {
+                  ...bundle.value,
+                  campaignText: campaignRead.value.text,
+                  suiteText: suiteRead.value.text,
+                  campaignSha256: sha256Bytes(campaignRead.value.bytes),
+                  suiteSha256,
+              },
+          }
+        : bundle;
+}
+
+/** One document's exact bytes and decoded text. */
+interface ReadDocument {
+    /** The bytes as read. */
+    bytes: Buffer;
+    /** The UTF-8 decoding of those bytes. */
+    text: string;
+}
+
+/** Read one original document once, preserving the historical error shape. */
+function readCampaignDocument(
+    path: string,
+    readDocument: (path: string) => Buffer,
+): { ok: true; value: ReadDocument } | { ok: false; problems: string[] } {
+    try {
+        const bytes = Buffer.from(readDocument(path));
+        return { ok: true, value: { bytes, text: bytes.toString("utf8") } };
+    } catch (error) {
+        return {
+            ok: false,
+            problems: [
+                `${path}: ${error instanceof Error ? error.message : String(error)}`,
+            ],
+        };
+    }
+}
+
+/** Parse one document's text, preserving the historical parse error shape. */
+function parseCampaignText(
+    path: string,
+    text: string,
+): { ok: true; value: unknown } | { ok: false; problems: string[] } {
+    try {
+        return { ok: true, value: JSON.parse(text) as unknown };
+    } catch (error) {
+        return {
+            ok: false,
+            problems: [
+                `${path}: ${error instanceof Error ? error.message : String(error)}`,
+            ],
+        };
+    }
 }
 
 /** Whether a value is one of the finite assessment kinds. */
