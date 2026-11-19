@@ -14,6 +14,8 @@ const PURE_MODULES = Object.freeze([
     join(SRC, "campaign", "stop-policy.ts"),
     join(SRC, "campaign", "plan.ts"),
     join(SRC, "campaign", "primary-record.ts"),
+    join(SRC, "evaluators", "docs", "scoring.ts"),
+    join(SRC, "evaluators", "docs", "analysis", "closure.ts"),
     join(SRC, "reporting", "report-calculation.ts"),
 ]);
 

@@ -210,6 +210,11 @@ describe("budget preview", () => {
     it("reports one admissible slot and the remaining refusals without claiming", async () => {
         // Arrange
         const { dir, root } = await campaignRoot({ trials: 1 });
+        const owned = (): string[] =>
+            readdirSync(tmpdir()).filter((name) =>
+                name.startsWith("otc-plan-"),
+            );
+        const before = owned();
         try {
             // Act
             const summary = await runCampaign(root, { dryRun: true });
@@ -233,6 +238,7 @@ describe("budget preview", () => {
             assert.deepEqual(readClaims(join(root, "evidence"), "trial"), []);
             assert.equal(existsSync(join(root, "evidence", "trials")), false);
             assert.deepEqual(readLedger(root).events, []);
+            assert.deepEqual(owned(), before);
         } finally {
             rmSync(dir, { recursive: true, force: true });
         }
