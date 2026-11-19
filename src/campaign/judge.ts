@@ -376,12 +376,70 @@ interface AttemptPlan {
     packetSha256: string;
 }
 
+/** The explicit values one judge attempt's plan is built from. */
+export interface AttemptPlanValues {
+    /** The frozen image identity. */
+    imageId: string;
+    /** The blinded packet delivered on stdin. */
+    packet: string;
+    /** The resolved read-only packet file. */
+    packetFile: string;
+    /** The resolved read-only judge config home. */
+    configHome: string;
+    /** The resolved writable judge work area. */
+    work: string;
+    /** The declared network mode. */
+    network: ContainerPlan["network"];
+    /** The complete opencode argument vector. */
+    argv: readonly string[];
+    /** The 0600 environment file path. */
+    envFile: string;
+    /** The environment variable names the file carries. */
+    envNames: readonly string[];
+    /** The declared judge timeout. */
+    timeoutMs: number;
+    /** The owned container name. */
+    name: string;
+    /** The ownership labels. */
+    labels: Record<string, string>;
+}
+
+/**
+ * Build one judge attempt plan from resolved values. Pure: it reads no disk,
+ * environment, clock or random source, and copies every supplied collection.
+ * @param values The resolved plan values.
+ * @returns The container plan.
+ */
+export function buildAttemptPlan(values: AttemptPlanValues): ContainerPlan {
+    return {
+        imageId: values.imageId,
+        mounts: judgeMounts({
+            packet: values.packetFile,
+            configHome: values.configHome,
+            work: values.work,
+        }),
+        workdir: "/judge/work",
+        network: values.network,
+        argv: [...values.argv],
+        // The blinded packet is the model's prompt. It travels on stdin so a
+        // packet larger than the host's per-argument limit still arrives
+        // byte for byte; it is never in the process argument vector.
+        stdin: values.packet,
+        envNames: [...new Set(values.envNames)],
+        envFile: values.envFile,
+        timeoutMs: values.timeoutMs,
+        name: values.name,
+        labels: { ...values.labels },
+    };
+}
+
 /** Build one attempt's dispatch plan without claiming or spawning. */
 function planAttempt(options: {
     root: string;
     campaign: Campaign;
     slot: Slot;
     attemptId: string;
+    imageId: string;
     packet: string;
     packetSha256: string;
     packetFile: string;
@@ -402,14 +460,13 @@ function planAttempt(options: {
     const environment = writeJudgeEnvironment(attemptDir, options.campaign);
     if (!environment.ok) return environment;
     const { envFile, names } = environment;
-    const plan: ContainerPlan = {
-        imageId: "",
-        mounts: judgeMounts({
-            packet: options.packetFile,
-            configHome,
-            work,
-        }),
-        workdir: "/judge/work",
+    const printLogs = process.env.OTC_PRINT_LOGS === "1";
+    const plan = buildAttemptPlan({
+        imageId: options.imageId,
+        packet: options.packet,
+        packetFile: options.packetFile,
+        configHome,
+        work,
         network: options.campaign.runtime.network,
         argv: [
             "opencode",
@@ -419,15 +476,11 @@ function planAttempt(options: {
                 // slot, arm or attempt identity in it.
                 title: `otc-judge-${sha256Bytes(options.attemptId).slice(0, 12)}`,
                 prompt: null,
-                printLogs: process.env.OTC_PRINT_LOGS === "1",
+                printLogs,
             }),
         ],
-        // The blinded packet is the model's prompt. It travels on stdin so a
-        // packet larger than the host's per-argument limit still arrives
-        // byte for byte; it is never in the process argument vector.
-        stdin: options.packet,
-        envNames: [...new Set(names)],
         envFile,
+        envNames: names,
         timeoutMs:
             options.campaign.assessment.judge?.timeoutMs ??
             options.campaign.runtime.timeoutMs,
@@ -443,7 +496,7 @@ function planAttempt(options: {
             "otc.slot": options.slot.slotId,
             "otc.attempt": options.attemptId,
         },
-    };
+    });
     return {
         ok: true,
         plan,
@@ -748,6 +801,7 @@ async function dispatchAttempt(options: {
             campaign: options.manifest.campaign,
             slot: options.slot,
             attemptId: options.attemptId,
+            imageId: options.frozen.imageId,
             packet: options.packet,
             packetSha256: options.packetSha256,
             packetFile: packetPath(options.root, options.slot.slotId),
@@ -768,7 +822,6 @@ async function dispatchAttempt(options: {
             problem: `judge environment is not valid: ${planned.problems.join("; ")}`,
         };
     }
-    planned.plan.imageId = options.frozen.imageId;
     const startedAt = options.now();
     const startedMeta: JudgeAttemptMeta = {
         schemaVersion: 1,
@@ -2123,6 +2176,7 @@ export function judgeSandboxPlanForSlot(
         campaign: prepared.manifest.campaign,
         slot,
         attemptId,
+        imageId: frozen.record.imageId,
         packet: built.packet,
         packetSha256: sha256Bytes(built.packet),
         packetFile,
@@ -2130,6 +2184,5 @@ export function judgeSandboxPlanForSlot(
         attemptDirOverride: directory,
     });
     if (!planned.ok) return planned;
-    planned.plan.imageId = frozen.record.imageId;
     return { ok: true, plan: planned.plan };
 }

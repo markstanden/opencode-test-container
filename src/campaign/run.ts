@@ -363,9 +363,67 @@ function stageTrialPayload(
     return { ok: true, workspace, configHome, journal };
 }
 
+/** The explicit values a trial plan is built from. */
+export interface TrialPlanValues {
+    /** The frozen image identity. */
+    imageId: string;
+    /** The resolved writable workspace mount. */
+    workspace: string;
+    /** The resolved read-only config home. */
+    configHome: string;
+    /** The resolved read-only subject payload. */
+    subjects: string;
+    /** The resolved writable docs journal, or null when the case has none. */
+    journal: string | null;
+    /** The container working directory. */
+    workdir: string;
+    /** The declared network mode. */
+    network: ContainerPlan["network"];
+    /** The complete opencode argument vector. */
+    argv: readonly string[];
+    /** The 0600 environment file path. */
+    envFile: string;
+    /** The environment variable names the file carries. */
+    envNames: readonly string[];
+    /** The declared timeout. */
+    timeoutMs: number;
+    /** The owned container name. */
+    name: string;
+    /** The ownership labels. */
+    labels: Record<string, string>;
+}
+
+/**
+ * Build one complete trial plan from resolved values. Pure: it reads no disk,
+ * environment, clock or random source, and copies every supplied collection.
+ * @param values The resolved plan values.
+ * @returns The container plan.
+ */
+export function buildTrialPlan(values: TrialPlanValues): ContainerPlan {
+    return {
+        imageId: values.imageId,
+        mounts: trialMounts({
+            workspace: values.workspace,
+            configHome: values.configHome,
+            subjects: values.subjects,
+            journal: values.journal,
+        }),
+        workdir: values.workdir,
+        network: values.network,
+        argv: [...values.argv],
+        envNames: [...new Set(values.envNames)],
+        envFile: values.envFile,
+        timeoutMs: values.timeoutMs,
+        name: values.name,
+        labels: { ...values.labels },
+    };
+}
+
 /**
  * Build the container plan for one trial without dispatching it. Dry runs and
- * tests use the same plan the real runner executes.
+ * tests use the same plan the real runner executes. This command stages files
+ * (workspace, config home, journal and a 0600 env file) and then delegates the
+ * calculation to {@link buildTrialPlan}.
  * @param options The resolved trial inputs.
  * @returns The validated plan, or the problems found while staging.
  * @param options.root The root value.
@@ -417,13 +475,14 @@ export function planTrial(options: {
             problems: [`prompt for ${testCase.caseId} is missing`],
         };
     }
+    const printLogs = process.env.OTC_PRINT_LOGS === "1";
     const argv = [
         "opencode",
         ...opencodeRunArgs({
             model: campaign.runtime.provider.model,
             title: `otc-${campaign.campaignId}-${slot.slotId}`,
             prompt,
-            printLogs: process.env.OTC_PRINT_LOGS === "1",
+            printLogs,
         }),
     ];
     const passthrough = [
@@ -438,19 +497,17 @@ export function planTrial(options: {
     );
     if (!environment.ok) return environment;
     const { envFile, names } = environment;
-    const plan: ContainerPlan = {
+    const plan = buildTrialPlan({
         imageId: frozen.imageId,
-        mounts: trialMounts({
-            workspace,
-            configHome,
-            subjects: join(root, "prepare", "subjects", arm.armId),
-            journal,
-        }),
+        workspace,
+        configHome,
+        subjects: join(root, "prepare", "subjects", arm.armId),
+        journal,
         workdir: CONTAINER_WORKSPACE,
         network: campaign.runtime.network,
         argv,
-        envNames: [...new Set(names)],
         envFile,
+        envNames: names,
         timeoutMs: campaign.runtime.timeoutMs,
         name: ownedContainerName(
             campaign.campaignId,
@@ -462,7 +519,7 @@ export function planTrial(options: {
             "otc.campaign": campaign.campaignId,
             "otc.slot": slot.slotId,
         },
-    };
+    });
     return { ok: true, plan, argv, configSha256 };
 }
 
