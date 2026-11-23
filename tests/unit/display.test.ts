@@ -8,6 +8,8 @@ describe("displayValue", () => {
         { name: "a number", value: 42, expected: "42" },
         { name: "a zero", value: 0, expected: "0" },
         { name: "a boolean", value: false, expected: "false" },
+        { name: "a bigint", value: 10n, expected: "10" },
+        { name: "a symbol", value: Symbol("probe"), expected: "Symbol(probe)" },
         { name: "null", value: null, expected: "null" },
         { name: "undefined", value: undefined, expected: "undefined" },
     ];
