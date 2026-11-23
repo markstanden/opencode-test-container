@@ -43,7 +43,9 @@ jobs:
                   test "$(podman info --format '{{.Host.Security.Rootless}}')" = "true"
 
             - name: Install
-              run: npm ci
+              # No dependency in this lockfile installs a lifecycle script, so
+              # the install must not allow one to run (githubactions:S6505).
+              run: npm ci --ignore-scripts
 
             - name: Smoke
               run: npm run test:smoke
