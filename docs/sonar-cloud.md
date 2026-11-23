@@ -60,37 +60,35 @@ Analysis` check both pass on the pull request.
 
 ## Cleanup register (2026-11-23)
 
-The whole-project scope exposed 182 pre-existing issues. They were paid down in
-two steps (the cleanup PR and its follow-up):
+Across the analyses of this work SonarCloud raised 191 issues: the 182 the first
+whole-project analysis reported, plus those raised as the cleanup moved code.
+The final register is **141 fixed, 50 accepted with a written reason, 0 open**.
 
-- **Fixed — 130 findings.** Deterministic sort comparators (`S2871`), nested
+- **Fixed — 141 findings.** Deterministic sort comparators (`S2871`), nested
   ternaries and templates (`S3358`, `S4624`), optional chains (`S6582`),
   re-exports and duplicate imports (`S7763`, `S3863`), collection and string
   idioms (`S7750`, `S7765`, `S7770`, `S7776`, `S7778`, `S7781`), character
   classes (`S6353`, `S5869`), `String.raw` (`S7780`), named aliases (`S4323`),
-  complexity extractions (`S3776`), and value rendering (`S6551`). Five
-  findings introduced by the cleanup itself were cleared before the follow-up
-  analysis, and the redundant `await` in the S13 slot loop was removed once the
-  audit below showed it was synchronous (`S4123`).
-- **Hardened — no `S8707` cohort.** The project holds 20 `S8707` issues, all
-  accepted; none was closed by hardening. `rehearsals/root.mts` confines the
-  one operator-supplied argument to a strict descendant of the system
-  temporary directory or the current directory — both bases are refused
-  themselves, because the rehearsal deletes its root recursively — and the
-  confinement is pinned by tests.
-- **Accepted with a written reason on each issue — 52.** `S9382` (20) serial
-  loops, each reason written for its site: ordered prepare/freeze/run sequences,
+  complexity extractions (`S3776`), and value rendering (`S6551`). This
+  includes the five findings the cleanup itself introduced, cleared before the
+  follow-up analysis.
+- **Hardened — the rehearsal root.** `rehearsals/root.mts` confines the one
+  operator-supplied argument to a strict descendant of the system temporary
+  directory or the current directory; both bases are refused themselves,
+  because the rehearsal deletes its root recursively. The confinement is
+  pinned by tests. The taint analyser still reads the sinks, so no `S8707`
+  closed; all 20 are in the accepted cohort below.
+- **Accepted with a written reason on each issue — 50.** `S8707` (20) the
+  residual sink flow for the confined rehearsal root; `S9382` (18) serial loops,
+  each reason written for its site: ordered prepare/freeze/run sequences,
   polling waits, request-accounting sequences sharing one scripted provider, and
   one budget-consuming dry-run preview; `S5443` (5) the sandbox container's
   `/tmp` home; `S4036` (2) the operator's `PATH` for `podman`; `S8705` (2)
   shell-free `spawn` with an argument array; `S107` (3) decision-contract
-  parameter lists; `S8707` (20) the residual sink flow for the confined
-  rehearsal root.
+  parameter lists. Two further `S9382` findings retired with the code that
+  carried them and are counted as fixed.
 
-Accepted issues do not count toward the quality gate. After the follow-up
-analysis the register reads 141 closed and 50 accepted: two `S9382` findings
-close with the code that carried them, the S13 `await` on a synchronous helper
-and the per-iteration dynamic import in the S06 copy loop. The repository's own
+Accepted issues do not count toward the quality gate. The repository's own
 `defined` gate remains the merge verdict for style and tests.
 
 ## Open questions
