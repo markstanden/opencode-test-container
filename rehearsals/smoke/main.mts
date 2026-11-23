@@ -1541,7 +1541,7 @@ async function s13(): Promise<string> {
         await otcMust(env, binary, ["assess", "--root", root], neutral);
 
         for (const [slotId, caseId] of s13Slots) {
-            await expectExampleSlot(
+            expectExampleSlot(
                 root,
                 slotId,
                 caseId === "positive-instrument"
@@ -1593,8 +1593,8 @@ async function s13(): Promise<string> {
         );
         const afterSecond = await live.chatRequests();
         await otcMust(env, binary, ["assess", "--root", secondRoot], neutral);
-        await expectExampleSlot(secondRoot, "pos-r0", "target-activation");
-        await expectExampleSlot(secondRoot, "unrelated-r0", "no-invocation");
+        expectExampleSlot(secondRoot, "pos-r0", "target-activation");
+        expectExampleSlot(secondRoot, "unrelated-r0", "no-invocation");
         const secondDelta = afterSecond - beforeSecond;
         expect(
             secondDelta === 3,

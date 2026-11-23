@@ -390,7 +390,7 @@ function globSource(pattern: string): string {
             .split("*")
             .map((part) => part.replace(/[.+^${}()|[\]\\?]/g, String.raw`\$&`))
             .join("[^/]*")
-            .replaceAll("\\?", "[^/]");
+            .replaceAll(String.raw`\?`, "[^/]");
     });
     return `^${segments.join("/")}$`;
 }
