@@ -70,19 +70,27 @@ two steps (the cleanup PR and its follow-up):
   classes (`S6353`, `S5869`), `String.raw` (`S7780`), named aliases (`S4323`),
   complexity extractions (`S3776`), and value rendering (`S6551`). Five
   findings introduced by the cleanup itself were cleared before the follow-up
-  analysis.
-- **Hardened — `S8707` (22).** The rehearsal work root is confined to the
-  system temporary directory or the current directory by `rehearsals/root.mts`
-  before any write, and the confinement is pinned by tests.
+  analysis, and the redundant `await` in the S13 slot loop was removed once the
+  audit below showed it was synchronous (`S4123`).
+- **Hardened — no `S8707` cohort.** The project holds 20 `S8707` issues, all
+  accepted; none was closed by hardening. `rehearsals/root.mts` confines the
+  one operator-supplied argument to a strict descendant of the system
+  temporary directory or the current directory — both bases are refused
+  themselves, because the rehearsal deletes its root recursively — and the
+  confinement is pinned by tests.
 - **Accepted with a written reason on each issue — 52.** `S9382` (20) serial
-  loops that consume budget or depend on the previous iteration; `S5443` (5)
-  the sandbox container's `/tmp` home; `S4036` (2) the operator's `PATH` for
-  `podman`; `S8705` (2) shell-free `spawn` with an argument array; `S107` (3)
-  decision-contract parameter lists; `S8707` (20) the residual sink flow for
-  the confined rehearsal root.
+  loops, each reason written for its site: ordered prepare/freeze/run sequences,
+  polling waits, request-accounting sequences sharing one scripted provider, and
+  one budget-consuming dry-run preview; `S5443` (5) the sandbox container's
+  `/tmp` home; `S4036` (2) the operator's `PATH` for `podman`; `S8705` (2)
+  shell-free `spawn` with an argument array; `S107` (3) decision-contract
+  parameter lists; `S8707` (20) the residual sink flow for the confined
+  rehearsal root.
 
-Accepted issues do not count toward the quality gate. The repository's own
-`defined` gate remains the merge verdict for style and tests.
+Accepted issues do not count toward the quality gate. After the follow-up
+analysis the register reads 140 closed and 51 accepted: the S13 `S9382` finding
+closes with the `await` it described. The repository's own `defined` gate
+remains the merge verdict for style and tests.
 
 ## Open questions
 

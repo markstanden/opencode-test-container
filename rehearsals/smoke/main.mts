@@ -727,7 +727,6 @@ async function s06(): Promise<string> {
         "utf8",
     );
     for (const member of ["suite.json", "workspace", "checker"]) {
-        const { cpSync } = await import("node:fs");
         cpSync(join(docs, member), join(directory, member), {
             recursive: true,
         });
