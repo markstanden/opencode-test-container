@@ -56,9 +56,12 @@ describe("rehearsal root", () => {
 
     it("refuses the temporary directory itself", () => {
         // Arrange / Act / Assert
-        assert.throws(() => rehearsalRoot(resolve(tmpdir()), "otc-root-test-"), {
-            message: /strict subdirectory/,
-        });
+        assert.throws(
+            () => rehearsalRoot(resolve(tmpdir()), "otc-root-test-"),
+            {
+                message: /strict subdirectory/,
+            },
+        );
     });
 
     it("refuses a relative path", () => {

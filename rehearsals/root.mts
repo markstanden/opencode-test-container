@@ -34,6 +34,11 @@ export function rehearsalRoot(
         realpathSync(tmpdir()),
         resolve(process.cwd()),
     ]);
+    if ([...bases].some((base) => base === root)) {
+        throw new Error(
+            `rehearsal root ${root} must be a strict subdirectory of ${[...bases].join(" or ")}`,
+        );
+    }
     if (![...bases].some((base) => inside(root, base))) {
         throw new Error(
             `rehearsal root ${root} must be a strict subdirectory of ${[...bases].join(" or ")}`,
