@@ -14,16 +14,15 @@ import {
     cpSync,
     existsSync,
     mkdirSync,
-    mkdtempSync,
     readFileSync,
     readdirSync,
     rmSync,
     writeFileSync,
 } from "node:fs";
 import { createServer } from "node:net";
-import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { rehearsalRoot } from "./root.mts";
 import {
     startProvider,
     type CapturedRequest,
@@ -510,7 +509,7 @@ function assertGateBlocked(byId: Record<string, SlotObservation>): void {
     const counts = byId["gate-blocked"]?.assessment?.counts as
         Record<string, number> | undefined;
     expect(
-        counts !== undefined && counts.creditedWrites === 0,
+        counts?.creditedWrites === 0,
         "refused write earned recording credit",
     );
 }
@@ -761,8 +760,7 @@ function publishReport(options: {
 
 /** The main rehearsal. */
 async function main(): Promise<void> {
-    const work =
-        process.argv[2] ?? mkdtempSync(join(tmpdir(), "otc-fresh-docs-"));
+    const work = rehearsalRoot(process.argv[2], "otc-fresh-docs-");
     mkdirSync(work, { recursive: true });
     expect(
         existsSync(join(DOCS_PLUGIN, "package.json")),
@@ -779,7 +777,9 @@ async function main(): Promise<void> {
     }
 }
 
-main().catch((error: unknown) => {
+try {
+    await main();
+} catch (error: unknown) {
     console.error(error instanceof Error ? error.stack : String(error));
     process.exitCode = 1;
-});
+}

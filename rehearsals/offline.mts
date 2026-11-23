@@ -17,16 +17,15 @@ import {
     cpSync,
     existsSync,
     mkdirSync,
-    mkdtempSync,
     readFileSync,
     readdirSync,
     rmSync,
     writeFileSync,
 } from "node:fs";
 import { createServer } from "node:net";
-import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { rehearsalRoot } from "./root.mts";
 import { startProvider, type ScriptedResponse } from "./provider.mts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -548,7 +547,7 @@ async function runDocsRehearsal(
 }
 
 async function main(): Promise<void> {
-    const work = process.argv[2] ?? mkdtempSync(join(tmpdir(), "otc-offline-"));
+    const work = rehearsalRoot(process.argv[2], "otc-offline-");
     mkdirSync(work, { recursive: true });
     const imageId = podman(["image", "inspect", "--format", "{{.Id}}", IMAGE]);
     const version = podman([
@@ -609,7 +608,9 @@ async function main(): Promise<void> {
     }
 }
 
-main().catch((error: unknown) => {
+try {
+    await main();
+} catch (error: unknown) {
     console.error(error instanceof Error ? error.stack : String(error));
     process.exitCode = 1;
-});
+}

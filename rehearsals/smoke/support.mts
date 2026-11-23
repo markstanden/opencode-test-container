@@ -409,8 +409,7 @@ export function parseProbe<T>(stdout: string): T {
     const line = stdout
         .split("\n")
         .map((entry) => entry.trim())
-        .filter((entry) => entry.startsWith("{"))
-        .at(-1);
+        .findLast((entry) => entry.startsWith("{"));
     if (line === undefined) throw new Error(`probe printed no JSON: ${stdout}`);
     return JSON.parse(line) as T;
 }
