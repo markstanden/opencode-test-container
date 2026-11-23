@@ -39,13 +39,11 @@ Wired 2026-11-23. Supersedes the 2026-11-19 note that this repository was
 
 - Whole-project scope is the whole-project truth for this repository: the
   rehearsal and script findings from the Automatic Analysis runs are in scope
-  by decision, not by accident. The first clean analysis reports 180 issues:
-  31 vulnerabilities, 23 bugs, 126 code smells.
-- Test files are analysed in the same scope as `src`. Whether SonarCloud also
-  classifies `tests/**` as test code (and so keeps it out of the coverage
-  metric) is unproven until a CI analysis imports `coverage/lcov.info`; if
-  coverage lands around 60% rather than ~92%, the tests are being counted as
-  source and want a coverage exclusion.
+  by decision, not by accident. The analysis reports 180 issues: 31
+  vulnerabilities, 23 bugs, 126 code smells.
+- SonarCloud classifies `tests/**` as test code automatically: the analysis'
+  `lines_to_cover` (30,121) equals the `src` executable-line count exactly, so
+  tests neither count as source nor drag the coverage metric.
 - The gate judges new code only, so the 180 pre-existing issues do not fail
   the wiring pull request; they are cleanup work in their own right (the 22
   `S2871` sort comparators and 5 `S5443` temp-directory findings are genuine
@@ -56,11 +54,17 @@ Wired 2026-11-23. Supersedes the 2026-11-19 note that this repository was
 - Local `npm run test:coverage` passes every declared floor and writes
   `coverage/lcov.info`; `defined comply` reports compliant with the workflow
   and properties file.
-- The first CI analysis imported no coverage and failed on the Automatic
-  Analysis conflict, so no scoped analysis of this repository has run yet.
+- The CI analysis of PR 8 (2026-11-23 08:09) imported that report: 90.9%
+  overall coverage (92.3% line, 82.5% branch), 0.8% duplicated lines, gate
+  `OK`, zero new-code issues. The `SonarQube` job and the `SonarCloud Code
+Analysis` check both pass on the pull request.
 
 ## Open questions
 
-- Does the first CI analysis classify `tests/**` as test code, or must coverage
-  exclusions compensate?
+- The 180 pre-existing issues are cleanup work in their own right: the 22
+  `S2871` sort comparators and 5 `S5443` temp-directory findings are genuine
+  correctness and security items, not style.
 - Is 100% of the security hotspots reviewable without silencing real risk?
+- Should the `SonarCloud Code Analysis` check become a required status check?
+  The repository is public, so branch protection and required checks are
+  available.
