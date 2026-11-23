@@ -8,6 +8,14 @@
  * @returns A printable, single-line form of the value.
  */
 export function displayValue(value: unknown): string {
-    if (value === null || typeof value !== "object") return String(value);
-    return JSON.stringify(value) ?? String(value);
+    switch (typeof value) {
+        case "object":
+            return value === null ? "null" : (JSON.stringify(value) ?? "null");
+        case "undefined":
+            return "undefined";
+        case "string":
+            return value;
+        default:
+            return String(value);
+    }
 }

@@ -39,15 +39,14 @@ Wired 2026-11-23. Supersedes the 2026-11-19 note that this repository was
 
 - Whole-project scope is the whole-project truth for this repository: the
   rehearsal and script findings from the Automatic Analysis runs are in scope
-  by decision, not by accident. The analysis reports 180 issues: 31
-  vulnerabilities, 23 bugs, 126 code smells.
+  by decision, not by accident. The first analysis reported 182 issues (31
+  vulnerabilities, 23 bugs, 126 code smells); the cleanup register below pays
+  them down.
 - SonarCloud classifies `tests/**` as test code automatically: the analysis'
   `lines_to_cover` (30,121) equals the `src` executable-line count exactly, so
   tests neither count as source nor drag the coverage metric.
-- The gate judges new code only, so the 180 pre-existing issues do not fail
-  the wiring pull request; they are cleanup work in their own right (the 22
-  `S2871` sort comparators and 5 `S5443` temp-directory findings are genuine
-  correctness and security items, not style).
+- The gate judges new code only, so the pre-existing issues could not fail the
+  wiring pull request; they were cleanup work in their own right.
 
 ## Tested
 
@@ -59,11 +58,42 @@ Wired 2026-11-23. Supersedes the 2026-11-19 note that this repository was
   `OK`, zero new-code issues. The `SonarQube` job and the `SonarCloud Code
 Analysis` check both pass on the pull request.
 
+## Cleanup register (2026-11-23)
+
+The whole-project scope exposed 182 pre-existing issues. They were paid down in
+two steps (the cleanup PR and its follow-up):
+
+- **Fixed — 130 findings.** Deterministic sort comparators (`S2871`), nested
+  ternaries and templates (`S3358`, `S4624`), optional chains (`S6582`),
+  re-exports and duplicate imports (`S7763`, `S3863`), collection and string
+  idioms (`S7750`, `S7765`, `S7770`, `S7776`, `S7778`, `S7781`), character
+  classes (`S6353`, `S5869`), `String.raw` (`S7780`), named aliases (`S4323`),
+  complexity extractions (`S3776`), and value rendering (`S6551`). Five
+  findings introduced by the cleanup itself were cleared before the follow-up
+  analysis, and the redundant `await` in the S13 slot loop was removed once the
+  audit below showed it was synchronous (`S4123`).
+- **Hardened — no `S8707` cohort.** The project holds 20 `S8707` issues, all
+  accepted; none was closed by hardening. `rehearsals/root.mts` confines the
+  one operator-supplied argument to a strict descendant of the system
+  temporary directory or the current directory — both bases are refused
+  themselves, because the rehearsal deletes its root recursively — and the
+  confinement is pinned by tests.
+- **Accepted with a written reason on each issue — 52.** `S9382` (20) serial
+  loops, each reason written for its site: ordered prepare/freeze/run sequences,
+  polling waits, request-accounting sequences sharing one scripted provider, and
+  one budget-consuming dry-run preview; `S5443` (5) the sandbox container's
+  `/tmp` home; `S4036` (2) the operator's `PATH` for `podman`; `S8705` (2)
+  shell-free `spawn` with an argument array; `S107` (3) decision-contract
+  parameter lists; `S8707` (20) the residual sink flow for the confined
+  rehearsal root.
+
+Accepted issues do not count toward the quality gate. After the follow-up
+analysis the register reads 140 closed and 51 accepted: the S13 `S9382` finding
+closes with the `await` it described. The repository's own `defined` gate
+remains the merge verdict for style and tests.
+
 ## Open questions
 
-- The 180 pre-existing issues are cleanup work in their own right: the 22
-  `S2871` sort comparators and 5 `S5443` temp-directory findings are genuine
-  correctness and security items, not style.
 - Is 100% of the security hotspots reviewable without silencing real risk?
 - Should the `SonarCloud Code Analysis` check become a required status check?
   The repository is public, so branch protection and required checks are

@@ -34,12 +34,34 @@ describe("rehearsal root", () => {
         }
     });
 
-    it("accepts the current working directory", () => {
-        // Arrange / Act
-        const root = rehearsalRoot(process.cwd(), "otc-root-test-");
+    it("accepts a directory below the current working directory", () => {
+        // Arrange
+        const child = resolve(process.cwd(), "otc-root-test-child");
+
+        // Act
+        const root = rehearsalRoot(child, "otc-root-test-");
 
         // Assert
-        assert.equal(root, resolve(process.cwd()));
+        assert.equal(root, child);
+    });
+
+    it("refuses the current working directory itself", () => {
+        // Arrange / Act / Assert
+        // The rehearsal deletes its root recursively, so a base itself must be
+        // refused even though it is "inside" the allowed area.
+        assert.throws(() => rehearsalRoot(process.cwd(), "otc-root-test-"), {
+            message: /strict subdirectory/,
+        });
+    });
+
+    it("refuses the temporary directory itself", () => {
+        // Arrange / Act / Assert
+        assert.throws(
+            () => rehearsalRoot(resolve(tmpdir()), "otc-root-test-"),
+            {
+                message: /strict subdirectory/,
+            },
+        );
     });
 
     it("refuses a relative path", () => {
@@ -55,7 +77,7 @@ describe("rehearsal root", () => {
 
         // Act / Assert
         assert.throws(() => rehearsalRoot(outside, "otc-root-test-"), {
-            message: /must be inside/,
+            message: /strict subdirectory/,
         });
     });
 });
