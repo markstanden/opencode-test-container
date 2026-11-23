@@ -51,7 +51,7 @@ export interface GuardrailArmSummary {
 const PRESERVATION_BLOCK = /\bpreserv/i;
 
 /** States that keep a still-valid fact alive. */
-const RETAINED_STATES: readonly string[] = ["retained", "corrected"];
+const RETAINED_STATES: ReadonlySet<string> = new Set(["retained", "corrected"]);
 
 /**
  * Evaluate a mutation-policy guardrail from the recorded run metadata.
@@ -112,7 +112,7 @@ function factOutcome(
             };
         }
     } else {
-        if (RETAINED_STATES.includes(state))
+        if (RETAINED_STATES.has(state))
             return { status: "pass", line: "" };
         if (state === "lost") {
             return {

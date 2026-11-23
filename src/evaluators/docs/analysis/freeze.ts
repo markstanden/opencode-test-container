@@ -331,8 +331,7 @@ function armSetProblems(arms: readonly FrozenArm[]): string[] {
     const second = sorted[1];
     if (
         first !== undefined &&
-        second !== undefined &&
-        first.descriptionHash === second.descriptionHash
+        first.descriptionHash === second?.descriptionHash
     ) {
         problems.push("the arms serve an identical description");
     }

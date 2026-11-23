@@ -17,6 +17,9 @@ import type {
     PreservationInventorySpec,
 } from "../model.ts";
 
+/** The claim-surface section currently being read. */
+type ClaimSection = "none" | "facts" | "failed";
+
 /** One independently evaluated assertion with its document offsets. */
 export interface Assertion {
     /** The assertion text. */
@@ -166,7 +169,7 @@ export function claimSurfaceOf(document: string): ClaimSurface {
         facts: [],
         failedApproaches: [],
     };
-    let section: "none" | "facts" | "failed" = "none";
+    let section: ClaimSection = "none";
     let offset = 0;
     for (const line of document.split("\n")) {
         section = lineSection(surface, line, offset, section);
@@ -187,8 +190,8 @@ function lineSection(
     surface: ClaimSurface,
     line: string,
     offset: number,
-    section: "none" | "facts" | "failed",
-): "none" | "facts" | "failed" {
+    section: ClaimSection,
+): ClaimSection {
     const trimmed = line.trim();
     const heading = HEADING.exec(trimmed);
     if (heading !== null) return sectionOf((heading[1] ?? "").trim());
@@ -326,7 +329,7 @@ function factTriggers(
 ): InventoryTrigger[] {
     const obsolete = fact.obsoleteCurrentPatterns !== undefined;
     const triggers: InventoryTrigger[] = [];
-    const affirmative = mentions.filter(
+    const affirmative = mentions.find(
         (mention) => mention.negation === undefined,
     );
     for (const mention of mentions) {
@@ -355,7 +358,7 @@ function factTriggers(
             kind: "negated-fact",
             negation: mention.negation,
         });
-        const opposing = affirmative[0];
+        const opposing = affirmative;
         if (opposing !== undefined && opposing !== mention) {
             triggers.push({
                 ...base,
@@ -471,13 +474,11 @@ export function preservationScreen(
                 .map((trigger) => trigger.factId),
         ),
     ];
-    const status = obsolete
-        ? "rejected"
-        : contradicted.length > 0
-          ? "rejected"
-          : scan.missing.length > 0
-            ? "unknown"
-            : "accepted";
+    let status: "rejected" | "unknown" | "accepted";
+    if (obsolete) status = "rejected";
+    else if (contradicted.length > 0) status = "rejected";
+    else if (scan.missing.length > 0) status = "unknown";
+    else status = "accepted";
     return {
         status,
         missing: scan.missing,

@@ -194,7 +194,7 @@ function takeOptionValue(name: string, args: string[]): string {
  */
 function slotSelector(name: string, raw: string): string[] {
     const parts = raw.split(",").map((entry) => entry.trim());
-    if (parts.some((entry) => entry === "")) {
+    if (parts.includes("")) {
         throw new UsageError(
             `${name} needs comma-separated slot ids with no empty entry`,
         );
@@ -500,19 +500,27 @@ async function run(options: CliOptions): Promise<number> {
     if (options.json) {
         console.log(JSON.stringify(summary, null, 2));
     } else {
-        for (const slotId of summary.ran) {
-            console.log(`${options.dryRun ? "planned" : "ran"} ${slotId}`);
-        }
-        for (const entry of summary.preview ?? []) {
-            console.log(
-                `${entry.admissible ? "admissible" : "refused"} ${entry.slotId}: ${entry.reason}`,
-            );
-        }
-        for (const problem of summary.problems) {
-            console.error(`otc: ${problem}`);
-        }
+        printRunSummary(summary, options);
     }
     return summary.ok ? 0 : 1;
+}
+
+/** Print one run summary in the human-readable form. */
+function printRunSummary(
+    summary: Awaited<ReturnType<typeof runCampaign>>,
+    options: CliOptions,
+): void {
+    for (const slotId of summary.ran) {
+        console.log(`${options.dryRun ? "planned" : "ran"} ${slotId}`);
+    }
+    for (const entry of summary.preview ?? []) {
+        console.log(
+            `${entry.admissible ? "admissible" : "refused"} ${entry.slotId}: ${entry.reason}`,
+        );
+    }
+    for (const problem of summary.problems) {
+        console.error(`otc: ${problem}`);
+    }
 }
 
 /** Blindly judge selected docs slots from checked evidence. */
@@ -659,17 +667,14 @@ const invokedDirectly =
         }
     })();
 if (invokedDirectly) {
-    main(process.argv.slice(2)).then(
-        (code) => {
-            process.exitCode = code;
-        },
-        (error: unknown) => {
-            console.error(
-                error instanceof Error
-                    ? (error.stack ?? String(error))
-                    : String(error),
-            );
-            process.exitCode = 1;
-        },
-    );
+    try {
+        process.exitCode = await main(process.argv.slice(2));
+    } catch (error: unknown) {
+        console.error(
+            error instanceof Error
+                ? (error.stack ?? String(error))
+                : String(error),
+        );
+        process.exitCode = 1;
+    }
 }

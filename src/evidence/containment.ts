@@ -23,6 +23,7 @@ import {
     readFileSync,
     readdirSync,
     realpathSync,
+    type Stats,
 } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { pathWithin } from "./paths.ts";
@@ -173,11 +174,9 @@ export function readContainedFile(
 }
 
 /** A snapshot of one directory's regular files, refused on any unsafe object. */
-interface WalkResult {
-    ok: boolean;
-    problem: string | null;
-    files: Array<{ path: string; contents: string }>;
-}
+type WalkResult =
+    | { ok: true; problem: null; files: Array<{ path: string; contents: string }> }
+    | { ok: false; problem: string; files: Array<{ path: string; contents: string }> };
 
 /** Walk one directory without traversing symlinked directories or special files. */
 function fileAt(
@@ -241,44 +240,49 @@ function walk(
         (left, right) => left.name.localeCompare(right.name),
     );
     for (const entry of names) {
-        const path = join(directory, entry.name);
-        const stat = lstatSync(path);
-        if (stat.isSymbolicLink()) {
-            const linked = symlinkFile(
-                root,
-                realBase,
-                path,
-                entry.name,
-                accept,
-            );
-            if (!linked.ok)
-                return { ok: false, problem: linked.problem, files };
-            if (linked.file !== null) files.push(linked.file);
-            continue;
-        }
-        if (stat.isDirectory()) {
-            const nested = walk(root, realBase, path, accept);
-            if (!nested.ok) return nested;
-            files.push(...nested.files);
-            continue;
-        }
-        if (!stat.isFile()) {
-            return {
-                ok: false,
-                problem: `${relative(realBase, path)} is not a regular file`,
-                files,
-            };
-        }
-        const plain = fileAt(
-            root,
-            relative(realBase, path).split(sep).join("/"),
-            entry.name,
-            accept,
-        );
-        if (!plain.ok) return { ok: false, problem: plain.problem, files };
-        if (plain.file !== null) files.push(plain.file);
+        const walked = walkEntry(root, realBase, directory, entry.name, accept);
+        if (!walked.ok) return { ok: false, problem: walked.problem, files };
+        files.push(...walked.files);
     }
     return { ok: true, problem: null, files };
+}
+
+/** One directory entry's contribution to the walk. */
+function walkEntry(
+    root: string,
+    realBase: string,
+    directory: string,
+    name: string,
+    accept: (name: string) => boolean,
+):
+    | { ok: true; files: Array<{ path: string; contents: string }> }
+    | { ok: false; problem: string } {
+    const path = join(directory, name);
+    const stat = lstatSync(path);
+    if (stat.isSymbolicLink()) {
+        const linked = symlinkFile(root, realBase, path, name, accept);
+        if (!linked.ok) return { ok: false, problem: linked.problem };
+        return { ok: true, files: linked.file === null ? [] : [linked.file] };
+    }
+    if (stat.isDirectory()) {
+        const nested = walk(root, realBase, path, accept);
+        if (!nested.ok) return { ok: false, problem: nested.problem };
+        return { ok: true, files: nested.files };
+    }
+    if (!stat.isFile()) {
+        return {
+            ok: false,
+            problem: `${relative(realBase, path)} is not a regular file`,
+        };
+    }
+    const plain = fileAt(
+        root,
+        relative(realBase, path).split(sep).join("/"),
+        name,
+        accept,
+    );
+    if (!plain.ok) return { ok: false, problem: plain.problem };
+    return { ok: true, files: plain.file === null ? [] : [plain.file] };
 }
 
 /**
@@ -328,11 +332,11 @@ export function readContainedDocuments(
 }
 
 /** The kind of object at a root-relative path, without opening it. */
+/** The kinds one contained entry can be. */
+type EntryKind = "missing" | "file" | "directory" | "symlink" | "special";
+
 export type ContainedEntry =
-    | {
-          ok: true;
-          kind: "missing" | "file" | "directory" | "symlink" | "special";
-      }
+    | { ok: true; kind: EntryKind }
     | { ok: false; problem: string };
 
 /**
@@ -400,27 +404,56 @@ export function containedEntry(root: string, path: string): ContainedEntry {
     let current = base.path;
     const parts = path.split("/").filter((part) => part !== "");
     for (const [index, part] of parts.entries()) {
-        const candidate = join(current, part);
-        let stat;
-        try {
-            stat = lstatSync(candidate);
-        } catch {
-            return { ok: true, kind: "missing" };
-        }
-        const last = index === parts.length - 1;
-        if (stat.isSymbolicLink()) {
-            const linked = symlinkComponent(base.path, candidate, path, last);
-            if (!linked.ok) return linked;
-            if ("kind" in linked) return { ok: true, kind: "symlink" };
-            current = linked.next;
-            continue;
-        }
-        if (last) return { ok: true, kind: kindOf(stat) };
-        const next = descend(candidate, stat, path);
-        if (!next.ok) return next;
-        current = next.path;
+        const step = entryStep(
+            base.path,
+            current,
+            part,
+            path,
+            index === parts.length - 1,
+        );
+        if (!step.ok) return step;
+        if (step.final) return { ok: true, kind: step.kind };
+        current = step.next;
     }
     return { ok: true, kind: "directory" };
+}
+
+/** lstat that treats an unreadable entry as absent. */
+function statOrNull(path: string): Stats | null {
+    try {
+        return lstatSync(path);
+    } catch {
+        return null;
+    }
+}
+
+/** One path component: a final classification, or the next directory. */
+type EntryStep =
+    | { ok: false; problem: string }
+    | { ok: true; final: true; kind: EntryKind }
+    | { ok: true; final: false; next: string };
+
+/** Classify one path component, or name the directory to descend into. */
+function entryStep(
+    base: string,
+    current: string,
+    part: string,
+    path: string,
+    last: boolean,
+): EntryStep {
+    const candidate = join(current, part);
+    const stat = statOrNull(candidate);
+    if (stat === null) return { ok: true, final: true, kind: "missing" };
+    if (stat.isSymbolicLink()) {
+        const linked = symlinkComponent(base, candidate, path, last);
+        if (!linked.ok) return linked;
+        if ("kind" in linked) return { ok: true, final: true, kind: "symlink" };
+        return { ok: true, final: false, next: linked.next };
+    }
+    if (last) return { ok: true, final: true, kind: kindOf(stat) };
+    const next = descend(candidate, stat, path);
+    if (!next.ok) return next;
+    return { ok: true, final: false, next: next.path };
 }
 
 /** Resolve one symlink and prove its target stays inside the root. */ /** Resolve one symlink and prove its target stays inside the root. */

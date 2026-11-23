@@ -72,7 +72,7 @@ function pairViewOf(
     for (const slot of group) {
         const row = bySlot.get(slot.slot);
         arms[slot.arm] = row;
-        if (row === undefined || !row.utility.assessed) {
+        if (!row?.utility.assessed) {
             missingArms.push(slot.arm);
         }
     }
@@ -130,7 +130,7 @@ export function pairObservations(
         .flatMap((pair) =>
             Object.values(pair.arms).filter(
                 (row): row is TrialScored =>
-                    row !== undefined && row.utility.assessed,
+                    row?.utility.assessed === true,
             ),
         );
     const pairedSlots = new Set(

@@ -110,7 +110,7 @@ export function parseLedger(text: string | undefined): LedgerRead {
     if (problems.length > 0) {
         return { state: "malformed", events, problems, closedAt: null };
     }
-    const closure = events.filter((event) => event.event === "close").at(-1);
+    const closure = events.findLast((event) => event.event === "close");
     return {
         state: closure === undefined ? "open" : "closed",
         events,

@@ -241,7 +241,7 @@ export function inventory(
     if (problem !== null) return { ok: false, problem };
     return {
         ok: true,
-        entries: entries.sort((left, right) =>
+        entries: entries.toSorted((left, right) =>
             left.path.localeCompare(right.path),
         ),
     };

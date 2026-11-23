@@ -33,6 +33,7 @@ import {
     verifyOperationsJournal,
     type JournalVerification,
 } from "./journal.ts";
+import { displayValue } from "../../../contracts/display.ts";
 
 /** The explicit state of one loaded record. */
 export type Loaded<T> =
@@ -393,7 +394,7 @@ function usableOf(run: Loaded<Record<string, unknown>>): {
     const meta = run.value;
     if (meta.exit !== 0) problems.push(`exit is ${String(meta.exit)}`);
     if (meta.signal !== null && meta.signal !== undefined) {
-        problems.push(`signal is ${String(meta.signal)}`);
+        problems.push(`signal is ${displayValue(meta.signal)}`);
     }
     if (meta.timedOut === true) problems.push("timedOut");
     if (meta.outputOverflow === true) problems.push("outputOverflow");
@@ -683,12 +684,12 @@ function loadPreservation(
         reader,
         joinPath(attemptDir, "resolution.json"),
     );
-    const value =
-        resolution.state === "available" && isRecord(resolution.value)
-            ? resolution.value.parsed
-            : judgement.state === "available"
-              ? judgement.value
-              : undefined;
+    let value: unknown;
+    if (resolution.state === "available" && isRecord(resolution.value)) {
+        value = resolution.value.parsed;
+    } else if (judgement.state === "available") {
+        value = judgement.value;
+    }
     if (!isRecord(value) || !isRecord(value.preservation)) {
         return { state: "missing", source: attemptDir };
     }
@@ -1022,13 +1023,19 @@ function selectionOutcome(
     problems: string[],
     selected: string | null,
 ): LoadedSelection {
-    return problems.length === 0 && selected !== null
-        ? { attemptId: selected, present: true, invalid: false, problems: [] }
-        : invalidSelection(
-              ...(problems.length > 0
-                  ? problems
-                  : ["selection record names no selected attempt"]),
-          );
+    if (problems.length === 0 && selected !== null) {
+        return {
+            attemptId: selected,
+            present: true,
+            invalid: false,
+            problems: [],
+        };
+    }
+    return invalidSelection(
+        ...(problems.length > 0
+            ? problems
+            : ["selection record names no selected attempt"]),
+    );
 }
 
 /** The facts a recorded selection is checked against here. */

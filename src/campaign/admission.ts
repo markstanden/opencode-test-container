@@ -80,7 +80,24 @@ export function withAdmission<T>(
     mkdirSync(directory, { recursive: true });
     const path = join(directory, "ADMISSION.lock");
     const token = `${process.pid}:${randomBytes(6).toString("hex")}`;
-    let owned = false;
+    const refusal = acquireLock(path, token);
+    if (refusal !== null) {
+        return { ok: false, problem: refusal };
+    }
+    try {
+        return { ok: true, value: section() };
+    } finally {
+        releaseLock(path, token);
+    }
+}
+
+/**
+ * Take the admission lock, or report why it could not be taken.
+ * @param path The lock file path.
+ * @param token This invocation's ownership token.
+ * @returns The refusal, or null when this invocation owns the lock.
+ */
+function acquireLock(path: string, token: string): string | null {
     for (let attempt = 0; attempt < 200; attempt += 1) {
         try {
             const fd = openSync(path, "wx", 0o600);
@@ -92,38 +109,31 @@ export function withAdmission<T>(
             } finally {
                 closeSync(fd);
             }
-            owned = true;
-            break;
+            return null;
         } catch (error) {
             if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
-                return {
-                    ok: false,
-                    problem: `admission lock failed: ${error instanceof Error ? error.message : String(error)}`,
-                };
+                return `admission lock failed: ${error instanceof Error ? error.message : String(error)}`;
             }
             sleepSync(10);
         }
     }
-    if (!owned) {
-        const pid = lockPid(path);
-        return {
-            ok: false,
-            problem: `admission lock ${path} is held${pid === null ? "" : ` by pid ${pid}`}; verify that process is gone and remove the lock deliberately`,
-        };
-    }
+    const pid = lockPid(path);
+    const pidNote = pid === null ? "" : ` by pid ${pid}`;
+    return `admission lock ${path} is held${pidNote}; verify that process is gone and remove the lock deliberately`;
+}
+
+/**
+ * Remove the lock if this invocation still owns it.
+ * @param path The lock file path.
+ * @param token This invocation's ownership token.
+ */
+function releaseLock(path: string, token: string): void {
     try {
-        return { ok: true, value: section() };
-    } finally {
-        try {
-            if (
-                existsSync(path) &&
-                readFileSync(path, "utf8").includes(token)
-            ) {
-                unlinkSync(path);
-            }
-        } catch {
-            // Only our own token is removed. A failed release is surfaced by
-            // the next holder's refusal, never by deleting someone else's lock.
+        if (existsSync(path) && readFileSync(path, "utf8").includes(token)) {
+            unlinkSync(path);
         }
+    } catch {
+        // Only our own token is removed. A failed release is surfaced by the
+        // next holder's refusal, never by deleting someone else's lock.
     }
 }

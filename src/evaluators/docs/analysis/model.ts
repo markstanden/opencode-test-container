@@ -15,6 +15,7 @@
  */
 
 import { parseRecoveryPolicy, type RecoveryPolicy } from "./recovery.ts";
+import { displayValue } from "../../../contracts/display.ts";
 
 /** The only manifest schema version this framework parses. */
 export const MANIFEST_SCHEMA_VERSION = 1;
@@ -655,7 +656,7 @@ function slotDispositionProblems(
 ): string[] {
     if (
         entry.disposition !== undefined &&
-        !(DISPOSITIONS as readonly string[]).includes(String(entry.disposition))
+        !(DISPOSITIONS as readonly string[]).includes(displayValue(entry.disposition))
     ) {
         return [
             `${label}.disposition must be one of ${DISPOSITIONS.join("|")} when present`,

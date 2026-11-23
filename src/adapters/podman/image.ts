@@ -35,7 +35,7 @@ export function containerDirectory(): string {
 /** Extract a version from `opencode --version` output. */
 export function parseOpencodeVersion(stdout: string): string | null {
     const match =
-        /(?:opencode\s+)?v?([0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,6}(?:[-+][0-9A-Za-z.-]{1,40})?)/.exec(
+        /(?:opencode\s+)?v?(\d{1,4}\.\d{1,4}\.\d{1,6}(?:[-+][0-9A-Za-z.-]{1,40})?)/.exec(
             stdout.trim(),
         );
     return match?.[1] ?? null;

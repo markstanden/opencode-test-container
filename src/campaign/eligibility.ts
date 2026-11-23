@@ -193,7 +193,7 @@ export function judgeStateOf(facts: JudgeFacts): JudgeState {
             `slot ${slot.slotId} is not judged: the campaign declares no judge`,
         );
     }
-    if (testCase === undefined || testCase.kind !== "docs-task") {
+    if (testCase?.kind !== "docs-task") {
         return state(
             "not-docs",
             `slot ${slot.slotId} is not a docs-task case; only docs tasks are judged`,

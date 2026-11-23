@@ -29,8 +29,8 @@ import {
     type PrimaryRecordFacts,
     type PrimaryRecordOutcome,
 } from "./primary-record.ts";
-export { primaryRecordFor };
-export type { PrimaryRecordFacts, PrimaryRecordOutcome };
+export { primaryRecordFor } from "./primary-record.ts";
+export type { PrimaryRecordFacts, PrimaryRecordOutcome } from "./primary-record.ts";
 
 /** One recorded primary-check outcome, kept distinct from task failure. */
 export interface PrimaryCheckRecord {

@@ -316,10 +316,11 @@ function governanceProblems(
 ): string[] {
     const lock = admissionLockStatus(root);
     const policy = policyOf(manifest);
+    const pidNote = lock.pid === null ? "" : ` by pid ${lock.pid}`;
     return [
         ...(lock.held
             ? [
-                  `admission lock ${lock.path} is held${lock.pid === null ? "" : ` by pid ${lock.pid}`}; verify that process is gone before removing it`,
+                  `admission lock ${lock.path} is held${pidNote}; verify that process is gone before removing it`,
               ]
             : []),
         ...(policy.ok ? [] : policy.problems),

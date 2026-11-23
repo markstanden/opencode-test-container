@@ -244,7 +244,7 @@ function factIds(
     const ids = facts.map((fact) =>
         isRecord(fact) && typeof fact.id === "string" ? fact.id.trim() : "",
     );
-    if (ids.some((value) => value === "")) {
+    if (ids.includes("")) {
         problems.push(
             `scenarios.${id}.preservation.facts must carry nonblank ids`,
         );

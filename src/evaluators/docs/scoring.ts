@@ -222,31 +222,39 @@ export function buildAcPrompt(input: {
                     `- ${entry.path}\n\n\`\`\`\n${entry.contents}\n\`\`\``,
             )
             .join("\n\n") || "(none)";
-    const preservation = input.requirePreservation
-        ? `
+    let preservation = "";
+    if (input.requirePreservation) {
+        preservation = `
 PRESERVATION ASSESSMENT (required for this scenario): the trial corrects an existing note whose other facts stay valid.
 Assess each still-valid fact by meaning, not exact wording: a faithful paraphrase, an equivalent number (for example "5000 milliseconds" for 5 seconds), or a clear restatement is "retained"; a changed value is "corrected"; a fact the lake no longer states is "lost".
 The obsolete TLS claim is "removed" only when the resulting document no longer asserts it.
 Quote the decisive text from the AFTER documents for every entry, or write "(absent)" when the text is gone.
 If any still-valid fact is lost, the documentation outcome must be "misleading".
-`
-        : input.preservationSpec
-          ? `
+`;
+    } else if (input.preservationSpec !== undefined) {
+        preservation = `
 PRESERVATION ASSESSMENT (required for this scenario): the trial corrects an existing note whose other facts stay valid.
 Assess each still-valid fact by meaning, not exact wording: a faithful paraphrase, an equivalent restatement or the same value is "retained"; a changed value is "corrected"; a fact the lake no longer states is "lost".
 The obsolete claim (${input.preservationSpec.facts
-                .filter((fact) => fact.obsolete === true)
-                .map((fact) => fact.label)
-                .join(
-                    ", ",
-                )}) is "removed" only when the resulting document no longer asserts it.
+            .filter((fact) => fact.obsolete === true)
+            .map((fact) => fact.label)
+            .join(
+                ", ",
+            )}) is "removed" only when the resulting document no longer asserts it.
 Quote the decisive text from the AFTER documents for every entry, or write "(absent)" when the text is gone.
 If any still-valid fact is lost, the documentation outcome must be "misleading".
-`
-          : "";
+`;
+    }
+    let seededNote = "";
+    if (input.retrievalSpec !== undefined) {
+        seededNote =
+            input.retrievalSpec.lake === undefined
+                ? `the seeded note \`${input.retrievalSpec.note}\``
+                : `the seeded note \`${input.retrievalSpec.lake}/${input.retrievalSpec.note}\` in the declared lake "${input.retrievalSpec.lake}"`;
+    }
     const retrieval = input.retrievalSpec
         ? `
-RETRIEVAL ASSESSMENT (required for this scenario): ${input.retrievalSpec.lake === undefined ? `the seeded note \`${input.retrievalSpec.note}\`` : `the seeded note \`${input.retrievalSpec.lake}/${input.retrievalSpec.note}\` in the declared lake "${input.retrievalSpec.lake}"`} carries the project-specific detail: ${input.retrievalSpec.detail}
+RETRIEVAL ASSESSMENT (required for this scenario): ${seededNote} carries the project-specific detail: ${input.retrievalSpec.detail}
 Decide whether the trial's work applied that detail, using the final answer and the observed docs operations above:
 - "applied": an attributable docs operation retrieved the note and the work uses its detail;
 - "read-not-applied": the note was retrieved but the work does not apply the detail;
@@ -259,20 +267,21 @@ Quote the decisive line from the work or the note, or write "(none)".
     const retrievalShape = input.retrievalSpec
         ? ',"retrievalApplication":{"state":"applied"|"read-not-applied"|"search-only"|"not-retrieved"|"unknown","quote":"..."}'
         : "";
-    const preservationShape = input.requirePreservation
-        ? `,"preservation":{"poolSize":{"state":"retained"|"corrected"|"lost","quote":"..."},"acquireTimeout":{"state":"retained"|"corrected"|"lost","quote":"..."},"startupMigrations":{"state":"retained"|"corrected"|"lost","quote":"..."},"obsoleteTlsClaim":{"state":"removed"|"retained","quote":"..."}}`
-        : input.preservationSpec
-          ? `,"preservation":{${input.preservationSpec.facts
-                .map(
-                    (fact) =>
-                        `"${fact.id}":{"state":${
-                            fact.obsolete === true
-                                ? '"removed"|"retained"'
-                                : '"retained"|"corrected"|"lost"'
-                        },"quote":"..."}`,
-                )
-                .join(",")}}`
-          : "";
+    let preservationShape = "";
+    if (input.requirePreservation) {
+        preservationShape = `,"preservation":{"poolSize":{"state":"retained"|"corrected"|"lost","quote":"..."},"acquireTimeout":{"state":"retained"|"corrected"|"lost","quote":"..."},"startupMigrations":{"state":"retained"|"corrected"|"lost","quote":"..."},"obsoleteTlsClaim":{"state":"removed"|"retained","quote":"..."}}`;
+    } else if (input.preservationSpec !== undefined) {
+        preservationShape = `,"preservation":{${input.preservationSpec.facts
+            .map(
+                (fact) =>
+                    `"${fact.id}":{"state":${
+                        fact.obsolete === true
+                            ? '"removed"|"retained"'
+                            : '"retained"|"corrected"|"lost"'
+                    },"quote":"..."}`,
+            )
+            .join(",")}}`;
+    }
     const returnShape = `{"documentationOutcome":"useful-create"|"useful-update"|"transient"|"duplicate"|"misleading"|"none","documentationReason":"...","evidence":["..."]${preservationShape}${retrievalShape}}`;
     return `Score ONE completed engineering trial's documentation outcome. Return ONE JSON object and nothing else.
 

@@ -60,7 +60,7 @@ export function isSafeRelativePath(value: unknown): value is string {
         return false;
     }
     const normalised = value.replaceAll("\\", "/");
-    return !normalised.split("/").some((part) => part === "..");
+    return !normalised.split("/").includes("..");
 }
 
 /**
@@ -821,7 +821,7 @@ function parseProvider(
         );
     }
     const overlay = overlayOf(value.overlay, problems);
-    if (route === undefined || model === undefined || !model.includes("/")) {
+    if (route === undefined || !model?.includes("/")) {
         return null;
     }
     return { route, model, ...(overlay === undefined ? {} : { overlay }) };

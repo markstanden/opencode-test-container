@@ -388,9 +388,11 @@ function globSource(pattern: string): string {
         if (segment === "**") return ".*";
         return segment
             .split("*")
-            .map((part) => part.replace(/[.+^${}()|[\]\\?]/g, "\\$&"))
+            .map((part) =>
+                part.replace(/[.+^${}()|[\]\\?]/g, String.raw`\$&`),
+            )
             .join("[^/]*")
-            .replace(/\\\?/g, "[^/]");
+            .replaceAll("\\?", "[^/]");
     });
     return `^${segments.join("/")}$`;
 }
@@ -472,6 +474,14 @@ export function permissionFindings(input: {
             input.visibleConstraints,
         );
         const start = input.writesText.indexOf(path);
+        let explanation: string;
+        if (visibility === "unknown") {
+            explanation = `hidden-policy mismatch cannot be classified: the recorded policy forbids ${path} and no task prompt was available to establish visibility`;
+        } else if (visibility === "visible") {
+            explanation = `the task communicated the restriction on ${baseline}; the change is a visible-policy breach`;
+        } else {
+            explanation = `hidden-policy mismatch: the recorded policy forbids ${path} but the task never exposed that restriction`;
+        }
         findings.push({
             ruleId: "permission-visibility",
             ruleVersion: SCREENING_RULES_VERSION,
@@ -485,12 +495,7 @@ export function permissionFindings(input: {
                 end: start === -1 ? path.length : start + path.length,
             },
             visibility,
-            explanation:
-                visibility === "unknown"
-                    ? `hidden-policy mismatch cannot be classified: the recorded policy forbids ${path} and no task prompt was available to establish visibility`
-                    : visibility === "visible"
-                      ? `the task communicated the restriction on ${baseline}; the change is a visible-policy breach`
-                      : `hidden-policy mismatch: the recorded policy forbids ${path} but the task never exposed that restriction`,
+            explanation,
         });
     }
     return findings;

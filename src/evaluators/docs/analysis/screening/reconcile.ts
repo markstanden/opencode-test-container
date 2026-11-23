@@ -67,12 +67,10 @@ export function reconcileFindings(
     const text = normalise([judgement.reason, ...judgement.evidence].join(" "));
     return findings.map((finding, index) => {
         const excerpt = normalise(finding.excerpt);
-        const status: ReconcileRow["status"] =
-            excerpt.length < 8
-                ? "unresolved"
-                : text.includes(excerpt)
-                  ? "referenced"
-                  : "not-referenced";
+        let status: ReconcileRow["status"];
+        if (excerpt.length < 8) status = "unresolved";
+        else if (text.includes(excerpt)) status = "referenced";
+        else status = "not-referenced";
         return { ...rows[index]!, status };
     });
 }
