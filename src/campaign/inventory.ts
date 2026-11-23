@@ -17,6 +17,7 @@ import {
 } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { pathWithin } from "../evidence/paths.ts";
+import { compareCodeUnits } from "../contracts/ordering.ts";
 
 /** One file identity in an immutable inventory. */
 export interface InventoryEntry {
@@ -399,7 +400,7 @@ export function changedInventoryPaths(
     for (const path of beforeMap.keys()) {
         if (!skip.has(path) && !afterMap.has(path)) changed.add(path);
     }
-    return [...changed].sort();
+    return [...changed].sort(compareCodeUnits);
 }
 
 /**
@@ -460,8 +461,8 @@ export function stageTree(
         include === undefined
             ? readdirSync(realSource, { withFileTypes: true })
                   .map((entry) => entry.name)
-                  .sort()
-            : [...include].sort();
+                  .sort(compareCodeUnits)
+            : [...include].sort(compareCodeUnits);
     for (const member of members) {
         if (!copied.add(member)) {
             return { ok: false, problem: `duplicate include ${member}` };

@@ -12,6 +12,7 @@ import type { DocumentationOutcome } from "../scoring.ts";
 import type { AccountingCounts } from "./accounting.ts";
 import type { SlotSpec } from "./model.ts";
 import type { TrialRecord } from "./records.ts";
+import { compareCodeUnits } from "../../../contracts/ordering.ts";
 
 /** The measurement declaration schema version this module parses. */
 export const MEASURES_SCHEMA_VERSION = 1;
@@ -1140,7 +1141,7 @@ export function summariseMeasures(
     planned: readonly SlotSpec[],
     declarations: MeasureDeclarations,
 ): Record<string, ArmMeasureSummary> {
-    const arms = [...new Set(planned.map((slot) => slot.arm))].sort();
+    const arms = [...new Set(planned.map((slot) => slot.arm))].sort(compareCodeUnits);
     const result: Record<string, ArmMeasureSummary> = {};
     for (const arm of arms) {
         const recording = emptyCounts();

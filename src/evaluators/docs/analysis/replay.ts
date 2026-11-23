@@ -95,6 +95,7 @@ import {
     type UsageSummary,
 } from "./render.ts";
 import type { AccountingCounts } from "./accounting.ts";
+import { compareCodeUnits } from "../../../contracts/ordering.ts";
 
 /** Parsed command-line options. */
 interface CliOptions {
@@ -252,7 +253,7 @@ function fsReader(root: string, trace: ReplayTrace): EvidenceReader {
                 return { state: "not-a-directory", source: path };
             }
             try {
-                const value = readdirSync(full).sort();
+                const value = readdirSync(full).sort(compareCodeUnits);
                 traceObservation(trace, {
                     reference: path,
                     kind: "directory",
@@ -905,11 +906,11 @@ function ledgerSummaryOf(
         ),
         unknownStamps: [...counted.stamps]
             .filter((stamp) => !declared.has(stamp))
-            .sort(),
+            .sort(compareCodeUnits),
         duplicateLaunches: [...counted.launches]
             .filter(([, count]) => count > 1)
             .map(([stamp]) => stamp)
-            .sort(),
+            .sort(compareCodeUnits),
         problems: [],
     };
 }
@@ -958,7 +959,7 @@ function judgeModelsOf(records: readonly TrialRecord[]): string[] {
                 )
                 .filter((model): model is string => model !== undefined),
         ),
-    ].sort();
+    ].sort(compareCodeUnits);
 }
 
 /**

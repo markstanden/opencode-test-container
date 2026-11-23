@@ -24,6 +24,7 @@ import {
     sourceIdentityProblems,
     type SourceIdentity,
 } from "./source-identity.ts";
+import { compareCodeUnits } from "../contracts/ordering.ts";
 
 /** The checked state of one slot's persisted assessment. */
 export type AssessmentRecordState =
@@ -457,7 +458,7 @@ function unexpectedFiles(root: string, slots: readonly Slot[]): string[] {
     const expected = new Set(slots.map((slot) => `${slot.slotId}.json`));
     return readdirSync(directory)
         .filter((name) => !expected.has(name))
-        .sort()
+        .sort(compareCodeUnits)
         .map(
             (name) =>
                 `unexpected assessment record evidence/assessments/${name}`,

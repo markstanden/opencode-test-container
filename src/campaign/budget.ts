@@ -23,6 +23,7 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { sleepSync } from "../contracts/sleep.ts";
+import { compareCodeUnits } from "../contracts/ordering.ts";
 
 /** The spend kinds with independent ceilings. */
 export type BudgetKind = "trial" | "judge" | "recovery";
@@ -151,7 +152,7 @@ export function readClaims(root: string, kind: BudgetKind): BudgetClaim[] {
     }
     const pattern = new RegExp(`^${kind}-(\\d{4})\\.claim$`);
     const claims: BudgetClaim[] = [];
-    for (const name of names.sort()) {
+    for (const name of names.sort(compareCodeUnits)) {
         const match = pattern.exec(name);
         if (match === null) continue;
         const index = Number(match[1]);

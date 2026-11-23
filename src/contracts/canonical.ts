@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { compareCodeUnits } from "./ordering.ts";
 
 /**
  * Stable JSON for identity purposes: object keys are sorted recursively,
@@ -17,7 +18,7 @@ function sortValue(value: unknown): unknown {
     if (Array.isArray(value)) return value.map(sortValue);
     if (value === null || typeof value !== "object") return value;
     const sorted: Record<string, unknown> = {};
-    for (const key of Object.keys(value).sort()) {
+    for (const key of Object.keys(value).sort(compareCodeUnits)) {
         const entry = (value as Record<string, unknown>)[key];
         if (entry !== undefined) sorted[key] = sortValue(entry);
     }

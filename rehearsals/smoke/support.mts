@@ -22,6 +22,7 @@ import { createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { compareCodeUnits } from "../../src/contracts/ordering.ts";
 
 export const HERE = dirname(fileURLToPath(import.meta.url));
 export const REPO = resolve(HERE, "..", "..");
@@ -390,7 +391,7 @@ export function filesUnder(root: string): string[] {
         }
     };
     if (existsSync(root)) walk(root);
-    return files.sort();
+    return files.sort(compareCodeUnits);
 }
 
 /** A scratch directory owned by this suite. */

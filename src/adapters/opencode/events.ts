@@ -1,4 +1,5 @@
 import { isRecord } from "../../contracts/validate.ts";
+import { compareCodeUnits } from "../../contracts/ordering.ts";
 
 /** One deduplicated tool call decoded from the CLI event stream. */
 export interface ToolCall {
@@ -340,5 +341,5 @@ export function bodyRoutes(
             routes.add(call.tool ?? "unknown");
         }
     }
-    return [...routes].sort();
+    return [...routes].sort(compareCodeUnits);
 }

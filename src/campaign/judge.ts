@@ -37,6 +37,7 @@ import {
     type ContainerPlan,
 } from "../adapters/podman/container.ts";
 import { buildAttemptPlan, type AttemptPlanValues } from "./plan.ts";
+import { compareCodeUnits } from "../contracts/ordering.ts";
 export { buildAttemptPlan };
 export type { AttemptPlanValues };
 import type { CommandResult } from "../adapters/process.ts";
@@ -239,7 +240,7 @@ function namesOf(directory: string): string[] {
         .filter((entry) => entry.isDirectory())
         .map((entry) => entry.name)
         .filter((name) => /^attempt-\d{3}$/.test(name))
-        .sort();
+        .sort(compareCodeUnits);
 }
 
 /** The recorded attempts for one slot. */

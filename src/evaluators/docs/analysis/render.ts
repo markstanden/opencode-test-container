@@ -21,6 +21,7 @@ import type { GuardrailSpec, SelectionSpec } from "./model.ts";
 import type { PairedComparison } from "./pairing.ts";
 import type { Finding } from "./screening/rules.ts";
 import type { ReconcileRow } from "./screening/reconcile.ts";
+import { compareCodeUnits } from "../../../contracts/ordering.ts";
 
 /** The analyser implementation identity. */
 export const ANALYSER_VERSION = "analysis-framework/1";
@@ -504,7 +505,7 @@ function sensitivitySection(result: AnalysisResult): string {
     if (result.sensitivity === null || result.sensitivity.length === 0) {
         return "## Sensitivity\n\nNot defined.\n";
     }
-    const arms = Object.keys(result.arms).sort();
+    const arms = Object.keys(result.arms).sort(compareCodeUnits);
     const rows = result.sensitivity.map((cell) => [
         num(cell.useful),
         num(cell.transient),
@@ -785,7 +786,7 @@ function measuresSection(result: AnalysisResult): string {
         `Declaration: ${escapeCell(measures.status)}${measures.declarationSha256 === null ? "" : ` (sha256 ${measures.declarationSha256})`}.`,
         "",
     ];
-    const arms = Object.keys(measures.arms).sort();
+    const arms = Object.keys(measures.arms).sort(compareCodeUnits);
     const counts = table(
         [
             "Arm",

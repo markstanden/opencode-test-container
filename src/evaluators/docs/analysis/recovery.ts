@@ -13,6 +13,7 @@
 
 import { createHash } from "node:crypto";
 import { claimBudget, releaseClaim, type BudgetClaim } from "./budget.ts";
+import { compareCodeUnits } from "../../../contracts/ordering.ts";
 
 /** The policy schema version this module understands. */
 export const RECOVERY_POLICY_VERSION = 1;
@@ -269,7 +270,7 @@ function layoutRefusal(
     policy: RecoveryPolicy,
     facts: RecoveryFacts,
 ): string | null {
-    const attempts = [...facts.attemptIds].sort();
+    const attempts = [...facts.attemptIds].sort(compareCodeUnits);
     if (attempts.length === 0) return "no judge attempt recorded for the slot";
     for (let index = 0; index < attempts.length; index += 1) {
         if (ordinal(attempts[index] as string) !== index + 1) {
@@ -554,8 +555,8 @@ function attemptSetProblems(
     recorded: Map<string, SelectionAttempt>,
     facts: SelectionFacts,
 ): string[] {
-    const actual = [...facts.attemptIds].sort();
-    const claimed = [...recorded.keys()].sort();
+    const actual = [...facts.attemptIds].sort(compareCodeUnits);
+    const claimed = [...recorded.keys()].sort(compareCodeUnits);
     return claimed.join(",") === actual.join(",")
         ? []
         : [
