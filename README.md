@@ -1,3 +1,5 @@
+[![Quality gate](https://sonarcloud.io/api/project_badges/quality_gate?project=markstanden_opencode-test-container)](https://sonarcloud.io/summary/new_code?id=markstanden_opencode-test-container)
+
 # OpenCode Test Container
 
 An isolated test sandbox for OpenCode plugins, skills and agent instructions.

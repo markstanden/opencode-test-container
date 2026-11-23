@@ -88,7 +88,9 @@ jobs:
                   fi
 
             - name: Install
-              run: npm ci
+              # No dependency in this lockfile installs a lifecycle script, so
+              # the install must not allow one to run (githubactions:S6505).
+              run: npm ci --ignore-scripts
 
             - name: Run defined gate
               # Mirrors .github/workflows/defined--verify.yml: same committed
