@@ -37,9 +37,9 @@ import {
     runContainer,
     type ContainerPlan,
 } from "../adapters/podman/container.ts";
-import { buildTrialPlan, type TrialPlanValues } from "./plan.ts";
-export { buildTrialPlan };
-export type { TrialPlanValues };
+import { buildTrialPlan } from "./plan.ts";
+export { buildTrialPlan } from "./plan.ts";
+export type { TrialPlanValues } from "./plan.ts";
 import type { CommandResult } from "../adapters/process.ts";
 import { deliveryCheck, loadFrozen, type FrozenRecord } from "./freeze.ts";
 import { stageTree } from "./inventory.ts";

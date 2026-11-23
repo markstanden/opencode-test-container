@@ -28,6 +28,7 @@ import {
     readPrimaryCheck,
     type PrimaryCheckRecord,
 } from "../../campaign/primary.ts";
+import { displayValue } from "../../contracts/display.ts";
 
 /** The one docs case shape. */
 type DocsCase = Extract<SuiteCase, { kind: "docs-task" }>;
@@ -217,12 +218,9 @@ export function creditedWriteOf(
     const metadata = resultMetadata(record);
     const input = isRecord(record.input) ? record.input : {};
     const add = input.add;
-    const mode =
-        typeof add === "string"
-            ? "create"
-            : isRecord(add) && typeof add.mode === "string"
-              ? add.mode
-              : null;
+    let mode: string | null = null;
+    if (typeof add === "string") mode = "create";
+    else if (isRecord(add) && typeof add.mode === "string") mode = add.mode;
     return {
         path: typeof metadata.path === "string" ? metadata.path : null,
         mode,
@@ -400,7 +398,7 @@ function operationInputParts(input: Record<string, unknown>): string[] {
     if (typeof add === "object" && add !== null) {
         const declaration = add as Record<string, unknown>;
         parts.push(
-            `${String(declaration.mode ?? "create")} ${String(declaration.path ?? "(body)")}`,
+            `${displayValue(declaration.mode ?? "create")} ${displayValue(declaration.path ?? "(body)")}`,
         );
     }
     return parts;
@@ -414,7 +412,7 @@ function operationLine(entry: Record<string, unknown>): string {
             ? (entry.input as Record<string, unknown>)
             : {};
     const parts = operationInputParts(input);
-    return `${String(entry.status ?? "unknown")} ${surface} ${parts.join("; ") || "help"}`;
+    return `${displayValue(entry.status ?? "unknown")} ${surface} ${parts.join("; ") || "help"}`;
 }
 
 /** Verify the captured journal against the host trail. */

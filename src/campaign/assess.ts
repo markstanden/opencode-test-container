@@ -30,6 +30,7 @@ import {
 import { assessShouldStop } from "./stop-policy.ts";
 import { withAdmission } from "./admission.ts";
 import { readClaims } from "./budget.ts";
+import { compareCodeUnits } from "../contracts/ordering.ts";
 
 /** One stored assessment. */
 export type StoredAssessment =
@@ -591,7 +592,7 @@ export function readAssessments(root: string): StoredAssessment[] {
     if (!existsSync(directory)) return [];
     return readdirSync(directory)
         .filter((name) => name.endsWith(".json"))
-        .sort()
+        .sort(compareCodeUnits)
         .flatMap((name) => {
             try {
                 const value: unknown = JSON.parse(

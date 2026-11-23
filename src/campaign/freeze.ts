@@ -221,13 +221,16 @@ export function freezeDifferences(
     };
     const differences: string[] = [];
     for (const field of Object.keys(observed) as Array<keyof FreezeIdentity>) {
-        const same =
-            field === "imageId"
-                ? String(observed[field]).replace(/^sha256:/, "") ===
-                  String(frozen[field]).replace(/^sha256:/, "")
-                : typeof observed[field] === "object"
-                  ? sha256Of(observed[field]) === sha256Of(frozen[field])
-                  : observed[field] === frozen[field];
+        let same: boolean;
+        if (field === "imageId") {
+            same =
+                String(observed[field]).replace(/^sha256:/, "") ===
+                String(frozen[field]).replace(/^sha256:/, "");
+        } else if (typeof observed[field] === "object") {
+            same = sha256Of(observed[field]) === sha256Of(frozen[field]);
+        } else {
+            same = observed[field] === frozen[field];
+        }
         if (!same) {
             differences.push(`frozen ${field} no longer holds`);
         }

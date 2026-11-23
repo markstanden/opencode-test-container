@@ -133,12 +133,10 @@ function thresholdLimb(
         };
     }
     const lead = candidate.utilityTotal - control.utilityTotal;
-    const status: ThresholdLimb["status"] =
-        delta.low >= selection.threshold
-            ? "pass"
-            : delta.high < selection.threshold
-              ? "fail"
-              : "inconclusive";
+    let status: ThresholdLimb["status"];
+    if (delta.low >= selection.threshold) status = "pass";
+    else if (delta.high < selection.threshold) status = "fail";
+    else status = "inconclusive";
     return {
         status,
         lead,

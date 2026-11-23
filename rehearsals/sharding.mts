@@ -17,14 +17,13 @@ import {
     cpSync,
     existsSync,
     mkdirSync,
-    mkdtempSync,
     readFileSync,
     writeFileSync,
 } from "node:fs";
 import { createServer } from "node:net";
-import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { rehearsalRoot } from "./root.mts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "..");
@@ -222,8 +221,7 @@ function shard(
 
 /** The main proof. */
 async function main(): Promise<void> {
-    const work =
-        process.argv[2] ?? mkdtempSync(join(tmpdir(), "otc-sharding-"));
+    const work = rehearsalRoot(process.argv[2], "otc-sharding-");
     mkdirSync(work, { recursive: true });
     const id = imageId();
     const port = await freePort();

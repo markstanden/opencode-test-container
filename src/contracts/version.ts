@@ -11,6 +11,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { compareCodeUnits } from "./ordering.ts";
 
 /**
  * The frozen evaluator-semantics version.
@@ -90,7 +91,7 @@ function filesUnder(root: string): string[] {
         }
     };
     if (existsSync(root)) walk(root);
-    return files.sort();
+    return files.sort(compareCodeUnits);
 }
 
 /**

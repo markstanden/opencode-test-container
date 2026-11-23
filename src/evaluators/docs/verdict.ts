@@ -67,13 +67,15 @@ function processOutcome(
     captureProblems: string[],
     complete: boolean,
 ): AttemptOutcome {
+    const timedOut = result.timedOut ? ", timed out" : "";
+    const errorNote = result.error === null ? "" : `, ${result.error}`;
     return attemptOutcome({
         status: "judge-error",
         failureClass: "transport-or-process",
         complete,
         captureProblems: [
             ...captureProblems,
-            `judge process not ok (exit ${String(result.status)}${result.timedOut ? ", timed out" : ""}${result.error === null ? "" : `, ${result.error}`})`,
+            `judge process not ok (exit ${String(result.status)}${timedOut}${errorNote})`,
         ],
         judgement: null,
         problems: [],

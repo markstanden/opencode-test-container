@@ -30,7 +30,7 @@ function reserved(name: string): boolean {
  * @returns The refusal, or null.
  */
 export function environmentNameProblem(name: string): string | null {
-    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+    if (!/^[A-Za-z_]\w*$/.test(name)) {
         return `${name} is not a valid environment name`;
     }
     if (reserved(name)) {

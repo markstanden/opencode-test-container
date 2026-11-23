@@ -23,6 +23,7 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { sleepSync } from "../contracts/sleep.ts";
+import { compareCodeUnits } from "../contracts/ordering.ts";
 
 /** The spend kinds with independent ceilings. */
 export type BudgetKind = "trial" | "judge" | "recovery";
@@ -149,9 +150,9 @@ export function readClaims(root: string, kind: BudgetKind): BudgetClaim[] {
     } catch {
         return [];
     }
-    const pattern = new RegExp(`^${kind}-(\\d{4})\\.claim$`);
+    const pattern = new RegExp(String.raw`^${kind}-(\d{4})\.claim$`);
     const claims: BudgetClaim[] = [];
-    for (const name of names.sort()) {
+    for (const name of names.sort(compareCodeUnits)) {
         const match = pattern.exec(name);
         if (match === null) continue;
         const index = Number(match[1]);
@@ -400,11 +401,7 @@ export function releaseClaim(claim: BudgetClaim): boolean {
     if (claim.state !== "reserved") return false;
     const locked = withClaimLock(claim.path, () => {
         const current = currentClaim(claim);
-        if (
-            current === null ||
-            current.state !== "reserved" ||
-            !sameClaim(claim, current)
-        ) {
+        if (current?.state !== "reserved" || !sameClaim(claim, current)) {
             return false;
         }
         try {
@@ -441,11 +438,7 @@ export function advanceClaim(
 ): BudgetClaim {
     const locked = withClaimLock(claim.path, () => {
         const current = currentClaim(claim);
-        if (
-            current === null ||
-            current.state !== claim.state ||
-            !sameClaim(claim, current)
-        ) {
+        if (current?.state !== claim.state || !sameClaim(claim, current)) {
             throw new Error(
                 `claim ${claim.path} changed ownership; refusing to advance a stale handle`,
             );

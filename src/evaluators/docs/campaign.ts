@@ -243,7 +243,7 @@ export const LABEL_PATTERNS = [
 export function labelLeaks(...surfaces: string[]): string[] {
     const text = surfaces.join("\n");
     const generic = LABEL_PATTERNS.filter((pattern) => pattern.test(text)).map(
-        (pattern) => String(pattern),
+        String,
     );
     const arm = blindingFindings("judge", text).map(
         (finding) => finding.fragment,

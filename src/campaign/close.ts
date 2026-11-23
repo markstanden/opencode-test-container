@@ -24,10 +24,10 @@ function unsettledClaims(root: string): string[] {
             kind as "trial" | "judge" | "recovery",
         )
             .filter((claim) => claim.state !== "closed")
-            .map(
-                (claim) =>
-                    `${kind} claim ${claim.index} is ${claim.state}${claim.stamp === null ? "" : ` for ${claim.stamp}`}`,
-            ),
+            .map((claim) => {
+                const stamp = claim.stamp === null ? "" : ` for ${claim.stamp}`;
+                return `${kind} claim ${claim.index} is ${claim.state}${stamp}`;
+            }),
     );
 }
 

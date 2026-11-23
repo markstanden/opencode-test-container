@@ -40,6 +40,7 @@ import {
     accountByScenarioArm,
     accountTrials,
     scoreTrial,
+    type AccountingCounts,
     type TrialScored,
 } from "./accounting.ts";
 import { differenceInterval, intervalFromCounts } from "./bounds.ts";
@@ -94,7 +95,7 @@ import {
     type PairingSummary,
     type UsageSummary,
 } from "./render.ts";
-import type { AccountingCounts } from "./accounting.ts";
+import { compareCodeUnits } from "../../../contracts/ordering.ts";
 
 /** Parsed command-line options. */
 interface CliOptions {
@@ -252,7 +253,7 @@ function fsReader(root: string, trace: ReplayTrace): EvidenceReader {
                 return { state: "not-a-directory", source: path };
             }
             try {
-                const value = readdirSync(full).sort();
+                const value = readdirSync(full).sort(compareCodeUnits);
                 traceObservation(trace, {
                     reference: path,
                     kind: "directory",
@@ -845,12 +846,9 @@ function countLedger(records: readonly LaunchRecord[]): LedgerCounts {
         events[event.event] = (events[event.event] ?? 0) + 1;
         if (event.stamp === null) continue;
         stamps.add(event.stamp);
-        const counter =
-            event.event === "launch"
-                ? launches
-                : event.event === "judge-launch"
-                  ? judgeAttempts
-                  : undefined;
+        let counter: Map<string, number> | undefined;
+        if (event.event === "launch") counter = launches;
+        else if (event.event === "judge-launch") counter = judgeAttempts;
         if (counter !== undefined) {
             counter.set(event.stamp, (counter.get(event.stamp) ?? 0) + 1);
         }
@@ -905,11 +903,11 @@ function ledgerSummaryOf(
         ),
         unknownStamps: [...counted.stamps]
             .filter((stamp) => !declared.has(stamp))
-            .sort(),
+            .sort(compareCodeUnits),
         duplicateLaunches: [...counted.launches]
             .filter(([, count]) => count > 1)
             .map(([stamp]) => stamp)
-            .sort(),
+            .sort(compareCodeUnits),
         problems: [],
     };
 }
@@ -958,7 +956,7 @@ function judgeModelsOf(records: readonly TrialRecord[]): string[] {
                 )
                 .filter((model): model is string => model !== undefined),
         ),
-    ].sort();
+    ].sort(compareCodeUnits);
 }
 
 /**
@@ -1207,18 +1205,17 @@ function screenOf(
     const candidate = guardrails[selection.candidateArm] ?? [];
     const breached = candidate.filter((one) => one.status === "breached");
     const unresolved = candidate.filter((one) => one.status === "unresolved");
+    let guardrailStatus: "breached" | "unresolved" | "clean";
+    if (breached.length > 0) guardrailStatus = "breached";
+    else if (unresolved.length > 0) guardrailStatus = "unresolved";
+    else guardrailStatus = "clean";
     return personalTrialDecision(
         selection.controlArm,
         selection.candidateArm,
         arms,
         counts,
         {
-            status:
-                breached.length > 0
-                    ? "breached"
-                    : unresolved.length > 0
-                      ? "unresolved"
-                      : "clean",
+            status: guardrailStatus,
             detail:
                 [...breached, ...unresolved]
                     .map((one) => `${one.guardrailId}: ${one.status}`)

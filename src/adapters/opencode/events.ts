@@ -1,4 +1,5 @@
 import { isRecord } from "../../contracts/validate.ts";
+import { compareCodeUnits } from "../../contracts/ordering.ts";
 
 /** One deduplicated tool call decoded from the CLI event stream. */
 export interface ToolCall {
@@ -287,12 +288,9 @@ export interface SkillCall {
 function skillCallOf(call: ToolCall): SkillCall | null {
     if (call.tool !== "skill") return null;
     const input = isRecord(call.input) ? call.input : {};
-    const requested =
-        typeof input.id === "string"
-            ? input.id
-            : typeof input.name === "string"
-              ? input.name
-              : null;
+    let requested: string | null = null;
+    if (typeof input.id === "string") requested = input.id;
+    else if (typeof input.name === "string") requested = input.name;
     const output = call.output?.trim() ?? "";
     return {
         callId: call.id,
@@ -340,5 +338,5 @@ export function bodyRoutes(
             routes.add(call.tool ?? "unknown");
         }
     }
-    return [...routes].sort();
+    return [...routes].sort(compareCodeUnits);
 }

@@ -246,7 +246,7 @@ export function buildPacket(options: {
 
 /** Escape one identifier for a literal RegExp. */
 function literal(text: string): string {
-    return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return text.replace(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);
 }
 
 /**
@@ -276,7 +276,7 @@ export function blindingProblems(
         const pattern = /[0-9-]/.test(identifier)
             ? new RegExp(`(^|[^A-Za-z0-9_-])${escaped}([^A-Za-z0-9_-]|$)`, "i")
             : new RegExp(
-                  `(?:[/\\\\]${escaped}(?:[/\\\\]|$)|"${escaped}"|${escaped}=)`,
+                  String.raw`(?:[/\\]${escaped}(?:[/\\]|$)|"${escaped}"|${escaped}=)`,
               );
         return pattern.test(packet)
             ? [`the packet names campaign identifier ${identifier}`]

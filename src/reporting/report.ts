@@ -25,9 +25,10 @@ import {
     readSelectedJudgement,
 } from "../campaign/judge.ts";
 import { trialDirectory } from "../campaign/run.ts";
-import { reportFor, type ReportValues } from "./report-calculation.ts";
-export { reportFor };
-export type { ReportValues };
+import { reportFor } from "./report-calculation.ts";
+import { displayValue } from "../contracts/display.ts";
+export { reportFor } from "./report-calculation.ts";
+export type { ReportValues } from "./report-calculation.ts";
 
 /** The derived report document. */
 export interface Report {
@@ -205,7 +206,11 @@ function slotRows(report: Report): string[] {
         const counts = Object.entries(slot.counts)
             .map(([key, value]) => `${key}=${value}`)
             .join(" ");
-        return `| ${slot.slotId} | ${slot.caseId} | ${slot.armId} | ${slot.repetitionId} | ${slot.expected} | ${slot.observed} | ${slot.validity} | ${slot.outcome} | ${counts} | ${slot.judgement === null ? "unjudged" : `${slot.judgement.documentationOutcome} (${String(slot.judgement.utility)}); ${slot.judgement.selectedAttemptId}`} |`;
+        const judgement =
+            slot.judgement === null
+                ? "unjudged"
+                : `${slot.judgement.documentationOutcome} (${String(slot.judgement.utility)}); ${slot.judgement.selectedAttemptId}`;
+        return `| ${slot.slotId} | ${slot.caseId} | ${slot.armId} | ${slot.repetitionId} | ${slot.expected} | ${slot.observed} | ${slot.validity} | ${slot.outcome} | ${counts} | ${judgement} |`;
     });
 }
 
@@ -254,7 +259,7 @@ function usageSection(report: Report): string[] {
                 `- ${slot.slotId}: unknown (no accepted usage record)${note}`,
             ];
         return [
-            `- ${slot.slotId}: input ${String(usage.inputTokens ?? "unknown")}, output ${String(usage.outputTokens ?? "unknown")}, cache read ${String(usage.cacheReadTokens ?? "unknown")}, reported ${String(usage.reported ?? false)}${note}`,
+            `- ${slot.slotId}: input ${displayValue(usage.inputTokens ?? "unknown")}, output ${displayValue(usage.outputTokens ?? "unknown")}, cache read ${displayValue(usage.cacheReadTokens ?? "unknown")}, reported ${displayValue(usage.reported ?? false)}${note}`,
         ];
     });
 }

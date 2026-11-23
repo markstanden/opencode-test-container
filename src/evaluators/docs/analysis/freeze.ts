@@ -11,6 +11,7 @@
 
 import { createHash } from "node:crypto";
 import { existsSync, writeFileSync } from "node:fs";
+import { compareCodeUnits } from "../../../contracts/ordering.ts";
 
 /** One immutable input and its SHA-256. */
 export interface FrozenFile {
@@ -318,7 +319,7 @@ function stateProblems(input: FreezeInput): string[] {
 function armSetProblems(arms: readonly FrozenArm[]): string[] {
     const problems: string[] = [];
     if (arms.length < 2) problems.push("a comparison needs at least two arms");
-    const ids = arms.map((arm) => arm.id).sort();
+    const ids = arms.map((arm) => arm.id).sort(compareCodeUnits);
     if (new Set(ids).size !== ids.length) {
         problems.push("arm ids must be distinct");
     }
@@ -330,8 +331,7 @@ function armSetProblems(arms: readonly FrozenArm[]): string[] {
     const second = sorted[1];
     if (
         first !== undefined &&
-        second !== undefined &&
-        first.descriptionHash === second.descriptionHash
+        first.descriptionHash === second?.descriptionHash
     ) {
         problems.push("the arms serve an identical description");
     }
@@ -536,7 +536,7 @@ export function verifyFreeze(
         }
         frozen.delete(file.path);
     }
-    for (const path of [...frozen.keys()].sort()) {
+    for (const path of [...frozen.keys()].sort(compareCodeUnits)) {
         problems.push(`immutable input missing: ${path}`);
     }
     problems.push(
@@ -573,11 +573,11 @@ function inventoryProblemsOf(
             }
             expected.delete(file.path);
         }
-        for (const path of [...expected.keys()].sort()) {
+        for (const path of [...expected.keys()].sort(compareCodeUnits)) {
             problems.push(`immutable input missing: ${path}`);
         }
     }
-    for (const path of [...byPath.keys()].sort()) {
+    for (const path of [...byPath.keys()].sort(compareCodeUnits)) {
         problems.push(`unexpected inventory: ${path}`);
     }
     return problems;

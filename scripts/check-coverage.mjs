@@ -24,6 +24,18 @@ import { join, relative, sep } from "node:path";
 const ROOT = process.cwd();
 const LCOV = join(ROOT, "coverage", "lcov.info");
 
+/**
+ * Compare two strings by UTF-16 code unit, independent of the host locale.
+ * @param {string} left Left-hand string.
+ * @param {string} right Right-hand string.
+ * @returns {number} Negative, zero, or positive.
+ */
+function compareCodeUnits(left, right) {
+    if (left < right) return -1;
+    if (left > right) return 1;
+    return 0;
+}
+
 /** The two declared populations and their floors. */
 const POPULATIONS = [
     {
@@ -129,7 +141,7 @@ function sourceFiles() {
     const root = join(ROOT, "src");
     const found = [];
     const walk = (directory) => {
-        for (const entry of readdirSync(directory).sort()) {
+        for (const entry of readdirSync(directory).sort(compareCodeUnits)) {
             const path = join(directory, entry);
             if (statSync(path).isDirectory()) walk(path);
             else if (entry.endsWith(".ts")) {
@@ -138,7 +150,7 @@ function sourceFiles() {
         }
     };
     walk(root);
-    return found.sort();
+    return found.sort(compareCodeUnits);
 }
 
 /**

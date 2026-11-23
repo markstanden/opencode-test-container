@@ -127,15 +127,15 @@ async function provider(
 }
 
 /** Probe script: trial filesystem/identity policy. */
-const FS_PROBE = `
+const FS_PROBE = String.raw`
 import { writeFileSync, readFileSync } from "node:fs";
 import { connect } from "node:net";
 const out = { uid: process.getuid?.(), gid: process.getgid?.(), writes: {}, caps: null, noNewPrivs: null };
 for (const [name, path] of [["workspace", "/workspace/probe-write.txt"], ["tmp", "/tmp/probe-write.txt"], ["subjects", "/subjects/probe-write.txt"], ["config", "/config-home/probe-write.txt"], ["root", "/probe-write.txt"]]) {
   try { writeFileSync(path, "x"); out.writes[name] = "ok"; } catch (error) { out.writes[name] = "denied"; }
 }
-try { out.caps = readFileSync("/proc/self/status", "utf8").split("\\n").find((line) => line.startsWith("CapEff:"))?.split(":")[1]?.trim(); } catch {}
-try { out.noNewPrivs = readFileSync("/proc/self/status", "utf8").split("\\n").find((line) => line.startsWith("NoNewPrivs:"))?.split(":")[1]?.trim(); } catch {}
+try { out.caps = readFileSync("/proc/self/status", "utf8").split("\n").find((line) => line.startsWith("CapEff:"))?.split(":")[1]?.trim(); } catch {}
+try { out.noNewPrivs = readFileSync("/proc/self/status", "utf8").split("\n").find((line) => line.startsWith("NoNewPrivs:"))?.split(":")[1]?.trim(); } catch {}
 console.log(JSON.stringify(out));
 `;
 
@@ -215,7 +215,7 @@ const wanted = process.env.OTC_SMOKE_CASES?.split(",").map((id) => id.trim());
 async function testCase(
     id: string,
     name: string,
-    body: () => Promise<string>,
+    body: () => Promise<string> | string,
 ): Promise<void> {
     if (wanted !== undefined && !wanted.includes(id)) return;
     console.log(`START ${id}`);
@@ -547,7 +547,7 @@ async function s02(): Promise<string> {
     return `real plugin tool dispatched with options; ${live.chatCount()} scripted chat request(s)`;
 }
 
-async function s03(): Promise<string> {
+function s03(): string {
     const assessed = installed.assessCampaign(skillsRoot, {
         now: () => "2026-11-17T00:00:00.000Z",
     });
@@ -992,7 +992,7 @@ async function s09(): Promise<string> {
               )
             : null;
         expect(
-            assessment === null || assessment.outcome !== "pass",
+            assessment?.outcome !== "pass",
             `${label} produced a passing assessment`,
         );
         observations.push(
@@ -1396,11 +1396,11 @@ async function exampleProvider(
 }
 
 /** One slot's expected checked assessment from the shipped example suite. */
-async function expectExampleSlot(
+function expectExampleSlot(
     root: string,
     slotId: string,
     observed: string,
-): Promise<void> {
+): void {
     const assessment = readJson<{
         observed: string;
         outcome: string;

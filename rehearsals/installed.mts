@@ -75,7 +75,7 @@ function packAndInstall(
     }>;
     const filename = entries[0]?.filename;
     if (typeof filename !== "string") {
-        throw new Error("npm pack did not name a tarball");
+        throw new TypeError("npm pack did not name a tarball");
     }
     const tarball = join(root, filename);
     const installed = run(

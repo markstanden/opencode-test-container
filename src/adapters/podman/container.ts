@@ -1,15 +1,7 @@
 import { existsSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import { runCommand, type CommandResult } from "../process.ts";
-import {
-    CONTAINER_CONFIG_HOME,
-    CONTAINER_JOURNAL,
-    CONTAINER_SUBJECTS,
-    CONTAINER_WORKSPACE,
-    normaliseMounts,
-    type ContainerPlan,
-    type Mount,
-} from "./plan.ts";
+import { type ContainerPlan, type Mount } from "./plan.ts";
 
 export {
     CONTAINER_CONFIG_HOME,
@@ -17,7 +9,7 @@ export {
     CONTAINER_SUBJECTS,
     CONTAINER_WORKSPACE,
     normaliseMounts,
-};
+} from "./plan.ts";
 export type { ContainerPlan, Mount };
 
 /** Check one proposed mount's path syntax and existence. */

@@ -3,11 +3,12 @@ import {
     lstatSync,
     mkdirSync,
     readFileSync,
+    realpathSync,
     rmSync,
     writeFileSync,
     copyFileSync,
 } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import {
     canonicalJson,
     sha256Bytes,
@@ -26,8 +27,6 @@ import {
     loadCampaignBundle,
     readJson,
 } from "../contracts/validate.ts";
-import { realpathSync } from "node:fs";
-import { isAbsolute } from "node:path";
 import {
     inventory,
     inventoryDifferences,
@@ -670,9 +669,10 @@ function claimRoot(root: string): string | null {
         mkdirSync(root, { recursive: false });
         return null;
     } catch (error) {
-        return (error as NodeJS.ErrnoException).code === "EEXIST"
-            ? `${root} already exists; prepare needs a fresh root`
-            : `${root} could not be created: ${error instanceof Error ? error.message : String(error)}`;
+        if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+            return `${root} already exists; prepare needs a fresh root`;
+        }
+        return `${root} could not be created: ${error instanceof Error ? error.message : String(error)}`;
     }
 }
 

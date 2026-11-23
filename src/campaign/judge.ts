@@ -36,9 +36,10 @@ import {
     runContainer,
     type ContainerPlan,
 } from "../adapters/podman/container.ts";
-import { buildAttemptPlan, type AttemptPlanValues } from "./plan.ts";
-export { buildAttemptPlan };
-export type { AttemptPlanValues };
+import { buildAttemptPlan } from "./plan.ts";
+import { compareCodeUnits } from "../contracts/ordering.ts";
+export { buildAttemptPlan } from "./plan.ts";
+export type { AttemptPlanValues } from "./plan.ts";
 import type { CommandResult } from "../adapters/process.ts";
 import type { Usage } from "../adapters/opencode/events.ts";
 import {
@@ -239,7 +240,7 @@ function namesOf(directory: string): string[] {
         .filter((entry) => entry.isDirectory())
         .map((entry) => entry.name)
         .filter((name) => /^attempt-\d{3}$/.test(name))
-        .sort();
+        .sort(compareCodeUnits);
 }
 
 /** The recorded attempts for one slot. */
@@ -1263,7 +1264,7 @@ export function checkedSelection(options: {
     const testCase = manifest.suite.cases.find(
         (entry) => entry.caseId === slot.caseId,
     );
-    if (testCase === undefined || testCase.kind !== "docs-task") {
+    if (testCase?.kind !== "docs-task") {
         return {
             ok: false,
             problems: [`slot ${slot.slotId} has no docs case`],
@@ -1369,6 +1370,8 @@ type SettlementDecision =
  * Apply an existing-slot settlement: reuse, refuse, or record a repair. A dry
  * run takes the same decision but never records the repair.
  */
+type SettlementStatus = "judged" | "skipped" | "refused";
+
 function applySettlement(options: {
     root: string;
     manifest: PreparedManifest;
@@ -1377,7 +1380,7 @@ function applySettlement(options: {
     policy: RecoveryPolicy | null;
     dryRun: boolean;
     now: () => string;
-}): { status: "judged" | "skipped" | "refused"; problems: string[] } | null {
+}): { status: SettlementStatus; problems: string[] } | null {
     const settled = settleExisting(options);
     if (settled === null) return null;
     if (settled.action === "reuse") {
@@ -1743,7 +1746,7 @@ async function judgeSlot(options: {
     dryRun: boolean;
     execute: (plan: ContainerPlan) => Promise<CommandResult>;
     now: () => string;
-}): Promise<{ status: "judged" | "skipped" | "refused"; problems: string[] }> {
+}): Promise<{ status: SettlementStatus; problems: string[] }> {
     const resolved = resolveCase(options.manifest, options.slot);
     if ("problem" in resolved) {
         return { status: "refused", problems: [resolved.problem] };
@@ -1811,7 +1814,7 @@ interface JudgeTally {
 function tallyResult(
     tally: JudgeTally,
     slotId: string,
-    result: { status: "judged" | "skipped" | "refused"; problems: string[] },
+    result: { status: SettlementStatus; problems: string[] },
 ): void {
     if (result.status === "judged") tally.judged.push(slotId);
     else if (result.status === "skipped") tally.skipped.push(slotId);
@@ -1851,7 +1854,7 @@ function judgeSlots(
 }
 
 /** Eligibility states that must stop the whole judge invocation before spend. */
-const BLOCKING_STATES: readonly JudgeStateCode[] = [
+const BLOCKING_STATES: ReadonlySet<JudgeStateCode> = new Set([
     "not-declared",
     "not-docs",
     "assessment-missing",
@@ -1860,11 +1863,11 @@ const BLOCKING_STATES: readonly JudgeStateCode[] = [
     "assessment-unknown",
     "selection-conflict",
     "unsettled",
-];
+]);
 
 /** Whether a decision blocks any paid dispatch in this invocation. */
 function blocksSpend(code: JudgeStateCode): boolean {
-    return BLOCKING_STATES.includes(code);
+    return BLOCKING_STATES.has(code);
 }
 
 /**
@@ -1997,7 +2000,7 @@ async function judgeOne(options: {
     execute: (plan: ContainerPlan) => Promise<CommandResult>;
     now: () => string;
 }): Promise<{
-    result: { status: "judged" | "skipped" | "refused"; problems: string[] };
+    result: { status: SettlementStatus; problems: string[] };
     adverse: boolean;
 }> {
     const result = await judgeSlot(options);

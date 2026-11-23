@@ -17,6 +17,7 @@ import {
 } from "../scoring.ts";
 import type { AssessmentStatus, AttemptState, TrialRecord } from "./records.ts";
 import type { Disposition, SlotSpec } from "./model.ts";
+import { compareCodeUnits } from "../../../contracts/ordering.ts";
 
 /** How one observation relates to the frozen schedule. */
 export type { Disposition };
@@ -294,7 +295,7 @@ export function accountByArm(
             ...slots.map((slot) => slot.arm),
             ...scored.map((row) => row.trial.arm),
         ]),
-    ].sort();
+    ].sort(compareCodeUnits);
     const byArm: Record<string, AccountingCounts> = {};
     for (const arm of arms) {
         byArm[arm] = accountTrials(
@@ -326,7 +327,7 @@ export function accountByScenarioArm(
                     .filter((row) => row.trial.arm === arm)
                     .map((row) => row.trial.scenario),
             ]),
-        ].sort();
+        ].sort(compareCodeUnits);
         byScenario[arm] = {};
         for (const scenario of scenarios) {
             byScenario[arm][scenario] = accountTrials(
