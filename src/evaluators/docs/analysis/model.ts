@@ -656,7 +656,9 @@ function slotDispositionProblems(
 ): string[] {
     if (
         entry.disposition !== undefined &&
-        !(DISPOSITIONS as readonly string[]).includes(displayValue(entry.disposition))
+        !(DISPOSITIONS as readonly string[]).includes(
+            displayValue(entry.disposition),
+        )
     ) {
         return [
             `${label}.disposition must be one of ${DISPOSITIONS.join("|")} when present`,

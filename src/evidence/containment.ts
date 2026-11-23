@@ -175,8 +175,16 @@ export function readContainedFile(
 
 /** A snapshot of one directory's regular files, refused on any unsafe object. */
 type WalkResult =
-    | { ok: true; problem: null; files: Array<{ path: string; contents: string }> }
-    | { ok: false; problem: string; files: Array<{ path: string; contents: string }> };
+    | {
+          ok: true;
+          problem: null;
+          files: Array<{ path: string; contents: string }>;
+      }
+    | {
+          ok: false;
+          problem: string;
+          files: Array<{ path: string; contents: string }>;
+      };
 
 /** Walk one directory without traversing symlinked directories or special files. */
 function fileAt(
@@ -331,12 +339,15 @@ export function readContainedDocuments(
         : { ok: false, problem: walked.problem ?? "unsafe evidence object" };
 }
 
-/** The kind of object at a root-relative path, without opening it. */
 /** The kinds one contained entry can be. */
 type EntryKind = "missing" | "file" | "directory" | "symlink" | "special";
 
+/** The kind of object at a root-relative path, without opening it. */
 export type ContainedEntry =
-    | { ok: true; kind: EntryKind }
+    | {
+          ok: true;
+          kind: EntryKind;
+      }
     | { ok: false; problem: string };
 
 /**

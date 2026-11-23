@@ -223,7 +223,10 @@ export interface AnalysisReceipt {
  * @returns The escaped, single-line value.
  */
 export function escapeCell(value: unknown): string {
-    return String(value).replaceAll("|", String.raw`\|`).replace(/\r?\n/g, " ").trim();
+    return String(value)
+        .replaceAll("|", String.raw`\|`)
+        .replace(/\r?\n/g, " ")
+        .trim();
 }
 
 /** Render one table from headers and rows. */

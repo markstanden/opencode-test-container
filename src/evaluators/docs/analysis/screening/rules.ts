@@ -388,9 +388,7 @@ function globSource(pattern: string): string {
         if (segment === "**") return ".*";
         return segment
             .split("*")
-            .map((part) =>
-                part.replace(/[.+^${}()|[\]\\?]/g, String.raw`\$&`),
-            )
+            .map((part) => part.replace(/[.+^${}()|[\]\\?]/g, String.raw`\$&`))
             .join("[^/]*")
             .replaceAll("\\?", "[^/]");
     });

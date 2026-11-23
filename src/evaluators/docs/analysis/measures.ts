@@ -1141,7 +1141,9 @@ export function summariseMeasures(
     planned: readonly SlotSpec[],
     declarations: MeasureDeclarations,
 ): Record<string, ArmMeasureSummary> {
-    const arms = [...new Set(planned.map((slot) => slot.arm))].sort(compareCodeUnits);
+    const arms = [...new Set(planned.map((slot) => slot.arm))].sort(
+        compareCodeUnits,
+    );
     const result: Record<string, ArmMeasureSummary> = {};
     for (const arm of arms) {
         const recording = emptyCounts();

@@ -36,7 +36,7 @@ import {
     runContainer,
     type ContainerPlan,
 } from "../adapters/podman/container.ts";
-import { buildAttemptPlan, type AttemptPlanValues } from "./plan.ts";
+import { buildAttemptPlan } from "./plan.ts";
 import { compareCodeUnits } from "../contracts/ordering.ts";
 export { buildAttemptPlan } from "./plan.ts";
 export type { AttemptPlanValues } from "./plan.ts";

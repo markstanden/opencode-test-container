@@ -112,8 +112,7 @@ function factOutcome(
             };
         }
     } else {
-        if (RETAINED_STATES.has(state))
-            return { status: "pass", line: "" };
+        if (RETAINED_STATES.has(state)) return { status: "pass", line: "" };
         if (state === "lost") {
             return {
                 status: "fail",

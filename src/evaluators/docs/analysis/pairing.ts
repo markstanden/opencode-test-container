@@ -129,8 +129,7 @@ export function pairObservations(
         .filter((pair) => !pair.complete)
         .flatMap((pair) =>
             Object.values(pair.arms).filter(
-                (row): row is TrialScored =>
-                    row?.utility.assessed === true,
+                (row): row is TrialScored => row?.utility.assessed === true,
             ),
         );
     const pairedSlots = new Set(

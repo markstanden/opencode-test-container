@@ -25,7 +25,7 @@ import {
     readSelectedJudgement,
 } from "../campaign/judge.ts";
 import { trialDirectory } from "../campaign/run.ts";
-import { reportFor, type ReportValues } from "./report-calculation.ts";
+import { reportFor } from "./report-calculation.ts";
 import { displayValue } from "../contracts/display.ts";
 export { reportFor } from "./report-calculation.ts";
 export type { ReportValues } from "./report-calculation.ts";

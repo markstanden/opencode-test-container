@@ -25,8 +25,7 @@ function unsettledClaims(root: string): string[] {
         )
             .filter((claim) => claim.state !== "closed")
             .map((claim) => {
-                const stamp =
-                    claim.stamp === null ? "" : ` for ${claim.stamp}`;
+                const stamp = claim.stamp === null ? "" : ` for ${claim.stamp}`;
                 return `${kind} claim ${claim.index} is ${claim.state}${stamp}`;
             }),
     );

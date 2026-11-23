@@ -24,13 +24,12 @@ import {
 } from "../adapters/podman/container.ts";
 import type { CommandResult } from "../adapters/process.ts";
 import type { PreparedCase } from "./prepare.ts";
-import {
-    primaryRecordFor,
-    type PrimaryRecordFacts,
-    type PrimaryRecordOutcome,
-} from "./primary-record.ts";
+import { primaryRecordFor } from "./primary-record.ts";
 export { primaryRecordFor } from "./primary-record.ts";
-export type { PrimaryRecordFacts, PrimaryRecordOutcome } from "./primary-record.ts";
+export type {
+    PrimaryRecordFacts,
+    PrimaryRecordOutcome,
+} from "./primary-record.ts";
 
 /** One recorded primary-check outcome, kept distinct from task failure. */
 export interface PrimaryCheckRecord {

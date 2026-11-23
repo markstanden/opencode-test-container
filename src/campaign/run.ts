@@ -37,7 +37,7 @@ import {
     runContainer,
     type ContainerPlan,
 } from "../adapters/podman/container.ts";
-import { buildTrialPlan, type TrialPlanValues } from "./plan.ts";
+import { buildTrialPlan } from "./plan.ts";
 export { buildTrialPlan } from "./plan.ts";
 export type { TrialPlanValues } from "./plan.ts";
 import type { CommandResult } from "../adapters/process.ts";
