@@ -88,9 +88,10 @@ two steps (the cleanup PR and its follow-up):
   rehearsal root.
 
 Accepted issues do not count toward the quality gate. After the follow-up
-analysis the register reads 140 closed and 51 accepted: the S13 `S9382` finding
-closes with the `await` it described. The repository's own `defined` gate
-remains the merge verdict for style and tests.
+analysis the register reads 141 closed and 50 accepted: two `S9382` findings
+close with the code that carried them, the S13 `await` on a synchronous helper
+and the per-iteration dynamic import in the S06 copy loop. The repository's own
+`defined` gate remains the merge verdict for style and tests.
 
 ## Open questions
 
