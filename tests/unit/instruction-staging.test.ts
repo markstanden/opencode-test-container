@@ -317,7 +317,7 @@ describe("arm instruction staging", () => {
         );
         write(
             join(dir, "campaign.json"),
-            `${JSON.stringify({
+            JSON.stringify({
                 schemaVersion: 1,
                 campaignId: "staging-ab",
                 suite: { path: "suite.json" },
@@ -349,7 +349,7 @@ describe("arm instruction staging", () => {
                 },
                 budgets: { trials: 2, judgeAttempts: 0 },
                 assessment: { kind: "skill-activation" },
-            })}\n`,
+            }) + "\n",
         );
         const root = join(dir, "root");
         const result = prepareCampaign(join(dir, "campaign.json"), root);
