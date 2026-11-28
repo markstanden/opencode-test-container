@@ -52,7 +52,10 @@ function input(overrides: Partial<FreezeInput> = {}): FreezeInput {
 }
 
 /** Assert a refusal containing the fragment. */
-function refuses(overrides: Partial<FreezeInput>, fragment: string): void {
+function assertRefuses(
+    overrides: Partial<FreezeInput>,
+    fragment: string,
+): void {
     const outcome = freezeExperiment(input(overrides));
     assert.equal(outcome.ok, false);
     if (outcome.ok) return;
@@ -64,22 +67,22 @@ function refuses(overrides: Partial<FreezeInput>, fragment: string): void {
 
 describe("freeze refusal branches", () => {
     it("refuses a started or already-frozen experiment", () => {
-        refuses({ started: true }, "refusing to freeze after a launch");
-        refuses({ frozen: true }, "refusing to overwrite");
+        assertRefuses({ started: true }, "refusing to freeze after a launch");
+        assertRefuses({ frozen: true }, "refusing to overwrite");
     });
 
     it("refuses a dirty arm, a short set, duplicate ids or identical delivery", () => {
-        refuses(
+        assertRefuses(
             { arms: [{ ...arm("A"), clean: false }, arm("B", OTHER)] },
             "dirty",
         );
-        refuses({ arms: [arm("A")] }, "at least two arms");
-        refuses({ arms: [arm("A"), arm("A")] }, "distinct");
-        refuses({ arms: [arm("A"), arm("B")] }, "identical description");
+        assertRefuses({ arms: [arm("A")] }, "at least two arms");
+        assertRefuses({ arms: [arm("A"), arm("A")] }, "distinct");
+        assertRefuses({ arms: [arm("A"), arm("B")] }, "identical description");
     });
 
     it("refuses delivery that differs from registration", () => {
-        refuses(
+        assertRefuses(
             {
                 arms: [
                     { ...arm("A"), deliveredHash: sha256Text("drift") },
@@ -88,7 +91,7 @@ describe("freeze refusal branches", () => {
             },
             "delivered description differs",
         );
-        refuses(
+        assertRefuses(
             {
                 arms: [{ ...arm("A"), deliveredChars: 1 }, arm("B", OTHER)],
             },
@@ -97,16 +100,22 @@ describe("freeze refusal branches", () => {
     });
 
     it("refuses missing image, CLI, measurement, ceilings or rules", () => {
-        refuses({ imageId: null }, "no container image identity");
-        refuses({ containerCli: null }, "no container CLI identity");
-        refuses({ measurementSha256: null }, "no measurement declaration");
-        refuses({ ceilings: null }, "ceiling");
-        refuses({ stoppingRules: [] }, "stopping");
+        assertRefuses({ imageId: null }, "no container image identity");
+        assertRefuses({ containerCli: null }, "no container CLI identity");
+        assertRefuses(
+            { measurementSha256: null },
+            "no measurement declaration",
+        );
+        assertRefuses({ ceilings: null }, "ceiling");
+        assertRefuses({ stoppingRules: [] }, "stopping");
     });
 
     it("refuses empty or escaping inventories", () => {
-        refuses({ inventories: [{ path: "rubrics", files: [] }] }, "is empty");
-        refuses(
+        assertRefuses(
+            { inventories: [{ path: "rubrics", files: [] }] },
+            "is empty",
+        );
+        assertRefuses(
             {
                 inventories: [
                     {
@@ -122,21 +131,24 @@ describe("freeze refusal branches", () => {
             },
             "outside rubrics",
         );
-        refuses({ inventories: [{ path: " ", files: [] }] }, "directory path");
+        assertRefuses(
+            { inventories: [{ path: " ", files: [] }] },
+            "directory path",
+        );
     });
 
     it("refuses empty inputs, blank identities and degenerate ceilings", () => {
-        refuses({ files: [] }, "no immutable inputs");
-        refuses(
+        assertRefuses({ files: [] }, "no immutable inputs");
+        assertRefuses(
             { files: [{ path: " ", sha256: sha256Text("a") }] },
             "path and a hash",
         );
-        refuses(
+        assertRefuses(
             { files: [{ path: "a.json", sha256: " " }] },
             "path and a hash",
         );
-        refuses({ imageId: " " }, "no container image identity");
-        refuses({ ceilings: { trial: 0, judge: 1 } }, "ceilings");
+        assertRefuses({ imageId: " " }, "no container image identity");
+        assertRefuses({ ceilings: { trial: 0, judge: 1 } }, "ceilings");
     });
 
     it("deduplicates repeated file paths by path", () => {

@@ -21,7 +21,7 @@ function manifest(mutate: (value: Record<string, unknown>) => void): unknown {
 }
 
 /** Assert one refusal fragment. */
-function refuses(
+function assertRefuses(
     mutate: (value: Record<string, unknown>) => void,
     fragment: string,
 ): void {
@@ -35,45 +35,45 @@ function refuses(
 
 describe("manifest optional-field branches", () => {
     it("refuses a blank campaign question or arm label", () => {
-        refuses((value) => {
+        assertRefuses((value) => {
             (value.campaign as Record<string, unknown>).question = "";
         }, "campaign.question");
-        refuses((value) => {
+        assertRefuses((value) => {
             (value.arms as Array<Record<string, unknown>>)[0]!.label = "";
         }, "label must be a nonblank string");
     });
 
     it("refuses malformed arm containers and identities", () => {
-        refuses((value) => {
+        assertRefuses((value) => {
             value.arms = "none";
         }, "arms must be a nonempty array");
-        refuses((value) => {
+        assertRefuses((value) => {
             (value.arms as unknown[])[0] = "arm";
         }, "arms[0] must be an object");
-        refuses((value) => {
+        assertRefuses((value) => {
             (value.arms as Array<Record<string, unknown>>)[0]!.id = "";
         }, "arms[0].id");
     });
 
     it("refuses malformed evidence layouts and inputs", () => {
-        refuses((value) => {
+        assertRefuses((value) => {
             (value.evidence as Record<string, unknown>).layout = "unknown";
         }, "evidence.layout");
-        refuses((value) => {
+        assertRefuses((value) => {
             (value.evidence as Record<string, unknown>).inputs = { bad: 1 };
         }, "evidence.inputs.bad");
-        refuses((value) => {
+        assertRefuses((value) => {
             (value.evidence as Record<string, unknown>).inputs = [];
         }, "evidence.inputs must be an object");
     });
 
     it("refuses an undeclared result root and a traversal input", () => {
-        refuses((value) => {
+        assertRefuses((value) => {
             const roots = (value.evidence as Record<string, unknown>)
                 .resultRoots as Record<string, unknown>;
             roots.C = "c/results";
         }, "not a declared arm");
-        refuses((value) => {
+        assertRefuses((value) => {
             (value.evidence as Record<string, unknown>).inputs = {
                 attempts: "../escape.json",
             };
@@ -81,16 +81,16 @@ describe("manifest optional-field branches", () => {
     });
 
     it("refuses malformed assessment, guardrails and selection", () => {
-        refuses((value) => {
+        assertRefuses((value) => {
             (value.assessment as Record<string, unknown>).selectionPolicy =
                 "unknown";
         }, "selectionPolicy");
-        refuses((value) => {
+        assertRefuses((value) => {
             (value.policy as Record<string, unknown>).guardrails = [
                 { id: "g", kind: "unknown", requirement: "r" },
             ];
         }, "guardrails[0].kind");
-        refuses((value) => {
+        assertRefuses((value) => {
             const selection = (value.policy as Record<string, unknown>)
                 .selection as Record<string, unknown>;
             selection.controlArm = "Z";
@@ -98,13 +98,13 @@ describe("manifest optional-field branches", () => {
     });
 
     it("refuses an empty sensitivity grid and blank guardrail requirement", () => {
-        refuses((value) => {
+        assertRefuses((value) => {
             (value.policy as Record<string, unknown>).sensitivity = {
                 usefulWeights: [],
                 transientPenalties: [1],
             };
         }, "sensitivity");
-        refuses((value) => {
+        assertRefuses((value) => {
             (value.policy as Record<string, unknown>).guardrails = [
                 { id: "g", kind: "mutation-policy", requirement: "" },
             ];
